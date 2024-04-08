@@ -42,58 +42,19 @@ isvar(x) = !ModelingToolkit.isparameter(x) && (!ModelingToolkit.istree(x) || !Mo
 
 is_differential(var) = isterm(var) && isa(operation(var), Differential)
 
-function declare_parameters(model, struct_name)
-    param_names_tuple_expr =  Expr(:tuple, Meta.quot.(access_var.(MTK.parameters(model)))...)
-    struct_expr = :(
-        struct $struct_name{B<:NamedTuple}
-            backing::B
-        end
-    )
-    
-    
-    constructor_expr =:(
-        function $struct_name(; kwargs...)
-            unexpected_parameters = setdiff(keys(kwargs), $param_names_tuple_expr)
-            isempty(unexpected_parameters) || error("unexpected parameters passed: $unexpected_parameters")
-            backing = NamedTuple(kwargs)
-            return $struct_name(backing)
-        end
-    )
-    propertynames_expr = :(Base.propertynames(::$struct_name) = $param_names_tuple_expr)
-
-    # build up the getproperty piece by piece
-    # we need to do this with a constant foldable function rather than assign values to paraemeters
-    # so that it constant folds any parameters not passed so we can alias eliminate them
-    # see https://github.com/JuliaComputing/DAECompiler.jl/issues/860
-    # We need the conversion-constraint to Number to stop DAECompiler hanging in inference: https://github.com/JuliaComputing/DAECompiler.jl/issues/864
-    getproperty_expr = :(@inline function Base.getproperty(this::$struct_name{B}, name::Symbol)::Float64 where B; end)
-    getproperty_body = []
+# Given a symbolic expression `sym`, run `substitute()` on it with the defaults from `model`
+# until fixed-point
+function replace_defaults(sym, model)
     defaults = MTK.defaults(model)
-    for param_sym in MTK.parameters(model)
-              param_default = get(defaults, param_sym, nothing)
-        param_default === nothing && continue  # no need to have a special case for parameters without defaults, they will error if not present
-        param_value = make_ast(param_default, model)
-        param_name = Meta.quot(access_var(param_sym))
-
-        push!(getproperty_body, :(
-            if name === $param_name
-                return if hasfield(B, $param_name)
-                    getfield(getfield(this, :backing), $param_name)
-                else 
-                    $param_value
-                end
-            end
-        ))
+    terms = Symbolics.get_variables(sym)
+    last_terms = eltype(terms)[]
+    while !isa(sym, Number) && !isequal(terms, last_terms)
+        sym = Symbolics.value(Symbolics.substitute(sym, defaults))
+        last_terms = terms
+        terms = Symbolics.get_variables(sym)
     end
-    push!(getproperty_body, :( # final "else"
-        return getfield(getfield(this, :backing), name)
-    ))
-    getproperty_expr.args[end].args[end] = Expr(:block, getproperty_body...)
-    
-    return Expr(:block, struct_expr, constructor_expr, propertynames_expr, getproperty_expr)
+    return sym
 end
-
-
 
 struct UnsupportedTermException
     term
@@ -114,9 +75,9 @@ function make_ast(x, model)
     end
     (x === MTK.t_unitful || x === MTK.t) && error("time with units not supported")
 
-    if is_parameter(model, x)
-        param_name = access_var(x)
-        return :(this.$param_name)
+    if haskey(MTK.defaults(model), x)  && is_parameter(model, x)
+        # Hard code all parameters we encounter to their default value
+        return replace_defaults(MTK.defaults(model)[x], model)
     end
 
     try
@@ -151,18 +112,11 @@ function build_ast(model)
     state = MTK.TearingState(model)
     eqs = MTK.equations(state)
 
-    struct_name = gensym(nameof(model))
-    return quote
-        $(declare_parameters(model, struct_name))
-
-        function (this::$struct_name)()
-            $(declare_vars(model))
-            $(declare_derivatives(state))
-            $(declare_equation.(eqs, Ref(model))...)
-        end
-
-        $struct_name  # this is the last line so it is the return value of eval'ing this block
-    end
+    body = Expr(:block)
+    push!(body.args, declare_vars(model))
+    push!(body.args, declare_derivatives(state))
+    append!(body.args, declare_equation.(eqs, Ref(model)))
+    return :(()->$body)
 end
 
 using DAECompiler: batch_reconstruct
@@ -221,69 +175,5 @@ function SymbolicIndexingInterface.is_observed(sys::TransformedIRODESystem, sym)
     return !is_variable(sys, sym)
 end
 
-
-############################################################
-"""
-    MTKConnector(mtk_component::MTK.ODESystem, ports...)
-
-Declares a connector function that allows you to call a component defined in MTK from DAECompiler.
-It takes a component as represented by an ODESystem, and a list of "ports" which can be ether parameters or variables (or even MTK expressions involving variables),
-as identified by their references in the component.
-The connector function that is defined will accept in the input correponding to each port a parameter, or variable (or even a julia expression involving variable) respectively,
-and will impose the connection 
-
-Example:
-```
-# At top-level
-const foo = ODESystem(...; name=:myfoo) # with parameter `a` and variable `x`
-const foo_conn! = MTKConnector(foo, foo.a, foo.x)`
-#...
-function (this::CedarSystem)()
-    (;outer_x,) = variables()
-    foo_conn!(this.a, outer_x)
-    #...
-end
-sys = IRODESystem(Tuple{CedarSystem})
-
-sys.myfoo.y  # references the value `y` from within the `foo` that is within the system
-```
-This 
-
-Note: this (like `include` or `eval`) always runs at top-level scope, even if invoked in a function.
-"""
-function MTKConnector(mtk_component::MTK.ODESystem, ports...)
-    # TODO handle parameters (or just push them outside?)
-    # TODO update docstring and test
-    # TODO handle scope.
-    port_names = access_var.(ports)
-    port_equations = map(ports) do port_sym
-        Expr(:call, _c(equation!),
-            Expr(:call, _c(-),
-                make_ast(port_sym), # inside of port
-                access_var(port_sym)  # outside of port
-            )
-        )
-    end
-
-    model = MTK.expand_connections(model)
-    state = MTK.TearingState(model)
-    eqs = MTK.equations(state)
-
-    struct_name = gensym(nameof(model))
-    return quote
-        $(declare_parameters(model, struct_name))
-
-        function (this::$struct_name)($(port_names...))
-            $(declare_vars(model))
-            $(declare_derivatives(state))
-            $(declare_equation.(eqs, Ref(model))...)
-
-            $(port_equations...)
-        end
-
-        $struct_name  # this is the last line so it is the return value of eval'ing this block
-    end
-end
-    
 
 end  # module
