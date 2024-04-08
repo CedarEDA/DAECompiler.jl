@@ -66,6 +66,8 @@ include("analysis/extra_rules.jl")
 include("state_mapping.jl")
 include("custom_init.jl")
 
+include("mtk_components.jl")
+
 include("../ext/DAECompilerSciMLSensitivityExt.jl")
 
 using PrecompileTools
