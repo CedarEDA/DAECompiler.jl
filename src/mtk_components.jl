@@ -42,19 +42,58 @@ isvar(x) = !ModelingToolkit.isparameter(x) && (!ModelingToolkit.istree(x) || !Mo
 
 is_differential(var) = isterm(var) && isa(operation(var), Differential)
 
-# Given a symbolic expression `sym`, run `substitute()` on it with the defaults from `model`
-# until fixed-point
-function replace_defaults(sym, model)
-    defaults = MTK.defaults(model)
-    terms = Symbolics.get_variables(sym)
-    last_terms = eltype(terms)[]
-    while !isa(sym, Number) && !isequal(terms, last_terms)
-        sym = Symbolics.value(Symbolics.substitute(sym, defaults))
-        last_terms = terms
-        terms = Symbolics.get_variables(sym)
+function declare_parameters(model, struct_name)
+    param_names = access_var.(MTK.parameters(model))
+
+    fields = [:($name :: Float64) for name in param_names]
+    struct_expr = :(
+        struct $struct_name{B<:NamedTuple}
+            backing::B
+        end
+    )
+    
+    
+    constructor_expr = quote
+        function $struct_name(; kwargs...)
+            unexpected_parameters = setdiff(keys(kwargs), $param_names)
+            isempty(unexpected_parameters) || error("unexpected parameters passed: $unexpected_parameters")
+            backing = NamedTuple(kwargs)
+            return $struct_name(backing)
+        end
     end
-    return sym
+
+    # build up the getproperty piece by piece
+    # we need to do this with a constant foldable function rather than assign values to paraemeters
+    # so that it constant folds any parameters not passed so we can alias eliminate them
+    # see https://github.com/JuliaComputing/DAECompiler.jl/issues/860
+    getproperty_expr = :(@inline function Base.getproperty(this::$struct_name{B}, name::Symbol) where B; end)
+    acc = getproperty_expr.args[end]
+    acc = acc.args[end] = Expr(:block)
+    defaults = MTK.defaults(model)
+    for param_sym in MTK.parameters(model)
+              param_default = get(defaults, param_sym, nothing)
+        param_default === nothing && continue  # no need to have a special case for parameters without defaults, they will error if not present
+        param_value = make_ast(param_default, model)
+        param_name = Meta.quot(access_var(param_sym))
+
+        acc = push!(acc.args, :(
+            if name === $param_name
+                if hasfield(B, $param_name)
+                    getfield(getfield(this, :backing), $param_name)
+                else 
+                    $param_value
+                end
+            end
+        ))[end]
+    end
+    push!(acc.args, :( # final else
+        getfield(getfield(this, :backing), name)
+    ))
+    
+    return Expr(:block, struct_expr, constructor_expr, getproperty_expr)
 end
+
+
 
 struct UnsupportedTermException
     term
@@ -75,9 +114,9 @@ function make_ast(x, model)
     end
     (x === MTK.t_unitful || x === MTK.t) && error("time with units not supported")
 
-    if haskey(MTK.defaults(model), x)  && is_parameter(model, x)
-        # Hard code all parameters we encounter to their default value
-        return replace_defaults(MTK.defaults(model)[x], model)
+    if is_parameter(model, x)
+        param_name = access_var(x)
+        return :(this.$param_name)
     end
 
     try
@@ -112,11 +151,18 @@ function build_ast(model)
     state = MTK.TearingState(model)
     eqs = MTK.equations(state)
 
-    body = Expr(:block)
-    push!(body.args, declare_vars(model))
-    push!(body.args, declare_derivatives(state))
-    append!(body.args, declare_equation.(eqs, Ref(model)))
-    return :(()->$body)
+    struct_name = gensym(nameof(model))
+    return quote
+        $(declare_parameters(model, struct_name))
+
+        function (this::$struct_name)()
+            $(declare_vars(model))
+            $(declare_derivatives(state))
+            $(declare_equation.(eqs, Ref(model))...)
+        end
+
+        $struct_name  # this is the last line so it is the return value of eval'ing this block
+    end
 end
 
 using DAECompiler: batch_reconstruct

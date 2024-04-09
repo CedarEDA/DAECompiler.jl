@@ -8,16 +8,18 @@ using StateSelection: MatchedSystemStructure
 using Sundials
 
 const MTK = ModelingToolkit
-using DAECompiler.MTKComponents: build_ast, access_var, is_differential, isvar, replace_defaults
+using DAECompiler.MTKComponents: build_ast, access_var, is_differential, isvar
 
 function DAECompiler.IRODESystem(model::MTK.ODESystem)
-    fun = eval(build_ast(model))
+    T = eval(build_ast(model))
+    # HACK we assume no user set parameters for the MTK tests, so just want defaults
+    T_parameterless = T{NamedTuple}
     debug_config = (;
         store_ir_levels = true,
         verify_ir_levels = true,
         store_ss_levels = true,
     )
-    DAECompiler.IRODESystem(Tuple{typeof(fun)}; debug_config)
+    DAECompiler.IRODESystem(Tuple{T_parameterless}; debug_config)
 end
 
 #🏴‍☠️🏴‍☠️🏴‍☠️ Begin Really Evil Type Piracy: 🏴‍☠️🏴‍☠️🏴‍☠️
@@ -28,12 +30,27 @@ end
 
 # Keep track of the original sys, so that we can get at the MTK default values
 sys_map = IdDict{Core.MethodInstance,MTK.AbstractSystem}()
-function MTK.structural_simplify(sys::MTK.AbstractSystem)
+function MTK.structural_simplify(model::MTK.AbstractSystem)
     # Don't do the MTK structural_simplify at all, instead convert to a IRODEProblem
-    daecompiler_sys = IRODESystem(sys)
-    sys_map[getfield(daecompiler_sys,:mi)] = sys
+    daecompiler_sys = IRODESystem(model)
+    sys_map[getfield(daecompiler_sys,:mi)] = model
     return daecompiler_sys
 end
+
+# Given a symbolic expression `sym`, run `substitute()` on it with the defaults from `model`
+# until fixed-point
+function replace_defaults(sym, model)
+    defaults = MTK.defaults(model)
+    terms = Symbolics.get_variables(sym)
+    last_terms = eltype(terms)[]
+    while !isa(sym, Number) && !isequal(terms, last_terms)
+        sym = Symbolics.value(Symbolics.substitute(sym, defaults))
+        last_terms = terms
+        terms = Symbolics.get_variables(sym)
+    end
+    return sym
+end
+
 
 function state_default_mapping!(prob, du0::Vector, u0::Vector)
     sys = get_sys(prob)
