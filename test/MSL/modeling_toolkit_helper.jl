@@ -3,19 +3,22 @@ using DAECompiler
 using ModelingToolkit.SymbolicUtils: BasicSymbolic, issym, isterm
 using ModelingToolkit: Symbolics
 using SymbolicIndexingInterface
+using StateSelection: MatchedSystemStructure
 using Sundials
 
 const MTK = ModelingToolkit
-using DAECompiler.MTKComponents: build_ast, access_var, is_differential, isvar, replace_defaults
+using DAECompiler.MTKComponents: build_ast, access_var, is_differential, isvar
 
 function DAECompiler.IRODESystem(model::MTK.ODESystem)
-    fun = eval(build_ast(model))
+    T = eval(build_ast(model))
+    # HACK we assume no user set parameters for the MTK tests, so just want defaults
+    T_parameterless = T{NamedTuple}
     debug_config = (;
         store_ir_levels = true,
         verify_ir_levels = true,
         store_ss_levels = true,
     )
-    DAECompiler.IRODESystem(Tuple{typeof(fun)}; debug_config)
+    DAECompiler.IRODESystem(Tuple{T_parameterless}; debug_config)
 end
 
 #🏴‍☠️🏴‍☠️🏴‍☠️ Begin Really Evil Type Piracy: 🏴‍☠️🏴‍☠️🏴‍☠️
@@ -26,14 +29,28 @@ end
 
 # Keep track of the original sys, so that we can get at the MTK default values
 sys_map = IdDict{Core.MethodInstance,MTK.AbstractSystem}()
-function MTK.structural_simplify(sys::MTK.AbstractSystem)
+function MTK.structural_simplify(model::MTK.AbstractSystem)
     # Don't do the MTK structural_simplify at all, instead convert to a IRODEProblem
     daecompiler_sys = IRODESystem(sys)
     sys_map[getfield(daecompiler_sys,:mi)] = sys
-    return MTKAdapter(daecompiler_sys)
+    return daecompiler_sys
 end
 
-using StateSelection: MatchedSystemStructure
+# Given a symbolic expression `sym`, run `substitute()` on it with the defaults from `model`
+# until fixed-point
+function replace_defaults(sym, model)
+    defaults = MTK.defaults(model)
+    terms = Symbolics.get_variables(sym)
+    last_terms = eltype(terms)[]
+    while !isa(sym, Number) && !isequal(terms, last_terms)
+        sym = Symbolics.value(Symbolics.substitute(sym, defaults))
+        last_terms = terms
+        terms = Symbolics.get_variables(sym)
+    end
+    return sym
+end
+
+
 function state_default_mapping!(prob, du0::Vector, u0::Vector)
     sys = get_sys(prob)
     # Construct the optimized variable matching datastructures
@@ -74,6 +91,8 @@ function state_default_mapping!(prob, du0::Vector, u0::Vector)
             end
         end
     end
+
+    
 
     function set_initial_condition!(var, val, new_u0, new_du0)
         # First, peel away any `Differential()` calls wrapping our variable,
@@ -148,8 +167,9 @@ function state_default_mapping!(prob, du0::Vector, u0::Vector)
 end
 
 # Hack in support for initial condition hints
-function SciMLBase.ODEProblem(sys::MTKAdapter, u0::Vector, tspan, p = nothing; kw...)
-    sys = getfield(sys, :sys)
+function SciMLBase.ODEProblem(sys_adapt::MTKAdapter, u0::Vector, tspan, p = nothing; kw...)
+    sys = getfield(sys_adapt, :sys)
+    isnothing(p) || isempty(p) || error("parameter merging not yet supported")  # to do this we would need to define the MTKConnection type inside ODEProblem then create the IRODESystem from that (viable)
     prob = ODEProblem(sys, nothing, tspan, p; jac=true, initializealg=CustomBrownFullBasicInit(), kw...)
     state_default_mapping!(prob, [], u0)
     return prob
@@ -158,14 +178,10 @@ end
 function SciMLBase.DAEProblem(sys::MTKAdapter, du0::Vector, u0::Vector, tspan, p = nothing; kw...)
     sys = getfield(sys, :sys)
     # don't use CustomBrownFullBasicInit() as we use IDA to solve DAEs and that handles things fine without it and doesn't support it.
-    prob = DAEProblem(sys, nothing, nothing, tspan, p; jac=true, kw...)
+    isnothing(p) || isempty(p) || error("param_merging not yet supported")
+    prob = DAEProblem(sys, nothing, nothing, tspan, nothing; jac=true, kw...)
     state_default_mapping!(prob, du0, u0)
     return prob
-end
-
-function MTK.StructuralTransformations.ODAEProblem{iip}(sys::MTKAdapter, u0map, tspan, parammap=nothing; kw...) where iip
-    sys = getfield(sys, :sys)
-    return ODEProblem(sys, u0map, tspan; kw...)
 end
 
 function drop_leading_namespace(sym, namespace)

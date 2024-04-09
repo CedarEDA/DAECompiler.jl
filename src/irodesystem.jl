@@ -112,7 +112,7 @@ end
 function DebugConfig(debug_config, tt::DataType)
     debug_config isa DebugConfig && return debug_config
     system_name = get(debug_config, :system_name) do
-        string(only(tt.parameters).name.name)
+        string(nameof(only(tt.parameters)))
     end
     timings = get(Timings, debug_config, :timings)
     ir_log = get(debug_config, :ir_log, nothing)
