@@ -53,22 +53,21 @@ function declare_parameters(model, struct_name)
     )
     
     
-    constructor_expr = quote
+    constructor_expr =:(
         function $struct_name(; kwargs...)
             unexpected_parameters = setdiff(keys(kwargs), $param_names)
             isempty(unexpected_parameters) || error("unexpected parameters passed: $unexpected_parameters")
             backing = NamedTuple(kwargs)
             return $struct_name(backing)
         end
-    end
+    )
 
     # build up the getproperty piece by piece
     # we need to do this with a constant foldable function rather than assign values to paraemeters
     # so that it constant folds any parameters not passed so we can alias eliminate them
     # see https://github.com/JuliaComputing/DAECompiler.jl/issues/860
     getproperty_expr = :(@inline function Base.getproperty(this::$struct_name{B}, name::Symbol) where B; end)
-    acc = getproperty_expr.args[end]
-    acc = acc.args[end] = Expr(:block)
+    getproperty_body = []
     defaults = MTK.defaults(model)
     for param_sym in MTK.parameters(model)
               param_default = get(defaults, param_sym, nothing)
@@ -76,19 +75,20 @@ function declare_parameters(model, struct_name)
         param_value = make_ast(param_default, model)
         param_name = Meta.quot(access_var(param_sym))
 
-        acc = push!(acc.args, :(
+        push!(getproperty_body, :(
             if name === $param_name
-                if hasfield(B, $param_name)
+                return if hasfield(B, $param_name)
                     getfield(getfield(this, :backing), $param_name)
                 else 
                     $param_value
                 end
             end
-        ))[end]
+        ))
     end
-    push!(acc.args, :( # final else
-        getfield(getfield(this, :backing), name)
+    push!(getproperty_body, :( # final "else"
+        return getfield(getfield(this, :backing), name)
     ))
+    getproperty_expr.args[end].args[end] = Expr(:block, getproperty_body...)
     
     return Expr(:block, struct_expr, constructor_expr, getproperty_expr)
 end
