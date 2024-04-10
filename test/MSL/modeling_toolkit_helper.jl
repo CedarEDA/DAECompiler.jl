@@ -14,6 +14,7 @@ function DAECompiler.IRODESystem(model::MTK.ODESystem)
     T = eval(build_ast(model))
     # HACK we assume no user set parameters for the MTK tests, so just want defaults
     T_parameterless = T{NamedTuple}
+    
     debug_config = (;
         store_ir_levels = true,
         verify_ir_levels = true,
