@@ -43,9 +43,7 @@ isvar(x) = !ModelingToolkit.isparameter(x) && (!ModelingToolkit.istree(x) || !Mo
 is_differential(var) = isterm(var) && isa(operation(var), Differential)
 
 function declare_parameters(model, struct_name)
-    param_names = access_var.(MTK.parameters(model))
-
-    fields = [:($name :: Float64) for name in param_names]
+    param_names_tuple_expr =  Expr(:tuple, Meta.quot.(access_var.(MTK.parameters(model)))...)
     struct_expr = :(
         struct $struct_name{B<:NamedTuple}
             backing::B
@@ -55,12 +53,13 @@ function declare_parameters(model, struct_name)
     
     constructor_expr =:(
         function $struct_name(; kwargs...)
-            unexpected_parameters = setdiff(keys(kwargs), $param_names)
+            unexpected_parameters = setdiff(keys(kwargs), $param_names_tuple_expr)
             isempty(unexpected_parameters) || error("unexpected parameters passed: $unexpected_parameters")
             backing = NamedTuple(kwargs)
             return $struct_name(backing)
         end
     )
+    propertynames_expr = :(Base.propertynames(::$struct_name) = $param_names_tuple_expr)
 
     # build up the getproperty piece by piece
     # we need to do this with a constant foldable function rather than assign values to paraemeters
@@ -90,7 +89,7 @@ function declare_parameters(model, struct_name)
     ))
     getproperty_expr.args[end].args[end] = Expr(:block, getproperty_body...)
     
-    return Expr(:block, struct_expr, constructor_expr, getproperty_expr)
+    return Expr(:block, struct_expr, constructor_expr, propertynames_expr, getproperty_expr)
 end
 
 
