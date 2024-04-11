@@ -65,7 +65,8 @@ function declare_parameters(model, struct_name)
     # we need to do this with a constant foldable function rather than assign values to paraemeters
     # so that it constant folds any parameters not passed so we can alias eliminate them
     # see https://github.com/JuliaComputing/DAECompiler.jl/issues/860
-    getproperty_expr = :(@inline function Base.getproperty(this::$struct_name{B}, name::Symbol) where B; end)
+    # We need the conversion-constraint to Number to stop DAECompiler hanging in inference: https://github.com/JuliaComputing/DAECompiler.jl/issues/864
+    getproperty_expr = :(@inline function Base.getproperty(this::$struct_name{B}, name::Symbol)::Number where B; end)
     getproperty_body = []
     defaults = MTK.defaults(model)
     for param_sym in MTK.parameters(model)
