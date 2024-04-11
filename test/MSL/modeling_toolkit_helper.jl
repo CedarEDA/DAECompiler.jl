@@ -1,3 +1,4 @@
+using OrdinaryDiffEq
 using ModelingToolkit
 using DAECompiler
 using ModelingToolkit.SymbolicUtils: BasicSymbolic, issym, isterm
@@ -9,16 +10,10 @@ using Sundials
 const MTK = ModelingToolkit
 using DAECompiler.MTKComponents: build_ast, access_var, is_differential, isvar
 
-function DAECompiler.IRODESystem(model::MTK.ODESystem)
+function DAECompiler.IRODESystem(model::MTK.ODESystem; debug_config=(;))
     T = eval(build_ast(model))
     # HACK we assume no user set parameters for the MTK tests, so just want defaults
-    T_parameterless = T{NamedTuple}
-    
-    debug_config = (;
-        store_ir_levels = true,
-        verify_ir_levels = true,
-        store_ss_levels = true,
-    )
+    T_parameterless = T{@NamedTuple{}}
     DAECompiler.IRODESystem(Tuple{T_parameterless}; debug_config)
 end
 
