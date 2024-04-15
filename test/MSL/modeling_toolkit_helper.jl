@@ -11,7 +11,7 @@ const MTK = ModelingToolkit
 using DAECompiler.MTKComponents: build_ast, access_var, is_differential, isvar
 
 function DAECompiler.IRODESystem(model::MTK.ODESystem; debug_config=(;))
-    T = eval(build_ast(model))
+    T = eval(build_ast(model))  # TODO: replace this with a call to MTKConnector(model)
     # HACK we assume no user set parameters for the MTK tests, so just want defaults
     T_parameterless = T{@NamedTuple{}}
     DAECompiler.IRODESystem(Tuple{T_parameterless}; debug_config)
