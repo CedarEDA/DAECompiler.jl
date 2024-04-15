@@ -222,4 +222,69 @@ function SymbolicIndexingInterface.is_observed(sys::TransformedIRODESystem, sym)
 end
 
 
+############################################################
+"""
+    MTKConnector(mtk_component::MTK.ODESystem, ports...)
+
+Declares a connector function that allows you to call a component defined in MTK from DAECompiler.
+It takes a component as represented by an ODESystem, and a list of "ports" which can be ether parameters or variables (or even MTK expressions involving variables),
+as identified by their references in the component.
+The connector function that is defined will accept in the input correponding to each port a parameter, or variable (or even a julia expression involving variable) respectively,
+and will impose the connection 
+
+Example:
+```
+# At top-level
+const foo = ODESystem(...; name=:myfoo) # with parameter `a` and variable `x`
+const foo_conn! = MTKConnector(foo, foo.a, foo.x)`
+#...
+function (this::CedarSystem)()
+    (;outer_x,) = variables()
+    foo_conn!(this.a, outer_x)
+    #...
+end
+sys = IRODESystem(Tuple{CedarSystem})
+
+sys.myfoo.y  # references the value `y` from within the `foo` that is within the system
+```
+This 
+
+Note: this (like `include` or `eval`) always runs at top-level scope, even if invoked in a function.
+"""
+function MTKConnector(mtk_component::MTK.ODESystem, ports...)
+    # TODO handle parameters (or just push them outside?)
+    # TODO update docstring and test
+    # TODO handle scope.
+    port_names = access_var.(ports)
+    port_equations = map(ports) do port_sym
+        Expr(:call, _c(equation!),
+            Expr(:call, _c(-),
+                make_ast(port_sym)# inside of port
+                access_var(port_sym)  # outside of port
+            )
+        )
+    end
+
+    model = MTK.expand_connections(model)
+    state = MTK.TearingState(model)
+    eqs = MTK.equations(state)
+
+    struct_name = gensym(nameof(model))
+    return quote
+        $(declare_parameters(model, struct_name))
+
+        function (this::$struct_name)($(port_names...))
+            $(declare_vars(model))
+            $(declare_derivatives(state))
+            $(declare_equation.(eqs, Ref(model))...)
+
+            $(port_equations...)
+        end
+
+        $struct_name  # this is the last line so it is the return value of eval'ing this block
+    end
+end
+    
+
+end
 end  # module

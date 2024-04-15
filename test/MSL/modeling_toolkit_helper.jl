@@ -11,7 +11,7 @@ const MTK = ModelingToolkit
 using DAECompiler.MTKComponents: build_ast, access_var, is_differential, isvar
 
 function DAECompiler.IRODESystem(model::MTK.ODESystem; debug_config=(;))
-    T = eval(build_ast(model))
+    T = eval(build_ast(model))  # TODO: replace this with a call to MTKConnector(model)
     # HACK we assume no user set parameters for the MTK tests, so just want defaults
     T_parameterless = T{@NamedTuple{}}
     DAECompiler.IRODESystem(Tuple{T_parameterless}; debug_config)
@@ -97,6 +97,7 @@ function state_default_mapping!(prob, du0::Vector, u0::Vector)
         if unopt_idx !== nothing
             # If that is not `nothing`, then try to get the optimized index:
             opt_idx, in_du = var_assignment[unopt_idx]
+            @info "setting initial conditions" var val
             if opt_idx != 0
                 # If that is not 0 then this is a selected state and we can
                 # set it in either `u0` or `du0`!
@@ -203,6 +204,7 @@ function Base.getproperty(sys::IRODESystem, name::Symbol)
         throw(Base.KeyError(name))  # should be a UndefRef but key error useful for findout what broke it.
     end
 end
+# TODO: actually use this above, so not monkey-patching getproperty on IRODEProblem
 Base.getproperty(sys::MTKAdapter, name::Symbol) = getproperty(getfield(sys, :sys), name)
 
 Core.eval(OrdinaryDiffEq, quote
