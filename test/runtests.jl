@@ -36,5 +36,7 @@ using Test
 @testset "epsilon.jl" include("epsilon.jl")
 @testset "cthulhu.jl" include("cthulhu.jl")
 
+@testset "mtk_components.jl" include("mtk_components.jl")
+
 # must be last to minimize risks from monkeypatching
 @testset "MSL" include("MSL/run_msl_tests.jl")
