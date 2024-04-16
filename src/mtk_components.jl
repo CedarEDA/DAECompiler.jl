@@ -259,7 +259,7 @@ function MTKConnector(mtk_component::MTK.ODESystem, ports...)
     port_equations = map(ports) do port_sym
         Expr(:call, _c(equation!),
             Expr(:call, _c(-),
-                make_ast(port_sym)# inside of port
+                make_ast(port_sym), # inside of port
                 access_var(port_sym)  # outside of port
             )
         )
@@ -286,5 +286,4 @@ function MTKConnector(mtk_component::MTK.ODESystem, ports...)
 end
     
 
-end
 end  # module
