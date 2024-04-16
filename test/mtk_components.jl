@@ -1,3 +1,5 @@
+module mtk_components
+
 using DAECompiler
 using DAECompiler.Intrinsics
 using DAECompiler.MTKComponents
@@ -32,19 +34,42 @@ function (this::ScaledFOL)()
     this.fol_conn!(x_outer) 
     equation!(scaled_x - this.scale * x_outer)
 end
+@testset "Normal case" begin
+    p = ScaledFOL(2.5, FolConnector())
+    p()  # make sure no errors
+    sys = IRODESystem(Tuple{typeof(p)})
+    prob = ODEProblem(sys, nothing, (0.0, 10.0), p; jac=true)
+    sol = solve(prob, Rodas5P())
 
-p = ScaledFOL(2.5, FolConnector())
-p()  # make sure no errors
-sys = IRODESystem(Tuple{typeof(p)})
-prob = ODEProblem(sys, nothing, (0.0, 10.0), p; jac=true)
-sol = solve(prob, Rodas5P())
+    # connection between fol and outer variables should work
+    @test sol[sys.fol.var"x(t)"] == sol[sys.x_outer]
+    # output of fol.x is basically a log function:
+    @test sol(0; idxs=sys.fol.var"x(t)") ≈ 0 atol=1e-4
+    @test sol(10; idxs=sys.fol.var"x(t)") ≈ 1 atol=1e-4
+    @test issorted(sol[sys.fol.var"x(t)"]; rev=false)  # monotonically increasing
+    #outer variables should work
+    @test sol[sys.scaled_x] ≈ 2.5*sol[sys.x_outer]
+end
 
-# connection between fol and outer variables sould work
-@test sol[sys.fol.var"x(t)"] == sol[sys.x_outer]
-# output of fol.x is basically a log function:
-@test sol(0; idxs=sys.fol.var"x(t)") ≈ 0 atol=1e-4
-@test sol(10; idxs=sys.fol.var"x(t)") ≈ 1 atol=1e-4
-@test issorted(sys.fol.var"x(t)"; rev=true)
-#outer variables should work
-@test 2.5 * sol[sys.scaled_x] == sol[sys.x_outer]
+###
+# Now let's set τ to a negative value
+# This isn't realistic for a FOL (first order lag) 
+# but it *is* something that we can simulate
+@testset "Nonphysical case" begin
+    p = ScaledFOL(2.5, FolConnector(τ=-1.0))
+    p()  # make sure no errors
+    sys = IRODESystem(Tuple{typeof(p)})
+    prob = ODEProblem(sys, nothing, (0.0, 10.0), p; jac=true)
+    sol = solve(prob, Rodas5P())
 
+    # connection between fol and outer variables shoould work
+    @test sol[sys.fol.var"x(t)"] == sol[sys.x_outer]
+    # output of fol.x is basically a upside down expodential
+    @test sol(0; idxs=sys.fol.var"x(t)") ≈ 0 atol=1e-4
+    @test sol(10; idxs=sys.fol.var"x(t)") < -2e4
+    @test issorted(sol[sys.fol.var"x(t)"]; rev=true)  # monotonically decreasing
+    #outer variables should work
+    @test  sol[sys.scaled_x] == 2.5*sol[sys.x_outer]
+end
+
+end  # module
