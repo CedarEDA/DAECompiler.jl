@@ -1,5 +1,6 @@
 module MTKComponents
 using ..DAECompiler
+using DAECompiler.Intrinsics
 using ModelingToolkit.SymbolicUtils: BasicSymbolic, issym, isterm
 using ModelingToolkit
 using ModelingToolkit: Symbolics
@@ -7,14 +8,18 @@ const MTK = ModelingToolkit
 using SymbolicIndexingInterface
 using SciMLBase
 
+export MTKConnector
+
+abstract type MTKConnector end
+
 _c(x) = x
 #_c(x) = nameof(x)  # uncomment this to disable interpolating function objects into AST, so as to get nicer printing ASTs
 
-function declare_vars(model)
+function declare_vars(model, scope_var)
     ret = Expr(:block)
     ret.args = map(unknowns(model)) do x
         var_name = access_var(x)
-        :($var_name = $(_c(DAECompiler.Intrinsics.variable))($(QuoteNode(var_name))))
+        :($var_name = $(_c(DAECompiler.Intrinsics.variable))($scope_var($(QuoteNode(var_name)))))
     end
     return ret
 end
@@ -45,7 +50,7 @@ is_differential(var) = isterm(var) && isa(operation(var), Differential)
 function declare_parameters(model, struct_name)
     param_names_tuple_expr =  Expr(:tuple, Meta.quot.(access_var.(MTK.parameters(model)))...)
     struct_expr = :(
-        struct $struct_name{B<:NamedTuple}
+        struct $struct_name{B<:NamedTuple} <: $(_c(MTKConnector))
             backing::B
         end
     )
@@ -141,9 +146,12 @@ end
 
 make_ast(op, x, _) = error("$x :: $op :: $(arguments(x))")
 
-function declare_equation(eq::Equation, model)
+function declare_equation(eq::Equation, model, scope_var)
     normed_eq = eq.rhs - eq.lhs
-    Expr(:call, _c(DAECompiler.Intrinsics.equation!), make_ast(normed_eq, model))
+    Expr(:call, _c(DAECompiler.Intrinsics.equation!),
+        make_ast(normed_eq, model), 
+        Expr(:call, scope_var, Meta.quot(gensym(:mtk_eq)))
+    )
 end
 
 function build_ast(model)
@@ -156,6 +164,7 @@ function build_ast(model)
         $(declare_parameters(model, struct_name))
 
         function (this::$struct_name)()
+            # TODO This is broken with the scope changes
             $(declare_vars(model))
             $(declare_derivatives(state))
             $(declare_equation.(eqs, Ref(model))...)
@@ -221,26 +230,37 @@ function SymbolicIndexingInterface.is_observed(sys::TransformedIRODESystem, sym)
     return !is_variable(sys, sym)
 end
 
+function drop_leading_namespace(sym, namespace)
+    sym_str = string(sym)
+    prefix = string(nameof(namespace)) * "₊"
+    startswith(sym_str, prefix) || return sym  # didn't start with prefix so no need to drop it
+    return Symbol(sym_str[nextind(sym_str, length(prefix)):end])
+end
 
 ############################################################
 """
     MTKConnector(mtk_component::MTK.ODESystem, ports...)
 
 Declares a connector function that allows you to call a component defined in MTK from DAECompiler.
-It takes a component as represented by an ODESystem, and a list of "ports" which can be ether parameters or variables (or even MTK expressions involving variables),
+It takes a component as represented by an ODESystem, and a list of "ports" which correpond to variables in the component,
 as identified by their references in the component.
-The connector function that is defined will accept in the input correponding to each port a parameter, or variable (or even a julia expression involving variable) respectively,
-and will impose the connection 
+This returns a constructor for a struct that accepts any of the parameters the mtk_component accepted, passed by keyword argument.
+The struct itself (once constructed by passing zero or more parameters) accepts in positional arguments in order correponding to each port declared earlier a variable
+(or even an expression) respectively  and will impose the connection between that variable in the outer system and the variable inside the port.
+
+Generally if you have parameters you want to be user-setable you will make the struct a field of your DAE system (but make sure it is concetely typed field e.g. by making it type-parametric and passing in an instance)
+If on the other hand, you have no parameters, or you don't need them to be user-setable and want to hard code their value, you can instead put it in a `const` global variable.
 
 Example:
 ```
 # At top-level
-const foo = ODESystem(...; name=:myfoo) # with parameter `a` and variable `x`
-const foo_conn! = MTKConnector(foo, foo.a, foo.x)`
+const foo = ODESystem(...; name=:myfoo) # with parameter `a` and variables `x` and `y`
+const FooConn = MTKConnector(foo, foo.x)`
+const foo_conn! = FooConn(a=1.5)
 #...
-function (this::CedarSystem)()
+function (this::BarCedarSystem)()
     (;outer_x,) = variables()
-    foo_conn!(this.a, outer_x)
+    foo_conn!(outer_x)
     #...
 end
 sys = IRODESystem(Tuple{CedarSystem})
@@ -252,39 +272,50 @@ This
 Note: this (like `include` or `eval`) always runs at top-level scope, even if invoked in a function.
 """
 function MTKConnector(mtk_component::MTK.ODESystem, ports...)
-    # TODO handle parameters (or just push them outside?)
-    # TODO update docstring and test
-    # TODO handle scope.
-    port_names = access_var.(ports)
-    port_equations = map(ports) do port_sym
-        Expr(:call, _c(equation!),
-            Expr(:call, _c(-),
-                make_ast(port_sym)# inside of port
-                access_var(port_sym)  # outside of port
-            )
-        )
-    end
+    # TODO should this be a macro so that it called `@eval` inside the user's module?
+    # We do need to do run time eval, because we can't decide what to construct with just lexical information.
+    eval(MTKConnector_AST(mtk_component, ports...))
+end
 
+function MTKConnector_AST(model::MTK.ODESystem, ports...)
     model = MTK.expand_connections(model)
     state = MTK.TearingState(model)
     eqs = MTK.equations(state)
 
+    scope_var = gensym(:scope)  # we will put a Scope in a variable with this name, we declare what we will call it first, so can then use it everywhere in generated expressions
+
+    port_names = gensym.(access_var.(ports))
+    port_equations = map(ports, port_names) do port_sym, outer_port_name
+        # remove namespace as we are currently inside it
+        Expr(:call, _c(equation!),
+            Expr(:call, _c(-),
+                drop_leading_namespace(port_sym, model),# inside of port
+                outer_port_name  # outside of port,   
+            ),
+            Expr(:call, scope_var, Meta.quot(Symbol(:port_, outer_port_name)))
+        )
+    end
+
+
     struct_name = gensym(nameof(model))
+    
     return quote
         $(declare_parameters(model, struct_name))
 
         function (this::$struct_name)($(port_names...))
-            $(declare_vars(model))
+            $scope_var =  $(_c(Scope))(nothing, $(Meta.quot(nameof(model))))
+            $(declare_vars(model, scope_var))
             $(declare_derivatives(state))
-            $(declare_equation.(eqs, Ref(model))...)
+            $(declare_equation.(eqs, Ref(model), scope_var)...)
 
-            $(port_equations...)
+            begin
+                $(port_equations...)
+            end
         end
 
         $struct_name  # this is the last line so it is the return value of eval'ing this block
     end
 end
-    
 
-end
+
 end  # module

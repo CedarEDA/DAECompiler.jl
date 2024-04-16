@@ -8,7 +8,7 @@ using StateSelection: MatchedSystemStructure
 using Sundials
 
 const MTK = ModelingToolkit
-using DAECompiler.MTKComponents: build_ast, access_var, is_differential, isvar
+using DAECompiler.MTKComponents: build_ast, access_var, is_differential, isvar, drop_leading_namespace
 
 function DAECompiler.IRODESystem(model::MTK.ODESystem; debug_config=(;))
     T = eval(build_ast(model))  # TODO: replace this with a call to MTKConnector(model)
@@ -181,12 +181,6 @@ function SciMLBase.DAEProblem(sys::MTKAdapter, du0::Vector, u0::Vector, tspan, p
     return prob
 end
 
-function drop_leading_namespace(sym, namespace)
-    sym_str = string(sym)
-    prefix = string(nameof(namespace)) * "₊"
-    startswith(sym_str, prefix) || return sym  # didn't start with prefix so no need to drop it
-    return Symbol(sym_str[nextind(sym_str, length(prefix)):end])
-end
 
 # Monkey-pathching the code in DAECompiler
 function Base.getproperty(sys::IRODESystem, name::Symbol)
