@@ -703,6 +703,8 @@ end
         end
     end
 
+    record_ir!(debug_config, "pre_incidence_propagation", ir)
+
     # TODO better work here?
     method_info = CC.MethodInfo(#=propagate_inbounds=#true, nothing)
     min_world = world = get_inference_world(interp)
