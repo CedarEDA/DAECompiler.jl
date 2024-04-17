@@ -8,11 +8,11 @@ using StateSelection: MatchedSystemStructure
 using Sundials
 
 const MTK = ModelingToolkit
-using DAECompiler.MTKComponents: build_ast, access_var, is_differential, isvar, drop_leading_namespace
+using DAECompiler.MTKComponents: access_var, is_differential, isvar, drop_leading_namespace, MTKConnector_AST
 
 function DAECompiler.IRODESystem(model::MTK.ODESystem; debug_config=(;))
-    T = eval(build_ast(model))  # TODO: replace this with a call to MTKConnector(model)
-    # HACK we assume no user set parameters for the MTK tests, so just want defaults
+    T = eval(MTKConnector_AST(model; scope_expr=nothing))
+    # We assume no user set parameters for the MTK tests
     T_parameterless = T{@NamedTuple{}}
     DAECompiler.IRODESystem(Tuple{T_parameterless}; debug_config)
 end
@@ -156,7 +156,7 @@ function state_default_mapping!(prob, du0::Vector, u0::Vector)
         if unopt_idx !== nothing
             # If that is not `nothing`, then try to get the optimized index:
             opt_idx, in_du = var_assignment[unopt_idx]
-            @info "setting initial conditions" var val
+            #@info "setting initial conditions" var val
             if opt_idx != 0
                 # If that is not 0 then this is a selected state and we can
                 # set it in either `u0` or `du0`!

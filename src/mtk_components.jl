@@ -15,11 +15,14 @@ abstract type MTKConnector end
 _c(x) = x
 #_c(x) = nameof(x)  # uncomment this to disable interpolating function objects into AST, so as to get nicer printing ASTs
 
+call_scope(parent, name) = Expr(:call, _c(Scope), parent, Meta.quot(name))
+
 function declare_vars(model, scope_var)
     ret = Expr(:block)
     ret.args = map(unknowns(model)) do x
         var_name = access_var(x)
-        :($var_name = $(_c(DAECompiler.Intrinsics.variable))($scope_var($(QuoteNode(var_name)))))
+        scope = call_scope(scope_var, var_name)
+        :($var_name = $(_c(variable))($scope))
     end
     return ret
 end
@@ -30,7 +33,7 @@ function declare_derivatives(state)
     append!(ret.args, filter(!isnothing, map(state.fullvars) do var
         if typeof(operation(var)) == Differential
             var_name = access_var(var)
-            return :($var_name = $(_c(DAECompiler.Intrinsics.state_ddt))($(access_var(only(arguments(var))))))
+            return :($var_name = $(_c(state_ddt))($(access_var(only(arguments(var))))))
         end
         return nothing
     end))
@@ -122,7 +125,7 @@ end
 
 function make_ast(x, model)
     if isequal(x, MTK.t_nounits)
-        return :($(_c(DAECompiler.Intrinsics.sim_time))())
+        return :($(_c(sim_time))())
     end
 
     if is_parameter(model, x)
@@ -154,30 +157,10 @@ make_ast(op, x, _) = error("$x :: $op :: $(arguments(x))")
 
 function declare_equation(eq::Equation, model, scope_var)
     normed_eq = eq.rhs - eq.lhs
-    Expr(:call, _c(DAECompiler.Intrinsics.equation!),
+    Expr(:call, _c(equation!),
         make_ast(normed_eq, model), 
-        Expr(:call, scope_var, Meta.quot(gensym(:mtk_eq)))
+        call_scope(scope_var, gensym(:mtk_eq))
     )
-end
-
-function build_ast(model)
-    model = MTK.expand_connections(model)
-    state = MTK.TearingState(model)
-    eqs = MTK.equations(state)
-
-    struct_name = gensym(nameof(model))
-    return quote
-        $(declare_parameters(model, struct_name))
-
-        function (this::$struct_name)()
-            # TODO This is broken with the scope changes
-            $(declare_vars(model))
-            $(declare_derivatives(state))
-            $(declare_equation.(eqs, Ref(model))...)
-        end
-
-        $struct_name  # this is the last line so it is the return value of eval'ing this block
-    end
 end
 
 
@@ -228,7 +211,11 @@ function MTKConnector(mtk_component::MTK.ODESystem, ports...)
     eval(MTKConnector_AST(mtk_component, ports...))
 end
 
-function MTKConnector_AST(model::MTK.ODESystem, ports...)
+"""
+    `scope_expr` is an expression for what scope to use for everything within this model
+    Set it to `nothing` to not introduce a new scope for this model.
+"""
+function MTKConnector_AST(model::MTK.ODESystem, ports...; scope_expr=call_scope(nothing, nameof(model)))
     model = MTK.expand_connections(model)
     state = MTK.TearingState(model)
     eqs = MTK.equations(state)
@@ -243,7 +230,7 @@ function MTKConnector_AST(model::MTK.ODESystem, ports...)
                 drop_leading_namespace(access_var(port_sym), model),# inside of port
                 outer_port_name  # outside of port,   
             ),
-            Expr(:call, scope_var, Meta.quot(Symbol(:port_, outer_port_name)))
+            call_scope(scope_var, Symbol(:port_, outer_port_name))
         )
     end
 
@@ -254,7 +241,7 @@ function MTKConnector_AST(model::MTK.ODESystem, ports...)
         $(declare_parameters(model, struct_name))
 
         function (this::$struct_name)($(port_names...))
-            $scope_var =  $(_c(Scope))(nothing, $(Meta.quot(nameof(model))))
+            $scope_var =  $scope_expr
             $(declare_vars(model, scope_var))
             $(declare_derivatives(state))
             $(declare_equation.(eqs, Ref(model), scope_var)...)
