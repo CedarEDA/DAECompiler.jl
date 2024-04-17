@@ -180,61 +180,6 @@ function build_ast(model)
     end
 end
 
-using DAECompiler: batch_reconstruct
-function reconstruct_helper(ro, sym::Union{Num,BasicSymbolic}, u, p, t)
-    replacements = Dict()
-
-    # Collect all variables/observeds used within the symbolic expression,
-    # translating them to DAECompiler ScopeRefs
-    syms = []
-    for var in Symbolics.get_variables.(sym)
-        push!(syms, getproperty(ro.sys, access_var(var)))
-    end
-
-    # Perform the reconstruction for these variables, then build replacements dict
-    out = batch_reconstruct(ro, syms, [zero(u)], [u], p, [t])
-    for (idx, var) in enumerate(Symbolics.get_variables(sym))
-        replacements[var] = out[idx, 1]
-    end
-
-    # Replace all instances of all variables with the concrete values
-    # stored within `replacements`; this will result in a concrete value.
-    return Symbolics.value(Symbolics.substitute(sym, replacements))
-end
-
-# A little type-piracy to handle that we store references to objects differently
-function (ro::DAECompiler.ODEReconstructedObserved)(sym::Union{Num,BasicSymbolic}, u, p, t)
-    return reconstruct_helper(ro, sym, u, p, Float64(t))
-end
-function (ro::DAECompiler.DAEReconstructedObserved)(sym::Union{Num,BasicSymbolic}, u, p, t)
-    return reconstruct_helper(ro, sym, u, p, Float64(t))
-end
-function (ro::DAECompiler.DAEReconstructedObserved)(sym::Union{Num,BasicSymbolic}, du, u, p, t)
-    return reconstruct_helper(ro, sym, u, p, Float64(t))
-end
-
-function get_scoperef_from_symbolic(sys::TransformedIRODESystem, sym::Union{Num, BasicSymbolic})
-    sym = Symbolics.get_variables(sym)
-    length(sym) == 1 || return nothing
-    return getproperty(get_sys(sys), access_var(only(sym)))
-end
-SymbolicIndexingInterface.is_independent_variable(sys::TransformedIRODESystem, sym) = false
-
-function SymbolicIndexingInterface.is_variable(sys::TransformedIRODESystem, sym::Union{Num, BasicSymbolic})
-    sr = get_scoperef_from_symbolic(sys, sym)
-    !isnothing(sr) && !isnothing(SciMLBase.sym_to_index(sr, sys))
-end
-
-function SymbolicIndexingInterface.variable_index(sys::TransformedIRODESystem, sym::Union{Num, BasicSymbolic})
-    SciMLBase.sym_to_index(get_scoperef_from_symbolic(sys, sym), sys)
-end
-
-SymbolicIndexingInterface.is_parameter(sys::TransformedIRODESystem, sym) = false
-
-function SymbolicIndexingInterface.is_observed(sys::TransformedIRODESystem, sym)
-    # this isn't really true, but it should pass tests that are well formed in MTK
-    return !is_variable(sys, sym)
-end
 
 function drop_leading_namespace(sym, namespace)
     sym_str = string(sym)
