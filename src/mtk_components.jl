@@ -37,7 +37,15 @@ function declare_derivatives(state)
     return ret
 end
 
-access_var(x) = Symbol(repr(x))
+access_var(x::Num) = access_var(MTK.value(x))
+function access_var(x)
+    if istree(x) && isequal(arguments(x), [MTK.t_nounits,])
+        # then it is something like `x(t)` so we just want to represent it as `x` for conciseness
+        nameof(operation(x))
+    else # could be anything including something like `τ[2]` but we will treat as a single DAECompler term
+        Symbol(repr(x))
+    end
+end
 
 """
 Determines if somethings is a variable (i.e. an unknown in MTK v9 terminology)
@@ -113,11 +121,9 @@ function Base.showerror(io::IO, ex::UnsupportedTermException, bt; backtrace=true
 end
 
 function make_ast(x, model)
-    is_unrecognized_t = issym(x) && nameof(x) == :t  #HACK: sometimes the `t` doesn't come out right, idk why. So just capture things that use that as the name
-    if x === MTK.t_nounits || is_unrecognized_t
+    if isequal(x, MTK.t_nounits)
         return :($(_c(DAECompiler.Intrinsics.sim_time))())
     end
-    (x === MTK.t_unitful || x === MTK.t) && error("time with units not supported")
 
     if is_parameter(model, x)
         param_name = access_var(x)
@@ -289,7 +295,7 @@ function MTKConnector_AST(model::MTK.ODESystem, ports...)
         # remove namespace as we are currently inside it
         Expr(:call, _c(equation!),
             Expr(:call, _c(-),
-                drop_leading_namespace(port_sym, model),# inside of port
+                drop_leading_namespace(access_var(port_sym), model),# inside of port
                 outer_port_name  # outside of port,   
             ),
             Expr(:call, scope_var, Meta.quot(Symbol(:port_, outer_port_name)))

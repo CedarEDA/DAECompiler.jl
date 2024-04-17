@@ -22,7 +22,7 @@ end
 
 
 const fol_mtk = FOL(; name=:fol)
-const FolConnector = MTKConnector(fol_mtk, fol_mtk.x) 
+const FolConnector = MTKConnector(fol_mtk, fol_mtk.x)
 
 struct ScaledFOL{T<:FolConnector}
     scale::Float64
@@ -42,11 +42,11 @@ end
     sol = solve(prob, Rodas5P())
 
     # connection between fol and outer variables should work
-    @test sol[sys.fol.var"x(t)"] == sol[sys.x_outer]
+    @test sol[sys.fol.x] == sol[sys.x_outer]
     # output of fol.x is basically a log function:
-    @test sol(0; idxs=sys.fol.var"x(t)") ≈ 0 atol=1e-4
-    @test sol(10; idxs=sys.fol.var"x(t)") ≈ 1 atol=1e-4
-    @test issorted(sol[sys.fol.var"x(t)"]; rev=false)  # monotonically increasing
+    @test sol(0; idxs=sys.fol.x) ≈ 0 atol=1e-4
+    @test sol(10; idxs=sys.fol.x) ≈ 1 atol=1e-4
+    @test issorted(sol[sys.fol.x]; rev=false)  # monotonically increasing
     #outer variables should work
     @test sol[sys.scaled_x] ≈ 2.5*sol[sys.x_outer]
 end
@@ -63,11 +63,11 @@ end
     sol = solve(prob, Rodas5P())
 
     # connection between fol and outer variables shoould work
-    @test sol[sys.fol.var"x(t)"] == sol[sys.x_outer]
+    @test sol[sys.fol.x] == sol[sys.x_outer]
     # output of fol.x is basically a upside down expodential
-    @test sol(0; idxs=sys.fol.var"x(t)") ≈ 0 atol=1e-4
-    @test sol(10; idxs=sys.fol.var"x(t)") < -2e4
-    @test issorted(sol[sys.fol.var"x(t)"]; rev=true)  # monotonically decreasing
+    @test sol(0; idxs=sys.fol.x) ≈ 0 atol=1e-4
+    @test sol(10; idxs=sys.fol.x) < -2e4
+    @test issorted(sol[sys.fol.x]; rev=true)  # monotonically decreasing
     #outer variables should work
     @test  sol[sys.scaled_x] == 2.5*sol[sys.x_outer]
 end
