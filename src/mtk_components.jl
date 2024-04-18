@@ -1,6 +1,7 @@
 module MTKComponents
 using ..DAECompiler
 using DAECompiler.Intrinsics
+using DAECompiler.Intrinsics: state_ddt
 using ModelingToolkit.SymbolicUtils: BasicSymbolic, issym, isterm
 using ModelingToolkit
 using ModelingToolkit: Symbolics
@@ -213,9 +214,10 @@ end
 
 """
     `scope_expr` is an expression for what scope to use for everything within this model
-    Set it to `nothing` to not introduce a new scope for this model.
+    By default this will introduce a scope for this model that uses the model's name as its name.
+    Setting it to `DAECompiler.Intrinsics.root_scope` to not introduce a new subscope for this model.
 """
-function MTKConnector_AST(model::MTK.ODESystem, ports...; scope_expr=call_scope(nothing, nameof(model)))
+function MTKConnector_AST(model::MTK.ODESystem, ports...; scope_expr=call_scope(DAECompiler.Intrinsics.root_scope, nameof(model)))
     model = MTK.expand_connections(model)
     state = MTK.TearingState(model)
     eqs = MTK.equations(state)
