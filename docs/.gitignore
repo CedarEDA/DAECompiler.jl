@@ -1,0 +1,4 @@
+build/
+
+# These are automatically generated, don't store them
+src/examples/

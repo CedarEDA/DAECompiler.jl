@@ -1,0 +1,151 @@
+steps:
+  - group: "DAECompiler"
+    notify:
+      - github_commit_status:
+          context: "DAECompiler"
+    steps:
+      - label: ":alma: DAECompiler"
+        notify:
+          - github_commit_status:
+              context: "DAECompiler"
+        env:
+          GITHUB_SSH_KEY: ${GITHUB_SSH_KEY?}
+        plugins:
+          - staticfloat/ssh-agent:
+              keyvars:
+                - "GITHUB_SSH_KEY"
+          - JuliaCI/julia#v1:
+              version: "https://jc-cedarsim-juliabuilds.s3.amazonaws.com/vanilla/julia-latest-linux-x86_64.tar.gz"
+          - JuliaCI/julia-test#v1:
+              use_ssh: true
+              coverage: false
+              extra_registries: ssh://git@github.com/JuliaComputing/CedarEDARegistry.git
+              allow_reresolve: false
+        if: build.message !~ /\[skip tests\]/
+        timeout_in_minutes: 120
+        agents:
+          sandbox.jl: true
+
+  - label: ":alma: DAECompiler (Julia nightliy)"
+    env:
+      GITHUB_SSH_KEY: ${GITHUB_SSH_KEY?}
+    soft_fail: true
+    plugins:
+      - staticfloat/ssh-agent:
+          keyvars:
+            - "GITHUB_SSH_KEY"
+      - JuliaCI/julia#v1:
+          version: "nightly"
+      - JuliaCI/julia-test#v1:
+          use_ssh: true
+          coverage: false
+          extra_registries: ssh://git@github.com/JuliaComputing/CedarEDARegistry.git
+    if: build.message !~ /\[skip tests\]/
+    timeout_in_minutes: 120
+    agents:
+      sandbox.jl: true
+
+  - wait
+
+  - group: ":arrow_right: Downstream testing"
+    notify:
+      - github_commit_status:
+          context: "Downstream"
+    steps:
+      - label: ":evergreen_tree: :electron: Cedar"
+        env:
+          GITHUB_SSH_KEY: ${GITHUB_SSH_KEY?}
+        plugins:
+          - staticfloat/ssh-agent:
+              keyvars:
+                - "GITHUB_SSH_KEY"
+          - JuliaCI/julia#v1:
+                version: "https://jc-cedarsim-juliabuilds.s3.amazonaws.com/vanilla/julia-latest-linux-x86_64.tar.gz"
+          - improbable-eng/metahook:
+              pre-command: |
+                echo "--- Clone CedarSim"
+                git clone git@github.com:JuliaComputing/CedarSim.jl CedarSim
+                julia --project=CedarSim -e 'import Pkg; \
+                                             Pkg.setprotocol!(protocol="ssh"); \
+                                             Pkg.Registry.add([Pkg.Registry.RegistrySpec(url="ssh://git@github.com/JuliaComputing/CedarEDARegistry.git")]);'
+
+                echo "--- Prepare CedarSim to use the current version of all packages for testing"
+                JULIA_PKG_PRECOMPILE_AUTO=0 \
+                julia --project=CedarSim -e 'import Pkg; Pkg.instantiate(); \
+                                                         Pkg.develop(path="."); \
+                                                         Pkg.precompile();'
+          - JuliaCI/julia-test#v1:
+              use_ssh: true
+              coverage: false
+              extra_registries: ssh://git@github.com/JuliaComputing/CedarEDARegistry.git
+              project: CedarSim
+              allow_reresolve: false
+          - staticfloat/metahook:
+              # Compress all of our `.ir` files into a single tarball:
+              pre-artifact: |
+                tar -C CedarSim/test/ir -czf CedarSim/test/ir.tar.gz . || true
+        agents:
+          os: "linux"
+        artifact_paths:
+          - "CedarSim/test/ir.tar.gz"
+
+      - label: ":evergreen_tree: :electron: :straight_ruler: Cedar Benchmarks"
+        env:
+          GITHUB_SSH_KEY: ${GITHUB_SSH_KEY?}
+        plugins:
+          - staticfloat/ssh-agent:
+              keyvars:
+                - "GITHUB_SSH_KEY"
+          - JuliaCI/julia#v1:
+                version: "https://jc-cedarsim-juliabuilds.s3.amazonaws.com/vanilla/julia-latest-linux-x86_64.tar.gz"
+          - JuliaCI/julia-test#v1:
+              use_ssh: true
+              run_tests: false
+              extra_registries: ssh://git@github.com/JuliaComputing/CedarEDARegistry.git
+              allow_reresolve: false
+        command: |
+              echo "--- Prepare dependencies"
+              apt update && apt install -y make
+              echo "--- Clone CedarSim"
+              git clone git@github.com:JuliaComputing/CedarSim.jl CedarSim
+              echo "--- Prepare CedarSim to use the current version of all packages for testing"
+              JULIA_PKG_PRECOMPILE_AUTO=0 \
+              julia --project=CedarSim -e 'import Pkg; Pkg.instantiate(); \
+                                                        Pkg.develop(path="."); \
+                                                        Pkg.precompile();'
+              julia --project=CedarSim/scratch/benchmarks -e 'import Pkg; Pkg.instantiate()'
+              echo "+++ Run benchmarks"
+              make -j$(nproc) --output-sync -C CedarSim/scratch/benchmarks
+        agents:
+          os: "linux"
+        artifact_paths:
+          - "CedarSim/scratch/benchmarks/output/*"
+          - "CedarSim/scratch/benchmarks/output_stats/*"
+
+      - label: ":electron: BSIM4"
+        env:
+          GITHUB_SSH_KEY: ${GITHUB_SSH_KEY?}
+        plugins:
+          - staticfloat/ssh-agent:
+              keyvars:
+                - "GITHUB_SSH_KEY"
+          - JuliaCI/julia#v1:
+              version: "https://jc-cedarsim-juliabuilds.s3.amazonaws.com/vanilla/julia-latest-linux-x86_64.tar.gz"
+          - improbable-eng/metahook:
+              pre-command: |
+                echo "--- Clone BSIM4"
+                git clone git@github.com:JuliaComputing/BSIM4.va.git BSIM4
+                julia --project=CedarSim -e 'import Pkg; \
+                                             Pkg.setprotocol!(protocol="ssh"); \
+                                             Pkg.Registry.add([Pkg.Registry.RegistrySpec(url="ssh://git@github.com/JuliaComputing/CedarEDARegistry.git")]);'
+
+                echo "--- Prepare BSIM4 to use the current version of all packages for testing"
+                JULIA_PKG_PRECOMPILE_AUTO=0 \
+                julia --project=BSIM4/test -e 'import Pkg; Pkg.instantiate(); \
+                                                           Pkg.develop(path="."); \
+                                                           Pkg.precompile();'
+        commands: |
+          cd BSIM4/test
+          julia --project=. runtests.jl
+        agents:
+          os: "linux"
