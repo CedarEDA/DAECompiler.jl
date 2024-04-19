@@ -207,6 +207,9 @@ This
 Note: this (like `include` or `eval`) always runs at top-level scope, even if invoked in a function.
 """
 function MTKConnector(mtk_component::MTK.ODESystem, ports...)
+    for port in ports
+        port isa MTK.ODESystem && throw(ArgumentError("Port $port is a ODESystem, not a variable (or expression of variables). Perhaps a subsystem. Did you specify a pin rather than the voltage/current across that pin?"))
+    end
     # TODO should this be a macro so that it called `@eval` inside the user's module?
     # We do need to do run time eval, because we can't decide what to construct with just lexical information.
     eval(MTKConnector_AST(mtk_component, ports...))
