@@ -285,7 +285,7 @@ version = "2.12.4"
 deps = ["CSTParser", "CentralizedCaches", "ChainRules", "ChainRulesCore", "Cthulhu", "DiffEqCallbacks", "Diffractor", "Distributions", "ExprTools", "FastBroadcast", "FiniteDiff", "ForwardDiff", "Graphs", "LinearAlgebra", "LinearSolve", "LoopVectorization", "ModelingToolkit", "ModelingToolkitStandardLibrary", "NonlinearSolve", "OrdinaryDiffEq", "PrecompileTools", "Preferences", "REPL", "Random", "SciMLBase", "SciMLSensitivity", "SparseArrays", "StaticArraysCore", "Sundials", "SymbolicIndexingInterface", "Symbolics", "TestEnv", "TimerOutputs", "Tracy"]
 path = "."
 uuid = "32805668-c3d0-42c2-aafd-0d0a9857a104"
-version = "1.17.1"
+version = "1.17.2"
 
 [[deps.DataAPI]]
 git-tree-sha1 = "abe83f3a2f1b857aac70ef8b269080af17764bbe"

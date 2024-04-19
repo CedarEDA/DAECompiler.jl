@@ -397,26 +397,21 @@ end
     return nothing
 end
 
-
-let # overload `const_prop_entry_heuristic`
-    sigs_ex = :(interp::DAEInterpreter, result::MethodCallResult, si::StmtInfo,
-                sv::InferenceState, force::Bool)
-    args_ex = :(interp::AbstractInterpreter, result::MethodCallResult, si::StmtInfo,
-                sv::InferenceState, force::Bool)
-    @eval @override function CC.const_prop_entry_heuristic($(sigs_ex.args...))
-        edge = result.edge
-        if edge !== nothing
-            cache = CC.get(CC.code_cache(interp), edge, nothing)
-            if cache !== nothing
-                src = @atomic :monotonic cache.inferred
-                if isa(src, DAECache)
-                    src.info.has_dae_intrinsics && return true
-                    src.info.has_scoperead && return true
-                end
+@override function CC.const_prop_entry_heuristic(interp::DAEInterpreter,
+    result::MethodCallResult, si::StmtInfo, sv::InferenceState, force::Bool)
+    edge = result.edge
+    if edge !== nothing
+        cache = CC.get(CC.code_cache(interp), edge, nothing)
+        if cache !== nothing
+            src = @atomic :monotonic cache.inferred
+            if isa(src, DAECache)
+                src.info.has_dae_intrinsics && return true
+                src.info.has_scoperead && return true
             end
         end
-        return @invoke CC.const_prop_entry_heuristic($(args_ex.args...))
     end
+    return @invoke CC.const_prop_entry_heuristic(interp::AbstractInterpreter,
+        result::MethodCallResult, si::StmtInfo, sv::InferenceState, force::Bool)
 end
 
 # semi-concrete interpretation

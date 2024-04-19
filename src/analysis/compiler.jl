@@ -707,7 +707,6 @@ end
                 var_num = idnum(type)::Int
                 scope = argextype(inst.args[3], ir)
                 isa(scope, Incidence) && (scope = scope.typ)
-                @show scope
                 if (!isa(scope, Const) || !isa(scope.val, Intrinsics.AbstractScope)) && !is_valid_partial_scope(scope)
                     push!(warnings,
                         UnsupportedIRException(
