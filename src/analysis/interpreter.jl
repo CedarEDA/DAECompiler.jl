@@ -589,17 +589,13 @@ function process_template!(𝕃, coeffs, eq_mapping, applied_scopes, argtypes, t
             elseif isa(arg, PartialScope)
                 applied_scopes[id] = arg
             else
-                @show arg
                 applied_scopes[id] = arg
             end
         elseif isa(template, PartialStruct)
             if isa(arg, PartialStruct)
                 fields = arg.fields
-            elseif isa(arg, Const)
-                fields = Any[getfield_tfunc(𝕃, arg, Const(i)) for i = 1:length(template.fields)]
             else
-                @show (arg, template)
-                error()
+                fields = Any[getfield_tfunc(𝕃, arg, Const(i)) for i = 1:length(template.fields)]
             end
             process_template!(𝕃, coeffs, eq_mapping, applied_scopes, fields, template.fields)
         else

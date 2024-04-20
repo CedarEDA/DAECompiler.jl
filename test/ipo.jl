@@ -24,7 +24,9 @@ sys = IRODESystem(Tuple{typeof(x2!)}; ipo_analysis_mode=false);
     equation!(state_ddt(x) - x + epsilon(scope), scope)
 end
 function x2_scope!()
-    x_scope!(Scope(Scope(), :x1)); x_scope!(Scope(Scope(), :x2));
+    x_scope!(Scope(Scope(), :x1));
+    x_scope!(Scope(Scope(), :x2));
+    x_scope!(Scope(Scope(Scope(), :x3), :x4));
     return nothing
 end
 
@@ -34,6 +36,7 @@ sys = IRODESystem(Tuple{typeof(x2_scope!)}; ipo_analysis_mode=false);
 let ipo_result = getfield(sys_ipo, :result), nonipo_result = getfield(sys, :result)
     @test ipo_result.ntotalvars == nonipo_result.ntotalvars
     @test length(ipo_result.names) == length(nonipo_result.names)
+    @test isa(sys_ipo.x3.x4, DAECompiler.ScopeRef)
 end
 
 #=================== + GenScope =============================#

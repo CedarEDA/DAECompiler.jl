@@ -528,6 +528,9 @@ end
         end
     end
 
+    cur_scope_lattice = PartialStruct(Base.ScopedValues.Scope,
+        Any[PartialKeyValue(Incidence(Base.PersistentDict{Base.ScopedValues.ScopedValue, Any}))])
+
     # Scan the IR, computing equations, variables, diffgraph, etc.
     externally_refined = CC.BitSet()
     nthisvars = 0 # Number of variables declared directly in this function
@@ -593,13 +596,12 @@ end
                 end
             end
         elseif isexpr(stmt, :call)
-            if stmt.args[1] === Core.current_scope
+            if is_known_call(stmt, Core.current_scope, ir)
                 # N.B.: We make the assumption here that all current_scope that
                 # was inside EnterScope within the same function has already
                 # been folded by SROA, so the only thing left are those that
                 # refer to the function's entry scope.
-                ir.stmts[i][:type] = PartialStruct(Base.ScopedValues.Scope,
-                    Any[PartialKeyValue(Incidence(Base.PersistentDict{Base.ScopedValues.ScopedValue, Any}))])
+                ir.stmts[i][:type] = cur_scope_lattice
                 ir.stmts[i][:flag] |= CC.IR_FLAG_REFINED
                 CC.push!(externally_refined, i)
                 continue
@@ -1020,8 +1022,8 @@ end
                                 scopet = argextype(en.scope, ir)
                                 newscope = nothing
                                 if isa(scopet, PartialStruct) &&
-                                scopet.typ === Base.ScopedValues.Scope &&
-                                isa(scopet.fields[1], PartialKeyValue)
+                                  scopet.typ === Base.ScopedValues.Scope &&
+                                  isa(scopet.fields[1], PartialKeyValue)
                                     𝕃 = CC.typeinf_lattice(analysis_interp)
                                     val = getkeyvalue_tfunc(𝕃,
                                         scopet.fields[1], Const(key.id))
@@ -1210,7 +1212,7 @@ function merge_scopes!(names::OrderedDict{LevelKey, NameLevel}, key::Union{Scope
         return
     end
     while length(stack) > 1
-        val = NameLevel(OrderedDict{LevelKey, NameLevel}(pop!(stack) => val))
+        val = NameLevel(OrderedDict{LevelKey, NameLevel}(popfirst!(stack) => val))
     end
     merge_scopes!(names, only(stack), val, varoffset, obsoffset, eqoffset, epsoffset)
 end
