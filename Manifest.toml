@@ -2,7 +2,7 @@
 
 julia_version = "1.12.0-DEV"
 manifest_format = "2.0"
-project_hash = "80c3b78a7aca12137803204943148bc1465797e3"
+project_hash = "ae490efd858348fd053ebc75978165e61df8f728"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "016833eb52ba2d6bea9fcb50ca295980e728ee24"
@@ -282,10 +282,10 @@ uuid = "f68482b8-f384-11e8-15f7-abe071a5a75f"
 version = "2.12.4"
 
 [[deps.DAECompiler]]
-deps = ["CSTParser", "CentralizedCaches", "ChainRules", "ChainRulesCore", "Cthulhu", "DiffEqCallbacks", "Diffractor", "Distributions", "ExprTools", "FastBroadcast", "FiniteDiff", "ForwardDiff", "Graphs", "LinearAlgebra", "LinearSolve", "LoopVectorization", "ModelingToolkit", "ModelingToolkitStandardLibrary", "NonlinearSolve", "OrdinaryDiffEq", "PrecompileTools", "Preferences", "REPL", "Random", "SciMLBase", "SciMLSensitivity", "SparseArrays", "StaticArraysCore", "Sundials", "SymbolicIndexingInterface", "Symbolics", "TestEnv", "TimerOutputs", "Tracy"]
+deps = ["Accessors", "CSTParser", "CentralizedCaches", "ChainRules", "ChainRulesCore", "Cthulhu", "DiffEqCallbacks", "Diffractor", "Distributions", "ExprTools", "FastBroadcast", "FiniteDiff", "ForwardDiff", "Graphs", "LinearAlgebra", "LinearSolve", "LoopVectorization", "ModelingToolkit", "ModelingToolkitStandardLibrary", "NonlinearSolve", "OrdinaryDiffEq", "PrecompileTools", "Preferences", "REPL", "Random", "SciMLBase", "SciMLSensitivity", "SparseArrays", "StaticArraysCore", "Sundials", "SymbolicIndexingInterface", "Symbolics", "TestEnv", "TimerOutputs", "Tracy"]
 path = "."
 uuid = "32805668-c3d0-42c2-aafd-0d0a9857a104"
-version = "1.17.2"
+version = "1.18.0"
 
 [[deps.DataAPI]]
 git-tree-sha1 = "abe83f3a2f1b857aac70ef8b269080af17764bbe"
@@ -294,9 +294,9 @@ version = "1.16.0"
 
 [[deps.DataStructures]]
 deps = ["Compat", "InteractiveUtils", "OrderedCollections"]
-git-tree-sha1 = "97d79461925cdb635ee32116978fc735b9463a39"
+git-tree-sha1 = "1d0a14036acb104d9e89698bd408f63ab58cdc82"
 uuid = "864edb3b-99cc-5e75-8d2d-829cb0a9cfe8"
-version = "0.18.19"
+version = "0.18.20"
 
 [[deps.DataValueInterfaces]]
 git-tree-sha1 = "bfc1187b79289637fa0ef6d4436ebdfe6905cbd6"

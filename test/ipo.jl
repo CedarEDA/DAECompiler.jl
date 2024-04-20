@@ -33,9 +33,28 @@ sys = IRODESystem(Tuple{typeof(x2_scope!)}; ipo_analysis_mode=false);
 
 let ipo_result = getfield(sys_ipo, :result), nonipo_result = getfield(sys, :result)
     @test ipo_result.ntotalvars == nonipo_result.ntotalvars
-    @test length(ipo_result.var_obs_names) == length(nonipo_result.var_obs_names)
-    @test length(ipo_result.eq_names) == length(nonipo_result.eq_names)
+    @test length(ipo_result.names) == length(nonipo_result.names)
 end
+
+#=================== + GenScope =============================#
+@noinline function x_gen!(scope)
+    scope = GenScope(scope, :g)
+    x = variable(scope)
+    equation!(state_ddt(x) - x + epsilon(scope), scope)
+end
+function x2_gen!()
+    x_gen!(Scope(Scope(), :x1)); x_gen!(Scope(Scope(), :x1));
+    return nothing
+end
+
+sys_ipo = IRODESystem(Tuple{typeof(x2_gen!)}; ipo_analysis_mode=true);
+sys = IRODESystem(Tuple{typeof(x2_gen!)}; ipo_analysis_mode=false);
+
+let ipo_result = getfield(sys_ipo, :result), nonipo_result = getfield(sys, :result)
+    @test ipo_result.ntotalvars == nonipo_result.ntotalvars
+    @test length(ipo_result.names) == length(nonipo_result.names)
+end
+
 
 #=================== + derived scope =============================#
 @noinline function x_derived!(scope)
@@ -54,8 +73,7 @@ sys = IRODESystem(Tuple{typeof(x2_derived!)}; ipo_analysis_mode=false);
 
 let ipo_result = getfield(sys_ipo, :result), nonipo_result = getfield(sys, :result)
     @test ipo_result.ntotalvars == nonipo_result.ntotalvars
-    @test length(ipo_result.var_obs_names) == length(nonipo_result.var_obs_names)
-    @test length(ipo_result.eq_names) == length(nonipo_result.eq_names)
+    @test length(ipo_result.names) == length(nonipo_result.names)
 end
 
 #====================== + ScopedValue =============================#
@@ -78,8 +96,7 @@ sys = IRODESystem(Tuple{typeof(x2_sv!)}; ipo_analysis_mode=false);
 
 let ipo_result = getfield(sys_ipo, :result), nonipo_result = getfield(sys, :result)
     @test ipo_result.ntotalvars == nonipo_result.ntotalvars
-    @test length(ipo_result.var_obs_names) == length(nonipo_result.var_obs_names)
-    @test length(ipo_result.eq_names) == length(nonipo_result.eq_names)
+    @test length(ipo_result.names) == length(nonipo_result.names)
 end
 
 #============================ vararg ===============================#
@@ -104,6 +121,5 @@ sys = IRODESystem(Tuple{typeof(x2_va!)}; ipo_analysis_mode=false);
 let ipo_result = getfield(sys_ipo, :result), nonipo_result = getfield(sys, :result)
     @test !any(==(Float64), ipo_result.total_incidence)
     @test ipo_result.ntotalvars == nonipo_result.ntotalvars
-    @test length(ipo_result.var_obs_names) == length(nonipo_result.var_obs_names)
-    @test length(ipo_result.eq_names) == length(nonipo_result.eq_names)
+    @test length(ipo_result.names) == length(nonipo_result.names)
 end

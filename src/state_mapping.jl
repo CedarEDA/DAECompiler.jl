@@ -44,7 +44,7 @@ end
 
 function SymbolicIndexingInterface.variable_symbols(tsys::TransformedIRODESystem)
     sys = get_sys(tsys)
-    syms = add_recursive_vars!(ScopeRef[], StructuralAnalysisResult(sys).var_obs_names, sys)
+    syms = add_recursive_vars!(ScopeRef[], StructuralAnalysisResult(sys).names, sys)
     nvars = count(x->isa(x, ModelingToolkit.StructuralTransformations.SelectedState), tsys.var_eq_matching)
     out = [Symbol() for _ in 1:nvars]
     for sym in syms
@@ -61,11 +61,16 @@ function SymbolicIndexingInterface.parameter_symbols(sys::TransformedIRODESystem
     fieldnames(getfield(get_sys(sys), :mi).specTypes.types[1])
 end
 
-function sym_stack(scope::Scope)
-    stack = Symbol[]
-    while isdefined(scope, :parent)
-        push!(stack, scope.name)
-        scope = scope.parent
+function sym_stack(scope::Union{Scope, GenScope})
+    stack = Union{Symbol, Gen}[]
+    while !isa(scope, Scope) || isdefined(scope, :parent)
+        if isa(scope, GenScope)
+            push!(stack, Gen(scope.identity, scope.sc.name))
+            scope = scope.sc.parent
+        else
+            push!(stack, scope.name)
+            scope = scope.parent
+        end
     end
     return stack
 end
@@ -73,25 +78,29 @@ end
 function _sym_to_index(sr::ScopeRef)
     scope = getfield(sr, :scope)
     stack = sym_stack(scope)
-    strct = StructuralAnalysisResult(IRODESystem(sr)).var_obs_names
+    strct = NameLevel(StructuralAnalysisResult(IRODESystem(sr)).names)
     for s in reverse(stack)
-        strct = strct[s]
+        strct = strct.children[s]
     end
     return strct
 end
 
 function SciMLBase.sym_to_index(sr::ScopeRef{IRODESystem}, transformed_sys::TransformedIRODESystem)
     unopt_idx = _sym_to_index(sr)
-    if unopt_idx isa Dict
-        sname = String(getfield(sr, :scope).name)
-        suggest = first(unopt_idx)[1]
-        error("$sname is not a concrete index. Did you mean $sname.var\"$suggest\"")
+    if unopt_idx.var === nothing && unopt_idx.obs === nothing
+        if !isempty(unopt_idx.children)
+            sname = String(getfield(sr, :scope).name)
+            suggest = first(unopt_idx)[1]
+            error("$sname is not a concrete index. Did you mean $sname.var\"$suggest\"")
+        else
+            error("$sname is not a variable or observed.")a
+        end
     end
-    if unopt_idx[1]
+    if unopt_idx.var === nothing
         # Observed gets handled elsewhere
         return nothing
     end
-    unopt_idx = unopt_idx[2]
+    unopt_idx = unopt_idx.var
     # Check if this index is still here
     (; var_assignment) = assign_vars_and_eqs(MatchedSystemStructure(transformed_sys), true)
 
@@ -122,30 +131,30 @@ function SciMLBase.sym_to_index(sr::ScopeRef, A::SciMLBase.DEIntegrator)
 end
 
 function Base.getproperty(sys::IRODESystem, name::Symbol)
-    haskey(StructuralAnalysisResult(sys).var_obs_names, name) || throw(Base.UndefRefError())
+    haskey(StructuralAnalysisResult(sys).names, name) || throw(Base.UndefRefError())
     return ScopeRef(sys, Scope(Scope(), name))
 end
 
 function Base.propertynames(sr::ScopeRef)
     scope = getfield(sr, :scope)
     stack = sym_stack(scope)
-    strct = StructuralAnalysisResult(IRODESystem(sr)).var_obs_names
+    strct = NameLevel(StructuralAnalysisResult(IRODESystem(sr)).names)
     for s in reverse(stack)
-        strct = strct[s]
-        strct isa Dict || return keys(Dict{Symbol, Any}())
+        strct = strct.chilren[s]
+        strct.children === nothing && return keys(Dict{Symbol, Any}())
     end
-    return keys(strct)
+    return keys(strct.children)
 end
 
 function Base.getproperty(sr::ScopeRef{IRODESystem}, name::Symbol)
     scope = getfield(sr, :scope)
     stack = sym_stack(scope)
-    strct = StructuralAnalysisResult(IRODESystem(sr)).var_obs_names
+    strct = NameLevel(StructuralAnalysisResult(IRODESystem(sr)).names)
     for s in reverse(stack)
-        strct = strct[s]
-        strct isa Dict || throw(Base.UndefRefError())
+        strct = strct.children[s]
+        strct.children === nothing && throw(Base.UndefRefError())
     end
-    if !haskey(strct, name)
+    if !haskey(strct.children, name)
         throw(Base.UndefRefError())
     end
     ScopeRef(IRODESystem(sr), Scope(getfield(sr, :scope), name))
@@ -161,7 +170,7 @@ function Base.show(io::IO, scope::Scope)
 end
 Base.show(io::IO, sr::ScopeRef) = show(io, getfield(sr, :scope))
 
-Base.propertynames(sys::IRODESystem) = keys(StructuralAnalysisResult(sys).var_obs_names)
+Base.propertynames(sys::IRODESystem) = keys(StructuralAnalysisResult(sys).names)
 
 # Observed
 const ReconstructCache = Dict{Tuple{Vector{Int64},Vector{Int64}},Function}
@@ -189,11 +198,12 @@ end
 function split_and_sort_syms(syms)
     vars = Int64[]
     obs = Int64[]
-    for (is_obs, idx) in _sym_to_index.(syms)
-        if is_obs
-            push!(obs, idx)
+    for level in _sym_to_index.(syms)
+        if level.obs !== nothing
+            @assert level.var === nothing
+            push!(obs, level.obs)
         else
-            push!(vars, idx)
+            push!(vars, level.var)
         end
     end
     return sort(vars), sort(obs)
@@ -225,13 +235,14 @@ function join_syms(
     vars_idx = 1
     obs_idx = 1
     for (out_idx, sym) in enumerate(syms)
-        (is_obs, idx) = DAECompiler._sym_to_index(sym)
-        if is_obs
-            loc=findfirst(==(idx), obs_inds)
+        level = DAECompiler._sym_to_index(sym)
+        if level.obs !== nothing
+            @assert level.var === nothing
+            loc=findfirst(==(level.obs), obs_inds)
             out[out_idx, :] .= obs[loc, :]
             obs_idx += 1
         else
-            loc=findfirst(==(idx), var_inds)
+            loc=findfirst(==(level.var), var_inds)
             out[out_idx, :] .= vars[loc, :]
             vars_idx += 1
         end

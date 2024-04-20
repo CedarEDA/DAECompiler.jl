@@ -12,6 +12,8 @@ using Base.Experimental: @opaque
 using Base.Meta: isexpr
 using ExprTools: splitdef
 using CentralizedCaches: @new_cache
+using Accessors
+using OrderedCollections
 
 export IRTransformationState, IRODESystem, TransformedIRODESystem
 export get_epsjac, reconstruct_sensitivities, get_transformed_sys, get_sys, select_ir

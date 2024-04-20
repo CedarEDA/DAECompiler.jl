@@ -1,30 +1,26 @@
 using ModelingToolkit
 using ModelingToolkit.BipartiteGraphs
 
-function build_var_names(var_obs_names, var_to_diff)
-    var_names = Dict{Int,String}()
-    build_var_names!(var_names, var_obs_names, var_to_diff)
+function build_var_names(names::OrderedDict{LevelKey, NameLevel}, var_to_diff)
+    var_names = OrderedDict{Int,String}()
+    build_var_names!(var_names, names, var_to_diff)
     return var_names
 end
-function build_var_names!(var_names, var_obs_names, var_to_diff, prefix=String[])
-    for name in keys(var_obs_names)
+function build_var_names!(var_names, names::OrderedDict{LevelKey, NameLevel}, var_to_diff, prefix=String[])
+    for name in keys(names)
         name_path = join(vcat(prefix..., name), ".")
-        if isa(var_obs_names[name], Pair)
-            (is_observable, var_idx) = var_obs_names[name]
-
-            # Skip observables
-            if is_observable
-                continue
-            end
-
+        level = names[name]
+        if level.children !== nothing
+            build_var_names!(var_names, level.children, var_to_diff, [name_path])
+        end
+        if level.var !== nothing
+            var_idx = level.var
             var_names[var_idx] = name_path
             while var_to_diff[var_idx] !== nothing
                 var_idx = var_to_diff[var_idx]
                 name_path = "D($(name_path))"
                 var_names[var_idx] = name_path
             end
-        else
-            build_var_names!(var_names, var_obs_names[name], var_to_diff, [name_path])
         end
     end
 end
@@ -36,10 +32,9 @@ function num_selected_states(tsys::TransformedIRODESystem, isdae)
     return length(filter(((state_idx, b),) -> b == 0 && state_idx >= 1, var_assignment))
 end
 
-
 function show_assignments(prob::SciMLBase.AbstractDEProblem)
     sys = get_transformed_sys(prob)
-    var_names = build_var_names(sys.state.var_obs_names, sys.state.structure.var_to_diff)
+    var_names = build_var_names(sys.state.names, sys.state.structure.var_to_diff)
 
     @info("Variables:")
     for var_idx in 1:ndsts(sys.state.structure.graph)
@@ -63,7 +58,6 @@ function show_assignments(prob::SciMLBase.AbstractDEProblem)
             println("  u[$state_idx] $(name)")
         end
     end
-    println()
     if isa(prob, DAEProblem)
         dstate_mapping = Dict(state_idx => var_idx for (var_idx, (state_idx, b)) in enumerate(var_assignment) if b == 1)
         for dstate_idx in 1:(prob.du0 === nothing ? 0 : length(prob.du0))

@@ -33,7 +33,7 @@ function (l::Lorenz1)()
     ))
 end
 
-@test_logs (:warn, r"Duplicate variable definition for scope") sys = IRODESystem(Tuple{Lorenz1{Float64}});
+@test_logs (:warn, r"definition for scope") sys = IRODESystem(Tuple{Lorenz1{Float64}});
 
 function genx(scope = GenScope(Scope(), :x))
     x = variable(scope)

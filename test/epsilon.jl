@@ -1,8 +1,10 @@
+module eps
+
 using Test
 using DAECompiler
 using DAECompiler.Intrinsics
+using DAECompiler.Intrinsics: state_ddt
 using SciMLBase, OrdinaryDiffEq
-
 
 @testset "expeps" begin
     function expeps()
@@ -13,9 +15,9 @@ using SciMLBase, OrdinaryDiffEq
     sys = IRODESystem(Tuple{typeof(expeps)})
     prob = ODEProblem(sys, [1.], (0., 1.); jac=true)
     sol = solve(prob, Rosenbrock23())
-    
+
     @test get_transformed_sys(sol).state.neps == 1
-    @test get_transformed_sys(sol).state.eps_names == Dict(:ε=>1)
+    @test get_transformed_sys(sol).state.names[:ε].eps == 1
 
     epsjac! = get_epsjac(sol)
     eps = epsjac!.([Matrix{Float64}(undef, 1, 1) for _ in sol.u], sol.u, expeps, sol.t)
@@ -32,17 +34,19 @@ end
     sys = IRODESystem(Tuple{typeof(time_linked)})
     prob = ODEProblem(sys, nothing, (0., 1.); jac=true)
     sol = solve(prob, Rosenbrock23())
-    
+
     @test get_transformed_sys(sol).state.neps == 1
-    @test get_transformed_sys(sol).state.eps_names == Dict(:ε=>1)
+    @test get_transformed_sys(sol).state.names[:ε].eps == 1
 
     epsjac! = get_epsjac(sol)
     eps_vals = epsjac!.([Matrix{Float64}(undef, 2, 1) for _ in sol.u], sol.u, time_linked, sol.t)
-    
-    # ε and x are independent 
+
+    # ε and x are independent
     @test all(iszero(dx) for (dx, _) in eps_vals)
 
     # y == t == ε
     @assert isapprox(sol[2, :], sol.t, rtol=1e-6) # make sure the system solved as expected
-    @test last.(eps_vals) ≈ sol.t rtol=1e-6   
+    @test last.(eps_vals) ≈ sol.t rtol=1e-6
+end
+
 end

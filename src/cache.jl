@@ -1,24 +1,34 @@
-"""
-    VarObsNames
 
-Names for variables and observables. Leaves are `Pair{isob::Bool, var_num::Int}`,
-with the `isob` indicating observables.
-"""
-const VarObsNames = Dict{Union{Symbol, PartialScope},Any}
+struct Gen
+    id::Intrinsics.ScopeIdentity
+    name::Symbol
+end
 
-"""
-    EqNames
-
-Names for equations.
-"""
-const EqNames = Dict{Union{Symbol, PartialScope}, Any}
+const LevelKey = Union{Symbol, Gen, PartialScope}
 
 """
-    EqNames
+    struct NameLevel
 
-Names for epsilons.
+Represents one level in the unified scope hierachy. DAECompiler tracks separate
+name hierachies for each kind of primitive (variables, observed, equations,
+epsilons), but we often want to operate on them jointly (e.g. for GenScope), so
+it makes sense to represent them in a unified tree.
+
+This struct represents one level in the tree. For each primitive kind
+(var, obs, eq, eps), it stores the current system index for said primitive at
+the current leaf. It also stores the children of this node.
 """
-const EpsNames = Dict{Union{Symbol, PartialScope}, Any}
+struct NameLevel
+    var::Union{Nothing, Int}
+    obs::Union{Nothing, Int}
+    eq::Union{Nothing, Int}
+    eps::Union{Nothing, Int}
+    children::Union{Nothing, OrderedDict{LevelKey, NameLevel}}
+end
+NameLevel() =
+    NameLevel(nothing, nothing, nothing, nothing, nothing)
+NameLevel(children::OrderedDict{LevelKey, NameLevel}) =
+    NameLevel(nothing, nothing, nothing, nothing, children)
 
 struct UnsupportedIRException <: Exception
     msg::String
@@ -36,9 +46,7 @@ struct DAEIPOResult
     total_incidence::Vector{Any}
     eq_callee_mapping::Vector{Union{Nothing, Pair{SSAValue, Int}}}
     var_callee_mapping::Vector{Union{Nothing, Pair{SSAValue, Int}}}
-    var_obs_names::VarObsNames
-    eq_names::EqNames
-    eps_names::EpsNames
+    names::OrderedDict{LevelKey, NameLevel}
     nobserved::Int
     neps::Int
     ic_nzc::Int

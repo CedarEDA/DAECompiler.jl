@@ -87,8 +87,8 @@ function ModelingToolkit.check_consistency(state::IRTransformationState, _)
 
     find_variable_names(idxs) =
         Union{Nothing, Symbol}[
-            findfirst(==(idx),
-                    getfield(get_sys(state), :result).eq_names) for idx in idxs]
+            findfirst(x->x.eq==idx,
+                    getfield(get_sys(state), :result).names) for idx in idxs]
 
     if neqs > 0 && !is_balanced
         (eqs, vars) = find_eqs_vars(state)
@@ -104,8 +104,8 @@ function ModelingToolkit.check_consistency(state::IRTransformationState, _)
         else
             bad_idxs = findall(isequal(unassigned), var_eq_matching)
             names = Union{Nothing, Symbol}[
-                findfirst(x->x[1] === false && x[2] == idx,
-                         getfield(get_sys(state), :result).var_obs_names) for idx in bad_idxs]
+                findfirst(x->x.var == idx,
+                         getfield(get_sys(state), :result).names) for idx in bad_idxs]
         end
 
         throw(BadSystemException(neqs, n_highest_vars, copy(state.ir), names,

@@ -13,7 +13,10 @@ using Test
         idx::Int
         is_obs::Bool
     end
-    DAECompiler._sym_to_index(ref::DummyRef) = (ref.is_obs, ref.idx)
+    function DAECompiler._sym_to_index(ref::DummyRef)
+        ref.is_obs ? DAECompiler.NameLevel(nothing, ref.idx, nothing, nothing, nothing) :
+            DAECompiler.NameLevel(ref.idx, nothing, nothing, nothing, nothing)
+    end
 
     indexes = shuffle(10:99)[1:50]
     obs_mask = rand(Bool, 50)

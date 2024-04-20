@@ -356,6 +356,29 @@ function make_argument_lattice_elem(which::Argument, @nospecialize(argt), add_va
     mft === nothing ? Incidence(argt) : mft
 end
 
+function resolve_genscopes(names)
+    new_names = OrderedDict{LevelKey, NameLevel}()
+    for (key, val) in collect(names)
+        if val.children !== nothing
+            @reset val.children = resolve_genscopes(val.children)
+        end
+        if isa(key, Gen)
+            idx = 1
+            while true
+                proposed_name = Symbol(string(key.name, idx))
+                if !haskey(names, proposed_name) && !haskey(new_names, proposed_name)
+                    new_names[proposed_name] = val
+                    break
+                end
+                idx += 1
+            end
+        else
+            new_names[key] = val
+        end
+    end
+    return new_names
+end
+
 """
     compute_structure(interp::DAEInterpreter,
         mi::MethodInstance, ir::IRCode, debug_config::DebugConfig) -> result::StructuralAnalysisResult
@@ -371,7 +394,9 @@ Perform the structural analysis on optimized code of `mi` and return `structure:
         callee_result = CC.traverse_analysis_results(codeinst) do @nospecialize result
             return result isa Union{DAEIPOResult, UncompilableIPOResult} ? result : nothing
         end
-        return callee_result
+        isa(callee_result, UncompilableIPOResult) && return callee_result
+        names = resolve_genscopes(callee_result.names)
+        return @set callee_result.names = names
     else
         codeinst = CC.getindex(CC.code_cache(interp), mi)
         cache = (@atomic :monotonic codeinst.inferred)::DAECache
@@ -384,7 +409,12 @@ Perform the structural analysis on optimized code of `mi` and return `structure:
         infer_ir!(ir, interp, mi)
         ir = run_dae_passes(interp, ir, debug_config)
 
-        return ipo_dae_analysis!(interp, ir, mi, nothing; debug_config)
+        result = ipo_dae_analysis!(interp, ir, mi, nothing; debug_config)
+        isa(result, UncompilableIPOResult) && return result
+
+        names = resolve_genscopes(result.names)
+
+        return @set result.names = names
     end
 end
 
@@ -420,6 +450,20 @@ function process_scope_template!(𝕃, applied_scopes, argtypes, template_argtyp
     end
 end
 
+function refresh_identities(names::OrderedDict{LevelKey, NameLevel})
+    new_names = OrderedDict{LevelKey, NameLevel}()
+    for (key, val) in names
+        if isa(key, Gen)
+            key = Gen(Intrinsics.ScopeIdentity(), key.name)
+        end
+        if val.children !== nothing
+            @reset val.children = refresh_identities(val.children)
+        end
+        new_names[key] = val
+    end
+    return new_names
+end
+
 @noinline function ipo_dae_analysis!(interp::DAEInterpreter, ir::IRCode, mi::MethodInstance, caller::Union{InferenceResult, Nothing};
         debug_config = nothing)
     ir = copy(ir)
@@ -452,9 +496,7 @@ end
     var_to_diff = DiffGraph(0)
     warnings = UnsupportedIRException[]
 
-    var_obs_names = VarObsNames()
-    eq_names = EqNames()
-    eps_names = EpsNames()
+    names = OrderedDict{LevelKey, NameLevel}()
 
     nsysmscopes = 0
 
@@ -686,14 +728,8 @@ end
     #    available at inference time
     # 3. To constant propagate the relationship between variables and
     #    state_ddt.
-
-    genscopes = Pair{Intrinsics.AbstractScope, Tuple}[]
     function record_this_scope!(scope::Union{PartialScope, PartialStruct, Intrinsics.AbstractScope}, args...)
-        if !has_any_genscope(scope)
-            record_scope!(ir, scope, args...)
-        else
-            push!(genscopes, scope=>args)
-        end
+        record_scope!(ir, names, scope, args...)
     end
     record_this_scope!(scope::Const, args...) = record_this_scope!(scope.val, args...)
 
@@ -715,7 +751,7 @@ end
                 elseif isa(scope, Const) && scope.val === Scope()
                     # Explicitly unnamed
                 else
-                    record_this_scope!(scope, var_obs_names, varssa, false=>var_num, :variable)
+                    record_this_scope!(scope, varssa, var_num, @o _.var)
                 end
                 # Delete the scope. It's only used for debug and we
                 # expect it to be constant anyway. However, if it's
@@ -733,11 +769,11 @@ end
                 end
                 v = only(rowvals(vp))
                 if !isone(vp[v])
-                    vname = get_variable_name(var_obs_names, var_to_diff, v-1)
+                    vname = get_variable_name(names, var_to_diff, v-1)
                     return UncompilableIPOResult(warnings, UnsupportedIRException("Expected incidence of variable `$vname` to state_ddt to be 1.0, got $vtyp at $ssa", ir))
                 end
                 if var_to_diff[v-1] !== nothing
-                    vname = get_variable_name(var_obs_names, var_to_diff, v-1)
+                    vname = get_variable_name(names, var_to_diff, v-1)
                     return UncompilableIPOResult(warnings, UnsupportedIRException("Duplicated state_ddt for variable `$vname` at $ssa", ir))
                 end
                 add_edge!(var_to_diff, v-1, idnum(type))
@@ -760,7 +796,7 @@ end
                 # Explicitly unnamed
             else
                 var_num = inst.args[end]::Int
-                record_this_scope!(scope, var_obs_names, obsssa, true=>var_num, :observed)
+                record_this_scope!(scope, obsssa, var_num, @o _.obs)
             end
             # Delete the scope (see above)
             inst.args[4] = nothing
@@ -778,7 +814,7 @@ end
             elseif isa(scope, Const) && scope.val === Scope()
                 # Explicitly unnamed
             else
-                record_this_scope!(scope, eps_names, epsssas, epsnum(ir[ssa][:type]), :epsilon)
+                record_this_scope!(scope, epsssas, epsnum(ir[ssa][:type]), @o _.eps)
             end
             # Delete the scope
             inst.args[end] = nothing
@@ -841,18 +877,10 @@ end
         elseif isa(scope, Const) && scope.val === Scope()
             # Explicitly unnamed
         else
-            record_this_scope!(scope, eq_names, varssa, eqnum, :equation)
+            record_this_scope!(scope, varssa, eqnum, @o _.eq)
         end
         # Delete scope (see above)
         eqinst.args[3] = nothing
-    end
-
-    # Resolve all genscopes
-    resolved_genscopes = Dict{Intrinsics.AbstractScope, Scope}()
-    for (genscope, args) in genscopes
-        record_scope!(ir, get!(resolved_genscopes, genscope) do
-            generate_scope_name(genscope, resolved_genscopes, (var_obs_names, eq_names))
-        end, args...)
     end
 
     for ssa in eqcallssas
@@ -1028,40 +1056,23 @@ end
                     return newscope
                 end
 
-                if !isempty(result.var_obs_names) || !isempty(result.eq_names)
+                if !isempty(result.names)
                     if result.nsysmscopes != 0
                         process_scope_template!(CC.optimizer_lattice(analysis_interp), applied_scopes, callee_argtypes, result.argtypes)
                     end
 
-                    for (key, val) in result.var_obs_names
+                    for (key, val) in refresh_identities(result.names)
                         if isa(key, PartialScope)
                             newscope = resolve_ipo_scope(key)
-                            if !isa(newscope, Union{Intrinsics.AbstractScope, PartialScope})
+                            if !isa(newscope, Union{Intrinsics.AbstractScope, PartialScope}) && !is_valid_partial_scope(newscope)
                                 push!(warnings, UnsupportedIRException(
-                                    "Saw non-constant name (`$newscope`) for variable with symbolic scope $key (SSA $i)",
+                                    "Saw non-constant name (`$newscope`) for name with symbolic scope $key (SSA $i)",
                                     ir))
                                 continue
                             end
-                            merge_scopes!(var_obs_names, newscope, val, offset)
+                            merge_scopes!(names, newscope, val, offset, -typemax(Int), eq_offset, -typemax(Int))
                         else
-                            @assert isa(key, Symbol)
-                            merge_scopes!(var_obs_names, key, val, offset)
-                        end
-                    end
-
-                    for (key, eqid) in result.eq_names
-                        if isa(key, PartialScope)
-                            newscope = resolve_ipo_scope(key)
-                            if !isa(newscope, Union{Intrinsics.AbstractScope, PartialScope})
-                                push!(warnings, UnsupportedIRException(
-                                    "Saw non-constant name (`$newscope`) for equation $(eqid+eq_offset) (SSA $i)",
-                                    ir))
-                                continue
-                            end
-                            merge_scopes!(eq_names, newscope, eqid, eq_offset; kind=:equation)
-                        else
-                            @assert isa(key, Symbol)
-                            merge_scopes!(eq_names, key, eqid, eq_offset; kind=:equation)
+                            merge_scopes!(names, key, val, offset, -typemax(Int), eq_offset, -typemax(Int))
                         end
                     end
                 end
@@ -1078,12 +1089,12 @@ end
 
     return DAEIPOResult(ir, argtypes, nexternalvars+nimplicitexternalvars, nexternalvars+nthisvars+nimplicitexternalvars+nimplicitinternalvars+ninternalvars, nsysmscopes, var_to_diff,
         ultimate_rt, total_incidence, eq_callee_mapping, var_callee_mapping,
-        var_obs_names, eq_names, eps_names, nobserved, length(epsssas), ic_nzc, vcc_nzc,
+        names, nobserved, length(epsssas), ic_nzc, vcc_nzc,
         warnings)
 end
 
-function get_variable_name(var_obs_names, var_to_diff, var_idx)
-    var_names = build_var_names(var_obs_names, var_to_diff)
+function get_variable_name(names::OrderedDict{LevelKey, NameLevel}, var_to_diff, var_idx)
+    var_names = build_var_names(names, var_to_diff)
     return var_names[var_idx]
 end
 
@@ -1112,131 +1123,110 @@ function get_inline_backtrace(ir::IRCode, v::SSAValue)
     return frames
 end
 
-function walk_dict(name_dict::Dict{Union{Symbol, PartialScope}, Any}, stack::Vector{<:Union{Symbol, PartialScope}})
+function walk_dict(names::OrderedDict{LevelKey, NameLevel}, stack::Vector{<:LevelKey})
     for i = length(stack):-1:2
         s = stack[i]
-        if !haskey(name_dict, s)
-            name_dict[s] = Dict{Union{Symbol, PartialScope}, Any}()
+        if !haskey(names, s)
+            names[s] = NameLevel(OrderedDict{LevelKey, NameLevel}())
         end
-        name_dict = name_dict[s]
+        names = names[s].children
     end
-    return name_dict
+    return names
 end
 
 is_valid_partial_scope(_) = false
 is_valid_partial_scope(ps::PartialScope) = true
 function is_valid_partial_scope(ps::PartialStruct)
-    ps.typ === Scope || return false
-    isa(ps.fields[2], Const) || return false
-    isa(ps.fields[2].val, Symbol) || return false
-    return is_valid_partial_scope(ps.fields[1])
+    if ps.typ === Scope
+        isa(ps.fields[2], Const) || return false
+        isa(ps.fields[2].val, Symbol) || return false
+        return is_valid_partial_scope(ps.fields[1])
+    elseif ps.typ === GenScope
+        isa(ps.fields[1], Const) || return false
+        return is_valid_partial_scope(ps.fields[2])
+    else
+        return false
+    end
 end
 
 function sym_stack(ps::PartialStruct)
-    @assert ps.typ === Scope
-    sym = (ps.fields[2]::Const).val::Symbol
-    pushfirst!(sym_stack(ps.fields[1]), sym)
+    if ps.typ === Scope
+        sym = (ps.fields[2]::Const).val::Symbol
+        return pushfirst!(sym_stack(ps.fields[1]), sym)
+    else
+        @assert ps.typ === GenScope
+        stack = sym_stack(ps.fields[2])
+        scope_identity = ((ps.fields[1]::Const).val)::Intrinsics.ScopeIdentity
+        stack[1] = Gen(scope_identity, stack[1])
+        return stack
+    end
 end
 
-sym_stack(ps::PartialScope) = Union{Symbol, PartialScope}[ps]
-function record_scope!(ir::IRCode, scope::Union{Scope, PartialStruct, PartialScope}, name_dict::Dict{Union{Symbol, PartialScope}, Any},
-                       varssa::Vector, val::Union{Pair{Bool,Int},Int},
-                       kind::Symbol = :variable)
+sym_stack(ps::PartialScope) = LevelKey[ps]
+function record_scope!(ir::IRCode, names::OrderedDict{LevelKey, NameLevel}, scope::Union{Scope, GenScope, PartialStruct, PartialScope},
+                       varssa::Vector, idx::Int, lens)
+
     stack = sym_stack(scope)
-    name_dict = walk_dict(name_dict, stack)
-    get_idx(x::Pair) = x.second
-    get_idx(x::Int) = x
-    if haskey(name_dict, stack[1])
-        new = get_inline_backtrace(ir, varssa[get_idx(val)])
-        existing = get_inline_backtrace(ir, varssa[get_idx(name_dict[stack[1]])])
+    name_dict = walk_dict(names, stack)
+    existing = get!(name_dict, stack[1], NameLevel())
+    if lens(existing) !== nothing
+        new = get_inline_backtrace(ir, varssa[idx])
+        existing = get_inline_backtrace(ir, varssa[lens(names[stack[1]])])
 
         io = IOBuffer()
         Base.show_backtrace(io, new)
         print(io, "\n")
         Base.show_backtrace(io, existing)
-        @warn "Duplicate $(kind) definition for scope $scope" * String(take!(io))
-    end
-    name_dict[stack[1]] = val
-end
-
-function merge_scopes!(name_dict::Dict{Union{Symbol, PartialScope}, Any}, key::Union{Symbol, PartialScope}, val, offset::Int; kind=:variable)
-    if !isa(val, Dict)
-        if haskey(name_dict, key)
-            @warn "Duplicate $(kind) definition for scope $key"
-            return
-        end
-        if isa(val, Pair)
-            name_dict[key] = val[1]=>(val[2]+offset)
-        else
-            name_dict[key] = val+offset
-        end
-        return
-    end
-    if !haskey(name_dict, key)
-        name_dict[key] = Dict{Union{Symbol, PartialScope}, Any}()
-    end
-    child_dict = name_dict[key]
-    for (val_key, val_val) in val
-        merge_scopes!(child_dict, val_key, val_val, offset)
+        @warn "Duplicate $(lens) definition for scope $scope" * String(take!(io))
+    else
+        name_dict[stack[1]] = set(existing, lens, idx)
     end
 end
 
-function merge_scopes!(name_dict::Dict{Union{Symbol, PartialScope}, Any}, key::Scope, val, offset::Int; kind=:variable)
+function merge_scopes!(names::OrderedDict{LevelKey, NameLevel}, key::LevelKey, val::NameLevel,
+        varoffset::Int, obsoffset::Int, eqoffset::Int, epsoffset::Int)
+
+    haskey(names, key) || (names[key] = NameLevel())
+    existing = names[key]
+    for (offset, lens) in ((varoffset, @o _.var), (obsoffset, @o _.obs),
+                           (eqoffset, @o _.eq), (epsoffset, @o _.eps))
+        if lens(val) !== nothing
+            if lens(existing) !== nothing
+                @warn "Duplicate $(lens) for $key"
+            else
+                existing = set(existing, lens, lens(val)+offset)
+            end
+        end
+    end
+
+    if val.children !== nothing
+        if existing.children === nothing
+            @reset existing.children = OrderedDict{LevelKey, NameLevel}()
+        end
+        child_dict = existing.children
+        for (val_key, val_val) in val.children
+            merge_scopes!(child_dict, val_key, val_val,
+                varoffset, obsoffset, eqoffset, epsoffset)
+        end
+    end
+    names[key] = existing
+end
+
+function merge_scopes!(names::OrderedDict{LevelKey, NameLevel}, key::Union{Scope, PartialStruct}, val::NameLevel,
+        varoffset::Int, obsoffset::Int, eqoffset::Int, epsoffset::Int)
+
     stack = sym_stack(key)
     if isempty(stack)
-        @assert isa(val, Dict)
-        for (k, v) in pairs(val)
-            merge_scopes!(name_dict, k, v, offset; kind)
+        @assert val.var == val.obs == val.eps == val.eq == nothing
+        for (k, v) in pairs(val.children)
+            merge_scopes!(names, k, v, varoffset, obsoffset, eqoffset, epsoffset)
         end
         return
     end
     while length(stack) > 1
-        val = Dict{Union{Symbol, PartialScope}, Any}(pop!(stack) => val)
+        val = NameLevel(OrderedDict{LevelKey, NameLevel}(pop!(stack) => val))
     end
-    merge_scopes!(name_dict, only(stack), val, offset; kind)
-end
-
-scope_name(scope::Scope) = scope.name
-scope_name(scope::GenScope) = scope_name(scope.sc)
-function resolve_sym_stack(scope::Intrinsics.AbstractScope, mapping::Dict{Intrinsics.AbstractScope, Scope}, dicts)
-    stack = Symbol[scope_name(scope)]
-    scope = isa(scope, Scope) ? scope.parent : scope.sc.parent
-    while isa(scope, GenScope) || isdefined(scope, :parent)
-        if !isa(scope, Scope)
-            scope = get!(mapping, scope) do
-                generate_scope_name(scope, mapping, dicts)
-            end
-        end
-        push!(stack, scope.name)
-        scope = scope.parent
-    end
-    return stack
-end
-
-function generate_scope_name(genscope::Intrinsics.AbstractScope, mapping::Dict{Intrinsics.AbstractScope, Scope}, dicts)
-    # First walk the scope stack to make sure we resolve any scopes higher up
-    stack = resolve_sym_stack(genscope, mapping, dicts)
-    counter = 1
-    # TODO: This has bad algorithmic complexity, but for now, this is mostly
-    # for demos, so fine for now
-    @label try_again
-    if isa(genscope, GenScope)
-        proposed_name = Symbol(string(stack[1], counter))
-        for dict in dicts
-            # See if this name is free
-            if haskey(walk_dict(dict, stack), proposed_name)
-                counter += 1
-                @goto try_again
-            end
-        end
-        stack[1] = proposed_name
-    end
-    # Found a free name - rebuild the scope chain
-    new_scope = Scope(Scope(), pop!(stack))
-    while !isempty(stack)
-        new_scope = Scope(new_scope, pop!(stack))
-    end
-    return new_scope
+    merge_scopes!(names, only(stack), val, varoffset, obsoffset, eqoffset, epsoffset)
 end
 
 function peephole_pass!(ir::IRCode)

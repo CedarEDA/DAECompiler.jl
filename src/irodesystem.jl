@@ -166,9 +166,7 @@ mutable struct IRTransformationState <: TransformationState{IRODESystem}
     ir::IRCode
     callback_func::Function
     structure::SystemStructure
-    const var_obs_names::VarObsNames
-    const eq_names::EqNames
-    const eps_names::EpsNames
+    const names::OrderedDict{LevelKey, NameLevel}
     const nobserved::Int
     const neps::Int
     const ic_nzc::Int
@@ -181,9 +179,7 @@ mutable struct IRTransformationState <: TransformationState{IRODESystem}
             copy(structure.ir),
             ()->CallbackSet(),
             make_structure_from_ipo(structure),
-            copy(structure.var_obs_names),
-            copy(structure.eq_names),
-            copy(structure.eps_names),
+            copy(structure.names),
             structure.nobserved,
             structure.neps,
             structure.ic_nzc,

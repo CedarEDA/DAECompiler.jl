@@ -229,13 +229,7 @@ function state_default_mapping!(prob, du0::Vector, u0::Vector)
                 @assert isvar(var)
                 unopt_idx = DAECompiler._sym_to_index(getproperty(sys, access_var(var)))
 
-                # Oops, this variable is not real
-                if unopt_idx[1]
-                    return nothing
-                end
-
-                # Otherwise, return the index
-                return unopt_idx[2]
+                return unopt_idx.var
             catch
                 @error("Unable to index $(var) into $(sys)")
                 rethrow()
@@ -344,11 +338,11 @@ end
 # Monkey-pathching the code in DAECompiler
 function Base.getproperty(sys::IRODESystem, name::Symbol)
     mtksys = sys_map[getfield(sys, :mi)]
-    var_obs_names = DAECompiler.StructuralAnalysisResult(sys).var_obs_names
-    if haskey(var_obs_names, name)
+    names = DAECompiler.StructuralAnalysisResult(sys).names
+    if haskey(names, name)
         # Normal DAECompiler way
         return DAECompiler.ScopeRef(sys, DAECompiler.Scope(DAECompiler.Scope(), name))
-    elseif haskey(var_obs_names, drop_leading_namespace(name, mtksys))
+    elseif haskey(names, drop_leading_namespace(name, mtksys))
         # If it came from something that includes the sys prefix  (probably from the MTK system originally)
         return DAECompiler.ScopeRef(sys, DAECompiler.Scope(DAECompiler.Scope(), drop_leading_namespace(name, mtksys)))
     elseif hasproperty(mtksys, name)  # if it is actually from the MTK system (which allows unflattened names)
