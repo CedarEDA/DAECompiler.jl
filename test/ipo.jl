@@ -55,7 +55,6 @@ let ipo_result = getfield(sys_ipo, :result), nonipo_result = getfield(sys, :resu
     @test length(ipo_result.names) == length(nonipo_result.names)
 end
 
-
 #=================== + derived scope =============================#
 @noinline function x_derived!(scope)
     vscope = scope(:x)
@@ -70,6 +69,28 @@ end
 
 sys_ipo = IRODESystem(Tuple{typeof(x2_derived!)}; ipo_analysis_mode=true);
 sys = IRODESystem(Tuple{typeof(x2_derived!)}; ipo_analysis_mode=false);
+
+let ipo_result = getfield(sys_ipo, :result), nonipo_result = getfield(sys, :result)
+    @test ipo_result.ntotalvars == nonipo_result.ntotalvars
+    @test length(ipo_result.names) == length(nonipo_result.names)
+end
+
+#=================== + equation arg =============================#
+using DAECompiler.Intrinsics: equation
+@noinline function x_eqarg!(eq, scope)
+    vscope = scope(:x)
+    x = variable(vscope)
+    observed!(x, scope(:xo))
+    eq(state_ddt(x) - x + epsilon(vscope))
+end
+function x2_eqarg!()
+    e1 = equation(Scope(Scope(), :e1)); e2 = equation(Scope(Scope(), :e2))
+    x_eqarg!(e1, Scope(Scope(), :x1)); x_eqarg!(e2, Scope(Scope(), :x2));
+    return nothing
+end
+
+sys_ipo = IRODESystem(Tuple{typeof(x2_eqarg!)}; ipo_analysis_mode=true);
+sys = IRODESystem(Tuple{typeof(x2_eqarg!)}; ipo_analysis_mode=false);
 
 let ipo_result = getfield(sys_ipo, :result), nonipo_result = getfield(sys, :result)
     @test ipo_result.ntotalvars == nonipo_result.ntotalvars

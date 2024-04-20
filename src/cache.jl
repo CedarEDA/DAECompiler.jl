@@ -41,6 +41,7 @@ struct DAEIPOResult
     nexternalvars::Int
     ntotalvars::Int
     nsysmscopes::Int
+    nexternaleqs::Int
     var_to_diff::DiffGraph
     ret
     total_incidence::Vector{Any}

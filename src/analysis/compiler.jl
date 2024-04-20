@@ -317,19 +317,21 @@ has_any_genscope(sc::Scope) = isdefined(sc, :parent) && has_any_genscope(sc.pare
 has_any_genscope(sc::PartialScope) = false
 has_any_genscope(sc::PartialStruct) = false # TODO
 
-function _make_argument_lattice_elem(which::Argument, @nospecialize(argt), add_variable!, add_scope!)
+function _make_argument_lattice_elem(which::Argument, @nospecialize(argt), add_variable!, add_equation!, add_scope!)
     if isa(argt, Const)
         @assert !isa(argt.val, Scope) # Shouldn't have been forwarded
         return argt
     elseif isa(argt, Type) && argt <: Intrinsics.AbstractScope
         return PartialScope(add_scope!(which))
+    elseif isa(argt, Type) && argt == equation
+        return Eq(add_equation!(which))
     elseif is_non_incidence_type(argt)
         return argt
     elseif CC.isprimitivetype(argt)
         inc = Incidence(add_variable!(which))
         return Incidence(argt, inc.row, inc.eps)
     elseif isa(argt, PartialStruct)
-        return PartialStruct(argt.typ, Any[make_argument_lattice_elem(which, f, add_variable!, add_scope!) for f in argt.fields])
+        return PartialStruct(argt.typ, Any[make_argument_lattice_elem(which, f, add_variable!, add_equation!, add_scope!) for f in argt.fields])
     elseif isabstracttype(argt) || ismutabletype(argt) || isa(argt, Union)
         return nothing
     else
@@ -339,7 +341,7 @@ function _make_argument_lattice_elem(which::Argument, @nospecialize(argt), add_v
         for i = 1:length(fieldtypes(argt))
             # TODO: Can we make this lazy?
             ft = fieldtype(argt, i)
-            mft = _make_argument_lattice_elem(which, ft, add_variable!, add_scope!)
+            mft = _make_argument_lattice_elem(which, ft, add_variable!, add_equation!, add_scope!)
             if mft === nothing
                 push!(fields, Incidence(ft))
             else
@@ -351,8 +353,8 @@ function _make_argument_lattice_elem(which::Argument, @nospecialize(argt), add_v
     end
 end
 
-function make_argument_lattice_elem(which::Argument, @nospecialize(argt), add_variable!, add_scope!)
-    mft = _make_argument_lattice_elem(which, argt, add_variable!, add_scope!)
+function make_argument_lattice_elem(which::Argument, @nospecialize(argt), add_variable!, add_equation!, add_scope!)
+    mft = _make_argument_lattice_elem(which, argt, add_variable!, add_equation!, add_scope!)
     mft === nothing ? Incidence(argt) : mft
 end
 
@@ -418,38 +420,6 @@ Perform the structural analysis on optimized code of `mi` and return `structure:
     end
 end
 
-function process_scope_template!(𝕃, applied_scopes, argtypes, template_argtypes)
-    for (arg, template) in zip(argtypes, template_argtypes)
-        if isa(template, PartialScope)
-            id = idnum(template)
-            (id > length(applied_scopes)) && resize!(applied_scopes, id)
-            if isa(arg, Const)
-                @assert isa(arg.val, Union{Scope, Nothing})
-                applied_scopes[id] = arg.val
-            elseif isa(arg, PartialScope)
-                applied_scopes[id] = arg
-            else
-                @show arg
-                applied_scopes[id] = arg
-            end
-        elseif isa(template, Incidence) || isa(template, Const)
-            continue
-        elseif isa(template, PartialStruct)
-            if isa(arg, PartialStruct)
-                fields = arg.fields
-            elseif isa(arg, Const)
-                fields = Any[getfield_tfunc(𝕃, arg, Const(i)) for i = 1:length(template.fields)]
-            else
-                @show arg
-                error()
-            end
-            process_scope_template!(𝕃, applied_scopes, fields, template.fields)
-        else
-            error()
-        end
-    end
-end
-
 function refresh_identities(names::OrderedDict{LevelKey, NameLevel})
     new_names = OrderedDict{LevelKey, NameLevel}()
     for (key, val) in names
@@ -487,7 +457,7 @@ end
     var_to_diff = interp.var_to_diff
 
     eqcallssas = SSAValue[]
-    eqssas = Pair{SSAValue, Vector{SSAValue}}[]
+    eqssas = Pair{Union{SSAValue, Argument}, Vector{SSAValue}}[]
     epsssas = SSAValue[]
     varssa = Union{SSAValue, Argument}[]
     obsssa = SSAValue[]
@@ -506,6 +476,11 @@ end
         return v
     end
 
+    function add_equation!(i::Union{SSAValue, Argument})
+        push!(eqssas, i=>SSAValue[])
+        return length(eqssas)
+    end
+
     function add_scope!(i::Union{SSAValue, Argument})
         nsysmscopes += 1
         return nsysmscopes
@@ -513,17 +488,13 @@ end
 
     # Allocate variables for all arguments f
     nexternalvars = 0 # number of variables that we expect to come in
+    nexternaleqs = 0 # number of equation references that we expect to come in
     if caller !== nothing
-        argtypes = Any[make_argument_lattice_elem(Argument(i), argt, add_variable!, add_scope!) for (i, argt) in enumerate(ir.argtypes)]
+        argtypes = Any[make_argument_lattice_elem(Argument(i), argt, add_variable!, add_equation!, add_scope!) for (i, argt) in enumerate(ir.argtypes)]
         nexternalvars = length(var_to_diff)
     else
         arg1type = isa(ir.argtypes[1], Const) ? ir.argtypes[1] : Incidence(ir.argtypes[1])
         argtypes = Any[arg1type]
-    end
-
-    function add_equation!(i::Int)
-        push!(eqssas, SSAValue(i)=>SSAValue[])
-        return length(eqssas)
     end
 
     nobserved = 0
@@ -576,7 +547,7 @@ end
                 CC.push!(externally_refined, i)
             elseif is_known_invoke(stmt, equation, ir)
                 @assert length(stmt.args) == 3
-                ir.stmts[i][:type] = Eq(add_equation!(i))
+                ir.stmts[i][:type] = Eq(add_equation!(SSAValue(i)))
                 CC.push!(externally_refined, i)
             elseif is_equation_call(stmt, ir, #=allow_call=#false)
                 push!(eqcallssas, SSAValue(i))
@@ -863,6 +834,7 @@ end
     var_callee_mapping = Vector{Union{Nothing, Pair{SSAValue, Int}}}(nothing, length(varssa))
 
     for (ieq, (ssa, _)) in enumerate(eqssas)
+        isa(ssa, Argument) && continue
         eqinst = ir[ssa][:inst]
         if eqinst === nothing
             continue
@@ -894,8 +866,7 @@ end
 
         eqeq = argextype(eqcall.args[2], ir)
         if !isa(eqeq, Eq)
-            push!(warnings, UnsupportedIRException("Equation call at $ssa has unknown equation reference.", ir))
-            continue
+            return UncompilableIPOResult(warnings, UnsupportedIRException("Equation call at $ssa has unknown equation reference.", ir))
         end
         ieq = eqeq.id
 
@@ -1010,12 +981,26 @@ end
                 callee_argtypes = CC.va_process_argtypes(CC.optimizer_lattice(analysis_interp),
                     CC.collect_argtypes(analysis_interp, stmt.args[2:end], nothing, irsv), mi)
                 eq_offset = length(total_incidence)
-                for (ieq, inc) in enumerate(result.total_incidence)
-                    push!(total_incidence, apply_linear_incidence(CC.optimizer_lattice(analysis_interp), callee_argtypes, inc, result, nvars))
-                    push!(eq_callee_mapping, SSAValue(i)=>ieq)
+
+                if isempty(result.total_incidence) && isempty(result.names)
+                    continue
                 end
 
-                applied_scopes = Any[]
+                mapping = CalleeMapping(CC.optimizer_lattice(analysis_interp), callee_argtypes, result, nvars, eq_offset)
+
+                for i = 1:result.nexternaleqs
+                    mapped_eq = mapping.eq_mapping[i]
+                    if isassigned(total_incidence, mapped_eq)
+                        total_incidence[mapped_eq] += result.total_incidence[i]
+                    else
+                        total_incidence[mapped_eq] = result.total_incidence[i]
+                    end
+                end
+
+                for (ieq, inc) in enumerate(result.total_incidence[(result.nexternaleqs+1):end])
+                    push!(total_incidence, apply_linear_incidence(inc, mapping))
+                    push!(eq_callee_mapping, SSAValue(i)=>ieq)
+                end
 
                 function resolve_ipo_scope(key::PartialScope)
                     local newscope
@@ -1051,16 +1036,12 @@ end
                             end
                         end
                     else
-                        newscope = applied_scopes[idnum(key)]
+                        newscope = mapping.applied_scopes[idnum(key)]
                     end
                     return newscope
                 end
 
                 if !isempty(result.names)
-                    if result.nsysmscopes != 0
-                        process_scope_template!(CC.optimizer_lattice(analysis_interp), applied_scopes, callee_argtypes, result.argtypes)
-                    end
-
                     for (key, val) in refresh_identities(result.names)
                         if isa(key, PartialScope)
                             newscope = resolve_ipo_scope(key)
@@ -1087,7 +1068,12 @@ end
         end
     end
 
-    return DAEIPOResult(ir, argtypes, nexternalvars+nimplicitexternalvars, nexternalvars+nthisvars+nimplicitexternalvars+nimplicitinternalvars+ninternalvars, nsysmscopes, var_to_diff,
+    return DAEIPOResult(ir, argtypes,
+        nexternalvars+nimplicitexternalvars,
+        nexternalvars+nthisvars+nimplicitexternalvars+nimplicitinternalvars+ninternalvars,
+        nsysmscopes,
+        nexternaleqs,
+        var_to_diff,
         ultimate_rt, total_incidence, eq_callee_mapping, var_callee_mapping,
         names, nobserved, length(epsssas), ic_nzc, vcc_nzc,
         warnings)

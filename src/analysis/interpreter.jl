@@ -564,7 +564,7 @@ using Random, Distributions
 const rand_method = only(methods(rand, (Random.Xoshiro, Distributions.Normal)))
 const ddt_method = only(methods(ddt, (Float64,)))
 
-function process_template!(𝕃, coeffs, argtypes, template_argtypes)
+function process_template!(𝕃, coeffs, eq_mapping, applied_scopes, argtypes, template_argtypes)
     for (arg, template) in zip(argtypes, template_argtypes)
         if isa(template, Incidence)
             if isempty(template)
@@ -575,20 +575,33 @@ function process_template!(𝕃, coeffs, argtypes, template_argtypes)
             @assert only(vals) == 1.0
             @assert !isassigned(coeffs, only(idxs)-1)
             coeffs[only(idxs)-1] = arg
+        elseif isa(template, Eq)
+            @assert isa(arg, Eq)
+            eq_mapping[idnum(template)] = idnum(arg)
         elseif CC.is_const_argtype(template)
             @assert CC.is_lattice_equal(DAE_LATTICE, arg, template)
         elseif isa(template, PartialScope)
-            # Handled elsewhere
+            id = idnum(template)
+            (id > length(applied_scopes)) && resize!(applied_scopes, id)
+            if isa(arg, Const)
+                @assert isa(arg.val, Union{Scope, Nothing})
+                applied_scopes[id] = arg.val
+            elseif isa(arg, PartialScope)
+                applied_scopes[id] = arg
+            else
+                @show arg
+                applied_scopes[id] = arg
+            end
         elseif isa(template, PartialStruct)
             if isa(arg, PartialStruct)
                 fields = arg.fields
             elseif isa(arg, Const)
                 fields = Any[getfield_tfunc(𝕃, arg, Const(i)) for i = 1:length(template.fields)]
             else
-                @show arg
+                @show (arg, template)
                 error()
             end
-            process_template!(𝕃, coeffs, fields, template.fields)
+            process_template!(𝕃, coeffs, eq_mapping, applied_scopes, fields, template.fields)
         else
             @show (arg, template)
             error()
@@ -596,12 +609,18 @@ function process_template!(𝕃, coeffs, argtypes, template_argtypes)
     end
 end
 
-apply_linear_incidence(𝕃,argtypes::Vector{Any}, ret::Type, callee_result::DAEIPOResult, internal_var_offset::Union{Nothing, Int}=nothing) =
-    ret
-apply_linear_incidence(𝕃,argtypes::Vector{Any}, ret::Const, callee_result::DAEIPOResult, internal_var_offset::Union{Nothing, Int}=nothing) =
-    ret
-function apply_linear_incidence(𝕃,argtypes::Vector{Any}, ret::Incidence, callee_result::DAEIPOResult, internal_var_offset::Union{Nothing, Int}=nothing)
+struct CalleeMapping
+    var_coeffs::Vector{Any}
+    eqs::Vector{Int}
+    applied_scopes::Vector{Any}
+end
+
+function CalleeMapping(𝕃, argtypes::Vector{Any}, callee_result::DAEIPOResult,
+        internal_var_offset::Union{Nothing, Int}=nothing,
+        internal_eq_offset::Union{Nothing, Int}=nothing)
+    applied_scopes = Any[]
     coeffs = Vector{Any}(undef, callee_result.ntotalvars)
+    eq_mapping = fill(0, length(callee_result.total_incidence))
 
     if internal_var_offset !== nothing
         for (n,i) in enumerate((callee_result.nexternalvars+1):length(coeffs))
@@ -609,7 +628,21 @@ function apply_linear_incidence(𝕃,argtypes::Vector{Any}, ret::Incidence, call
         end
     end
 
-    process_template!(𝕃,coeffs, argtypes, callee_result.argtypes)
+    if internal_eq_offset !== nothing
+        for (n,i) in enumerate((callee_result.nexternaleqs+1):length(eq_mapping))
+            eq_mapping[i] = n + internal_eq_offset
+        end
+    end
+
+    process_template!(𝕃, coeffs, eq_mapping, applied_scopes, argtypes, callee_result.argtypes)
+
+    return CalleeMapping(coeffs, eq_mapping, applied_scopes)
+end
+
+apply_linear_incidence(ret::Type, mapping::CalleeMapping) = ret
+apply_linear_incidence(ret::Const, mapping::CalleeMapping) = ret
+function apply_linear_incidence(ret::Incidence, mapping::CalleeMapping)
+    coeffs = mapping.var_coeffs
 
     const_val = ret.typ
     new_row = _zero_row()
@@ -772,7 +805,8 @@ function _abstract_eval_invoke_inst(interp::DAEInterpreter, inst::Union{CC.Instr
         if !isa(callee_result.ret, Incidence)
             return RT(nothing, (false, false))
         end
-        new_rt = apply_linear_incidence(CC.optimizer_lattice(interp), argtypes, callee_result.ret, callee_result)
+        mapping = CalleeMapping(CC.optimizer_lattice(analysis_interp), argtypes, callee_result)
+        new_rt = apply_linear_incidence(callee_result.ret, mapping)
         if new_rt === nothing
             return RT(nothing, (false, false))
         end
