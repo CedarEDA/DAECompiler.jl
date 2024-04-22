@@ -214,6 +214,14 @@ sys.myfoo.y  # references the value `y` from within the `foo` that is within the
 This 
 
 Note: this (like `include` or `eval`) always runs at top-level scope, even if invoked in a function.
+
+!!! warning "Do not call structural_simplify on ODESystem before using in MTKConnector"
+    You might think it makes sense to simplify the the subsystem before passing it to the MTKConnector.
+    However, until the system is connected fully such simplification can produce problematic results,
+    In particular, it may (during tearing) simplify away one of the variables that you were going to connect to a port.
+    DAECompiler will perform simplifications on the whole system once it is all connected regardless, so there is no need to call `structural_simplify` earlier.
+    This also means you can not use `@mtkbuild` to instantitate the mnodel as this uses `structural_simplify` under-the-hood.
+    You can use `@named` instead. And there is no issue with using `@mtkmodel` to define the model.
 """
 function MTKConnector(mtk_component::MTK.ODESystem, ports...)
     for port in ports
