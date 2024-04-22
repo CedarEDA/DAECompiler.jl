@@ -197,6 +197,8 @@ end
 Base.:(==)(a::Incidence, b::Incidence) = a.typ === b.typ &&
     a.row.nzind == b.row.nzind && a.row.nzval == b.row.nzval && a.eps == b.eps
 Base.:(+)(a::Incidence, b::Incidence) = tfunc(Val{Core.Intrinsics.add_float}(), a, b)
+Base.:(+)(a::Const, b::Incidence) = tfunc(Val{Core.Intrinsics.add_float}(), a, b)
+Base.:(+)(a::Incidence, b::Const) = tfunc(Val{Core.Intrinsics.add_float}(), a, b)
 
 function Incidence(v::Int)
     row = _zero_row()
@@ -233,6 +235,8 @@ function has_dependence(typ::Incidence)
     return any(!iszero, vals)  # includes vacuous truth
 end
 has_dependence(::Const) = false
+has_dependence(ps::PartialStruct) = any(has_dependence, ps.fields)
+has_dependence(::Type) = true
 
 "returns true if statement may depend on time"
 function has_time_dependence(typ::Incidence)

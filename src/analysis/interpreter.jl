@@ -611,33 +611,46 @@ struct CalleeMapping
     applied_scopes::Vector{Any}
 end
 
-function CalleeMapping(𝕃, argtypes::Vector{Any}, callee_result::DAEIPOResult,
-        internal_var_offset::Union{Nothing, Int}=nothing,
-        internal_eq_offset::Union{Nothing, Int}=nothing)
+function CalleeMapping(𝕃, argtypes::Vector{Any}, callee_result::DAEIPOResult)
     applied_scopes = Any[]
-    coeffs = Vector{Any}(undef, callee_result.ntotalvars)
+    coeffs = Vector{Any}(undef, length(callee_result.var_to_diff))
     eq_mapping = fill(0, length(callee_result.total_incidence))
-
-    if internal_var_offset !== nothing
-        for (n,i) in enumerate((callee_result.nexternalvars+1):length(coeffs))
-            coeffs[i] = Incidence(n + internal_var_offset)
-        end
-    end
-
-    if internal_eq_offset !== nothing
-        for (n,i) in enumerate((callee_result.nexternaleqs+1):length(eq_mapping))
-            eq_mapping[i] = n + internal_eq_offset
-        end
-    end
 
     process_template!(𝕃, coeffs, eq_mapping, applied_scopes, argtypes, callee_result.argtypes)
 
     return CalleeMapping(coeffs, eq_mapping, applied_scopes)
 end
 
-apply_linear_incidence(ret::Type, mapping::CalleeMapping) = ret
-apply_linear_incidence(ret::Const, mapping::CalleeMapping) = ret
-function apply_linear_incidence(ret::Incidence, mapping::CalleeMapping)
+function compute_missing_coeff!(coeffs, result, caller_var_to_diff, v)
+    # First find the rootvar, and if we already have a coeff for it
+    # apply the derivatives.
+    ndiffs = 0
+    calle_inv = invview(result.var_to_diff)
+    while calle_inv[v] !== nothing && !isassigned(coeffs, v)
+        ndiffs += 1
+        v = calle_inv[v]
+    end
+
+    if !isassigned(coeffs, v)
+        @assert v > result.nexternalvars
+        # Reached the root and it's an internal variable. We need to allocate
+        # it in the caller now
+        coeffs[v] = Incidence(add_vertex!(caller_var_to_diff))
+    end
+    thisinc = coeffs[v]
+
+    for _ = 1:ndiffs
+        dv = result.var_to_diff[v]
+        coeffs[dv] = structural_inc_ddt(caller_var_to_diff, thisinc)
+        v = dv
+    end
+
+    return nothing
+end
+
+apply_linear_incidence(ret::Type, result::DAEIPOResult, caller_var_to_diff::DiffGraph, mapping::CalleeMapping) = ret
+apply_linear_incidence(ret::Const, result::DAEIPOResult, caller_var_to_diff::DiffGraph, mapping::CalleeMapping) = ret
+function apply_linear_incidence(ret::Incidence, result::DAEIPOResult, caller_var_to_diff::DiffGraph, mapping::CalleeMapping)
     coeffs = mapping.var_coeffs
 
     const_val = ret.typ
@@ -652,7 +665,9 @@ function apply_linear_incidence(ret::Incidence, mapping::CalleeMapping)
             continue
         end
 
-        isassigned(coeffs, v) || continue
+        if !isassigned(coeffs, v)
+            compute_missing_coeff!(coeffs, result, caller_var_to_diff, v)
+        end
 
         replacement = coeffs[v]
         if isa(replacement, Incidence)
@@ -689,6 +704,12 @@ else
     @override function CC.concrete_eval_invoke(interp::DAEInterpreter, stmt::Expr, mi::MethodInstance, irsv::IRInterpretationState)
         _abstract_eval_invoke_inst(interp, nothing, stmt, irsv)
     end
+end
+
+struct MappingInfo <: CC.CallInfo
+    info::Any
+    result::DAEIPOResult
+    mapping::CalleeMapping
 end
 
 function _abstract_eval_invoke_inst(interp::DAEInterpreter, inst::Union{CC.Instruction, Nothing}, @nospecialize(stmt), irsv::IRInterpretationState)
@@ -775,34 +796,24 @@ function _abstract_eval_invoke_inst(interp::DAEInterpreter, inst::Union{CC.Instr
             return RT(nothing, (false, false))
         end
 
-        ret = CC.concrete_eval_invoke(interp, codeinst, argtypes, irsv)
-        ret !== nothing && return ret
+        @assert !isa(info, MappingInfo)
 
         if isa(info, Diffractor.FRuleCallInfo)
             info = info.info
         end
         argtypes = CC.collect_argtypes(interp, stmt.args, nothing, irsv)[2:end]
-        if isa(info, CC.ConstCallInfo)
-            cpr = only(info.results)
-            if isa(cpr, ConstPropResult)
-                callee_result = CC.traverse_analysis_results(cpr.result) do @nospecialize result
-                    return result isa Union{DAEIPOResult, UncompilableIPOResult} ? result : nothing
-                end
-            else
-                @Core.Main.Base.show argtypes
-                @goto bail
-            end
-        else
-            codeinst = CC.get(CC.code_cache(interp), mi, nothing)
-            callee_result = CC.traverse_analysis_results(codeinst) do @nospecialize result
-                return result isa Union{DAEIPOResult, UncompilableIPOResult} ? result : nothing
-            end
-        end
-        if !isa(callee_result.ret, Incidence)
+        callee_result = dae_result_for_inst(interp, inst)
+        callee_result === nothing && return RT(nothing, (false, false))
+        if !isa(callee_result.extended_rt, Incidence)
             return RT(nothing, (false, false))
         end
-        mapping = CalleeMapping(CC.optimizer_lattice(analysis_interp), argtypes, callee_result)
-        new_rt = apply_linear_incidence(callee_result.ret, mapping)
+        mapping = CalleeMapping(CC.optimizer_lattice(interp), argtypes, callee_result)
+        new_rt = apply_linear_incidence(callee_result.extended_rt, callee_result, interp.var_to_diff, mapping)
+
+        # Remember this mapping, both for performance of not having to recompute it
+        # and because we may have assigned caller variables to internal variables
+        # that we now need to remember.
+        inst[:info] = MappingInfo(inst[:info], callee_result, mapping)
         if new_rt === nothing
             return RT(nothing, (false, false))
         end

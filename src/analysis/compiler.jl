@@ -434,6 +434,37 @@ function refresh_identities(names::OrderedDict{LevelKey, NameLevel})
     return new_names
 end
 
+function dae_result_for_inst(interp, inst::CC.Instruction)
+    # TODO: Factor this out into base
+    info = inst[:info]
+    stmt = inst[:stmt]
+    mi = stmt.args[1]
+    if isa(info, CC.ConstCallInfo)
+        if length(info.results) != 1
+            # TODO: When does this happen? Union split?
+            return nothing
+        end
+        cpr = info.results[1]
+        # ConcreteResult, we don't need to bother handling, because
+        # we know that anything with interesting intrinsics in it is
+        # not concrete eval eligible
+        isa(cpr, CC.ConcreteResult) && return nothing
+        cpr::Union{ConstPropResult, CC.VolatileInferenceResult}
+        infr = isa(cpr, ConstPropResult) ? cpr.result : cpr.inf_result
+        result = CC.traverse_analysis_results(infr) do @nospecialize result
+            return result isa Union{DAEIPOResult, UncompilableIPOResult} ? result : nothing
+        end
+    else
+        codeinst = CC.get(CC.code_cache(interp), mi, nothing)
+        codeinst === nothing && return nothing
+        result = CC.traverse_analysis_results(codeinst) do @nospecialize result
+            return result isa Union{DAEIPOResult, UncompilableIPOResult} ? result : nothing
+        end
+    end
+    return result
+end
+
+
 @noinline function ipo_dae_analysis!(interp::DAEInterpreter, ir::IRCode, mi::MethodInstance, caller::Union{InferenceResult, Nothing};
         debug_config = nothing)
     ir = copy(ir)
@@ -492,6 +523,7 @@ end
     if caller !== nothing
         argtypes = Any[make_argument_lattice_elem(Argument(i), argt, add_variable!, add_equation!, add_scope!) for (i, argt) in enumerate(ir.argtypes)]
         nexternalvars = length(var_to_diff)
+        nexternaleqs = length(eqssas)
     else
         arg1type = isa(ir.argtypes[1], Const) ? ir.argtypes[1] : Incidence(ir.argtypes[1])
         argtypes = Any[arg1type]
@@ -591,7 +623,25 @@ end
                         break
                     end
                 end
-                if is_all_const
+
+                # Check if this result leaks any internal variables,
+                # in which case we need to reprocess it. Here we also catch
+                # cases where we only depend on arg variables, but we reprocess
+                # those anyway, so the overapproximate analysis is no problem.
+                returns_any_vars = false
+                if caller !== nothing
+                    inst = ir[SSAValue(i)]
+                    result = dae_result_for_inst(interp, inst)
+                    result === nothing && continue
+
+                    # Allow this for now - might be on a dead path.
+                    # TODO: Replace by throw to cut off excessive inference?
+                    isa(result, UncompilableIPOResult) && continue
+
+                    returns_any_vars = has_dependence(result.extended_rt)
+                end
+
+                if is_all_const || returns_any_vars
                     ir.stmts[i][:flag] |= CC.IR_FLAG_REFINED
                 end
             end
@@ -670,19 +720,6 @@ end
     # count them here
     var_to_diff = complete(var_to_diff)
     diff_to_var = invview(var_to_diff)
-    nimplicitexternalvars = 0
-    nimplicitinternalvars = 0
-    for i = (nexternalvars + nthisvars + 1):length(var_to_diff)
-        # If this is a derivative of an external var, consider it external
-        while diff_to_var[i] !== nothing
-            i = diff_to_var[i]
-        end
-        if i <= nexternalvars
-            nimplicitexternalvars += 1
-        else
-            nimplicitinternalvars += 1
-        end
-    end
 
     if caller === nothing &&  ultimate_rt === Union{}
         # TODO: Can we find out what this error is? It's a bit tricky, because
@@ -833,7 +870,6 @@ end
     total_incidence = Vector{Any}(undef, neqs)
 
     eq_callee_mapping = Vector{Union{Nothing, Pair{SSAValue, Int}}}(nothing, neqs)
-    var_callee_mapping = Vector{Union{Nothing, Pair{SSAValue, Int}}}(nothing, length(varssa))
 
     for (ieq, (ssa, _)) in enumerate(eqssas)
         isa(ssa, Argument) && continue
@@ -916,7 +952,6 @@ end
 
     structure = SystemStructure(complete(var_to_diff), complete(eq_to_diff), graph, solvable_graph, nothing, false)
 
-    ninternalvars = 0
     if caller !== nothing
         handler_at, handlers = CC.compute_trycatch(ir, Core.Compiler.BitSet())
         for i = 1:length(ir.stmts)
@@ -927,71 +962,37 @@ end
                     continue
                 end
 
-                # TODO: Factor this out into base
-                info = inst[:info]
-                mi = stmt.args[1]
-                if isa(info, CC.ConstCallInfo)
-                    if length(info.results) != 1
-                        # TODO: When does this happen? Union split?
-                        continue
-                    end
-                    cpr = info.results[1]
-                    # ConcreteResult, we don't need to bother handling, because
-                    # we know that anything with interesting intrinsics in it is
-                    # not concrete eval eligible
-                    isa(cpr, CC.ConcreteResult) && continue
-                    cpr::Union{ConstPropResult, CC.VolatileInferenceResult}
-                    infr = isa(cpr, ConstPropResult) ? cpr.result : cpr.inf_result
-                    result = CC.traverse_analysis_results(infr) do @nospecialize result
-                        return result isa Union{DAEIPOResult, UncompilableIPOResult} ? result : nothing
-                    end
+                if isa(inst[:info], MappingInfo)
+                    (; result, mapping) = inst[:info]
                 else
-                    codeinst = CC.get(CC.code_cache(interp), mi, nothing)
-                    codeinst === nothing && continue
-                    result = CC.traverse_analysis_results(codeinst) do @nospecialize result
-                        return result isa Union{DAEIPOResult, UncompilableIPOResult} ? result : nothing
-                    end
+                    result = dae_result_for_inst(interp, inst)
                     result === nothing && continue
-                end
 
-                if isa(result, UncompilableIPOResult)
-                    # TODO: stack these
-                    return result
+                    if isa(result, UncompilableIPOResult)
+                        # TODO: stack these
+                        return result
+                    end
+
+                    callee_argtypes = CC.va_process_argtypes(CC.optimizer_lattice(analysis_interp),
+                        CC.collect_argtypes(analysis_interp, stmt.args[2:end], nothing, irsv), stmt.args[1])
+                    mapping = CalleeMapping(CC.optimizer_lattice(analysis_interp), callee_argtypes, result)
                 end
                 append!(warnings, result.warnings)
 
-                nvars = nexternalvars+nthisvars+nimplicitexternalvars+nimplicitinternalvars+ninternalvars
-                @assert nvars == length(var_to_diff)
-                ninternalvars += result.ntotalvars - result.nexternalvars
-
-                # The first `n` vars are external from the perspective of our
-                # callee, so will get replaced by some linear combination of
-                # other variables. The remainder get added as internal vars
-                # at the end of ours.
-                offset = nvars - result.nexternalvars
-                for i = (result.nexternalvars+1):result.ntotalvars
-                    nv = add_vertex!(var_to_diff)
-                    push!(var_callee_mapping, SSAValue(i)=>i)
-                    @assert nv == i+offset
-                end
-                for i = (result.nexternalvars+1):result.ntotalvars
-                    if result.var_to_diff[i] !== nothing
-                        var_to_diff[i+offset] = result.var_to_diff[i]+offset
+                for i in (result.nexternalvars+1):length(mapping.var_coeffs)
+                    if !isassigned(mapping.var_coeffs, i)
+                        compute_missing_coeff!(mapping.var_coeffs, result, var_to_diff, i)
                     end
                 end
 
-                callee_argtypes = CC.va_process_argtypes(CC.optimizer_lattice(analysis_interp),
-                    CC.collect_argtypes(analysis_interp, stmt.args[2:end], nothing, irsv), mi)
                 eq_offset = length(total_incidence)
-
                 if isempty(result.total_incidence) && isempty(result.names)
                     continue
                 end
 
-                mapping = CalleeMapping(CC.optimizer_lattice(analysis_interp), callee_argtypes, result, nvars, eq_offset)
 
                 for i = 1:result.nexternaleqs
-                    mapped_eq = mapping.eq_mapping[i]
+                    mapped_eq = mapping.eqs[i]
                     if isassigned(total_incidence, mapped_eq)
                         total_incidence[mapped_eq] += result.total_incidence[i]
                     else
@@ -1000,8 +1001,10 @@ end
                 end
 
                 for (ieq, inc) in enumerate(result.total_incidence[(result.nexternaleqs+1):end])
-                    push!(total_incidence, apply_linear_incidence(inc, mapping))
+                    push!(total_incidence, apply_linear_incidence(inc, result, var_to_diff, mapping))
                     push!(eq_callee_mapping, SSAValue(i)=>ieq)
+                    @assert mapping.eqs[ieq] == 0
+                    mapping.eqs[ieq] = length(total_incidence)
                 end
 
                 function resolve_ipo_scope(key::PartialScope)
@@ -1053,9 +1056,9 @@ end
                                     ir))
                                 continue
                             end
-                            merge_scopes!(names, newscope, val, offset, -typemax(Int), eq_offset, -typemax(Int))
+                            merge_scopes!(names, newscope, val, mapping, -typemax(Int), -typemax(Int))
                         else
-                            merge_scopes!(names, key, val, offset, -typemax(Int), eq_offset, -typemax(Int))
+                            merge_scopes!(names, key, val, mapping, -typemax(Int), -typemax(Int))
                         end
                     end
                 end
@@ -1070,13 +1073,12 @@ end
         end
     end
 
-    return DAEIPOResult(ir, argtypes,
-        nexternalvars+nimplicitexternalvars,
-        nexternalvars+nthisvars+nimplicitexternalvars+nimplicitinternalvars+ninternalvars,
+    return DAEIPOResult(ir, ultimate_rt, argtypes,
+        nexternalvars,
         nsysmscopes,
         nexternaleqs,
-        var_to_diff,
-        ultimate_rt, total_incidence, eq_callee_mapping, var_callee_mapping,
+        complete(var_to_diff),
+        total_incidence, eq_callee_mapping,
         names, nobserved, length(epsssas), ic_nzc, vcc_nzc,
         warnings)
 end
@@ -1172,17 +1174,18 @@ function record_scope!(ir::IRCode, names::OrderedDict{LevelKey, NameLevel}, scop
 end
 
 function merge_scopes!(names::OrderedDict{LevelKey, NameLevel}, key::LevelKey, val::NameLevel,
-        varoffset::Int, obsoffset::Int, eqoffset::Int, epsoffset::Int)
+        mapping::CalleeMapping, obsoffset::Int, epsoffset::Int)
 
     haskey(names, key) || (names[key] = NameLevel())
     existing = names[key]
-    for (offset, lens) in ((varoffset, @o _.var), (obsoffset, @o _.obs),
-                           (eqoffset, @o _.eq), (epsoffset, @o _.eps))
+    for (offset, lens) in ((x->(only(findnz(mapping.var_coeffs[x].row)[1])), @o _.var),
+                           (x->(x+obsoffset), @o _.obs),
+                           (x->mapping.eqs[x], @o _.eq), (x->(x+epsoffset), @o _.eps))
         if lens(val) !== nothing
             if lens(existing) !== nothing
                 @warn "Duplicate $(lens) for $key"
             else
-                existing = set(existing, lens, lens(val)+offset)
+                existing = set(existing, lens, offset(lens(val)))
             end
         end
     end
@@ -1194,27 +1197,27 @@ function merge_scopes!(names::OrderedDict{LevelKey, NameLevel}, key::LevelKey, v
         child_dict = existing.children
         for (val_key, val_val) in val.children
             merge_scopes!(child_dict, val_key, val_val,
-                varoffset, obsoffset, eqoffset, epsoffset)
+                mapping, obsoffset, epsoffset)
         end
     end
     names[key] = existing
 end
 
 function merge_scopes!(names::OrderedDict{LevelKey, NameLevel}, key::Union{Scope, PartialStruct}, val::NameLevel,
-        varoffset::Int, obsoffset::Int, eqoffset::Int, epsoffset::Int)
+    mapping::CalleeMapping, obsoffset::Int, epsoffset::Int)
 
     stack = sym_stack(key)
     if isempty(stack)
         @assert val.var == val.obs == val.eps == val.eq == nothing
         for (k, v) in pairs(val.children)
-            merge_scopes!(names, k, v, varoffset, obsoffset, eqoffset, epsoffset)
+            merge_scopes!(names, k, v, mapping, obsoffset, epsoffset)
         end
         return
     end
     while length(stack) > 1
         val = NameLevel(OrderedDict{LevelKey, NameLevel}(popfirst!(stack) => val))
     end
-    merge_scopes!(names, only(stack), val, varoffset, obsoffset, eqoffset, epsoffset)
+    merge_scopes!(names, only(stack), val, mapping, obsoffset, epsoffset)
 end
 
 function peephole_pass!(ir::IRCode)

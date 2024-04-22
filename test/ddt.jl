@@ -43,12 +43,12 @@ let sys = IRODESystem(ddt_nonlinear; debug_config=(; store_ss_levels=true))
     end
 end
 
-function ddt_nonlinear()
+function ddt_nonlinear2()
     (;x,y) = variables()
     equation!(ddt(x*y)/2x - x)
     equation!(ddt(x*y)/2y - y)
 end
-let sys = IRODESystem(ddt_nonlinear; debug_config=(; store_ss_levels=true))
+let sys = IRODESystem(ddt_nonlinear2; debug_config=(; store_ss_levels=true))
     dbg = getfield(sys, :debug_config)
 
     for sol in (solve_dae(sys, [0., 0.], [1., 1.], (0., 1.))...,

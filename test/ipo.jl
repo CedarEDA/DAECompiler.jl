@@ -1,3 +1,5 @@
+module ipo
+
 using Test
 using DAECompiler, SciMLBase, OrdinaryDiffEq, Sundials
 using DAECompiler.Intrinsics
@@ -16,7 +18,8 @@ end
 sys_ipo = IRODESystem(Tuple{typeof(x2!)}; ipo_analysis_mode=true);
 sys = IRODESystem(Tuple{typeof(x2!)}; ipo_analysis_mode=false);
 
-@test getfield(sys_ipo, :result).ntotalvars == getfield(sys, :result).ntotalvars
+@test length(getfield(sys_ipo, :result).var_to_diff) ==
+      length(getfield(sys, :result).var_to_diff)
 
 #=================== + Scope handling =============================#
 @noinline function x_scope!(scope)
@@ -34,7 +37,7 @@ sys_ipo = IRODESystem(Tuple{typeof(x2_scope!)}; ipo_analysis_mode=true);
 sys = IRODESystem(Tuple{typeof(x2_scope!)}; ipo_analysis_mode=false);
 
 let ipo_result = getfield(sys_ipo, :result), nonipo_result = getfield(sys, :result)
-    @test ipo_result.ntotalvars == nonipo_result.ntotalvars
+    @test length(ipo_result.var_to_diff) == length(nonipo_result.var_to_diff)
     @test length(ipo_result.names) == length(nonipo_result.names)
     @test isa(sys_ipo.x3.x4, DAECompiler.ScopeRef)
 end
@@ -54,7 +57,7 @@ sys_ipo = IRODESystem(Tuple{typeof(x2_gen!)}; ipo_analysis_mode=true);
 sys = IRODESystem(Tuple{typeof(x2_gen!)}; ipo_analysis_mode=false);
 
 let ipo_result = getfield(sys_ipo, :result), nonipo_result = getfield(sys, :result)
-    @test ipo_result.ntotalvars == nonipo_result.ntotalvars
+    @test length(ipo_result.var_to_diff) == length(nonipo_result.var_to_diff)
     @test length(ipo_result.names) == length(nonipo_result.names)
 end
 
@@ -74,7 +77,7 @@ sys_ipo = IRODESystem(Tuple{typeof(x2_derived!)}; ipo_analysis_mode=true);
 sys = IRODESystem(Tuple{typeof(x2_derived!)}; ipo_analysis_mode=false);
 
 let ipo_result = getfield(sys_ipo, :result), nonipo_result = getfield(sys, :result)
-    @test ipo_result.ntotalvars == nonipo_result.ntotalvars
+    @test length(ipo_result.var_to_diff) == length(nonipo_result.var_to_diff)
     @test length(ipo_result.names) == length(nonipo_result.names)
 end
 
@@ -96,7 +99,7 @@ sys_ipo = IRODESystem(Tuple{typeof(x2_eqarg!)}; ipo_analysis_mode=true);
 sys = IRODESystem(Tuple{typeof(x2_eqarg!)}; ipo_analysis_mode=false);
 
 let ipo_result = getfield(sys_ipo, :result), nonipo_result = getfield(sys, :result)
-    @test ipo_result.ntotalvars == nonipo_result.ntotalvars
+    @test length(ipo_result.var_to_diff) == length(nonipo_result.var_to_diff)
     @test length(ipo_result.names) == length(nonipo_result.names)
 end
 
@@ -119,7 +122,7 @@ sys_ipo = IRODESystem(Tuple{typeof(x2_sv!)}; ipo_analysis_mode=true);
 sys = IRODESystem(Tuple{typeof(x2_sv!)}; ipo_analysis_mode=false);
 
 let ipo_result = getfield(sys_ipo, :result), nonipo_result = getfield(sys, :result)
-    @test ipo_result.ntotalvars == nonipo_result.ntotalvars
+    @test length(ipo_result.var_to_diff) == length(nonipo_result.var_to_diff)
     @test length(ipo_result.names) == length(nonipo_result.names)
 end
 
@@ -144,6 +147,28 @@ sys = IRODESystem(Tuple{typeof(x2_va!)}; ipo_analysis_mode=false);
 
 let ipo_result = getfield(sys_ipo, :result), nonipo_result = getfield(sys, :result)
     @test !any(==(Float64), ipo_result.total_incidence)
-    @test ipo_result.ntotalvars == nonipo_result.ntotalvars
+    @test length(ipo_result.var_to_diff) == length(nonipo_result.var_to_diff)
     @test length(ipo_result.names) == length(nonipo_result.names)
+end
+
+#====================== internal variable leaking ======================#
+@noinline make_a_variable() = variable()
+
+@noinline function x_internal!()
+    x = make_a_variable()
+    equation!(ddt(x) - x)
+end
+function x2_internal!()
+    x_internal!(); x_internal!();
+    return nothing
+end
+
+sys_ipo = IRODESystem(Tuple{typeof(x2_internal!)}; ipo_analysis_mode=true);
+sys = IRODESystem(Tuple{typeof(x2_internal!)}; ipo_analysis_mode=false);
+
+let ipo_result = getfield(sys_ipo, :result), nonipo_result = getfield(sys, :result)
+    @test length(ipo_result.var_to_diff) == length(nonipo_result.var_to_diff)
+    @test length(ipo_result.names) == length(nonipo_result.names)
+end
+
 end

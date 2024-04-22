@@ -37,16 +37,14 @@ end
 
 struct DAEIPOResult
     ir::IRCode
+    extended_rt::Any
     argtypes
-    nexternalvars::Int
-    ntotalvars::Int
+    nexternalvars::Int # total vars is length(var_to_diff)
     nsysmscopes::Int
     nexternaleqs::Int
     var_to_diff::DiffGraph
-    ret
     total_incidence::Vector{Any}
     eq_callee_mapping::Vector{Union{Nothing, Pair{SSAValue, Int}}}
-    var_callee_mapping::Vector{Union{Nothing, Pair{SSAValue, Int}}}
     names::OrderedDict{LevelKey, NameLevel}
     nobserved::Int
     neps::Int
