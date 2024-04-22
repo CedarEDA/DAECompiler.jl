@@ -4,6 +4,7 @@ struct ScopeRef{T}
     sys::T
     scope::Scope
 end
+Base.Broadcast.broadcastable(ref::ScopeRef) = Ref(ref)  # broadcast as scalar
 
 IRODESystem(sr::ScopeRef) = getfield(sr, :sys)
 

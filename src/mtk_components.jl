@@ -16,13 +16,25 @@ abstract type MTKConnector end
 _c(x) = x
 #_c(x) = nameof(x)  # uncomment this to disable interpolating function objects into AST, so as to get nicer printing ASTs
 
-call_scope(parent, name) = Expr(:call, _c(Scope), parent, Meta.quot(name))
 
-function declare_vars(model, scope_var)
+split_namespaces_var(x::Symbol) = Symbol.(split(string(x), '₊'))
+split_namespaces_var(x) = split_namespaces_var(access_var(x))
+
+_get_scope!(scope, sub_scopes::Dict{Symbol}) = scope
+function _get_scope!(parent_scope, sib_scopes::Dict{Symbol}, namespace::Symbol, var_name_tail::Symbol...)
+    scope, subscopes = get!(sib_scopes, namespace) do
+        Scope(parent_scope, namespace) => Dict{Symbol, Pair}()
+    end
+    return _get_scope!(scope, subscopes, var_name_tail...)
+end
+get_scope!(root_scope, scopes, namespaced_var) = _get_scope!(root_scope, scopes, split_namespaces_var(namespaced_var)...)
+
+function declare_vars(model, root_scope)
     ret = Expr(:block)
-    ret.args = map(unknowns(model)) do x
-        var_name = access_var(x)
-        scope = call_scope(scope_var, var_name)
+    scopes = Dict{Symbol, Pair}()
+    ret.args = map(unknowns(model)) do var
+        scope = get_scope!(root_scope, scopes, var)
+        var_name = access_var(var)
         :($var_name = $(_c(variable))($scope))
     end
     return ret
@@ -32,7 +44,7 @@ end
 function declare_derivatives(state)
     ret = Expr(:block)
     append!(ret.args, filter(!isnothing, map(state.fullvars) do var
-        if typeof(operation(var)) == Differential
+        if is_differential(var)
             var_name = access_var(var)
             return :($var_name = $(_c(state_ddt))($(access_var(only(arguments(var))))))
         end
@@ -156,12 +168,9 @@ end
 
 make_ast(op, x, _) = error("$x :: $op :: $(arguments(x))")
 
-function declare_equation(eq::Equation, model, scope_var)
+function declare_equation(eq::Equation, model, root_scope)
     normed_eq = eq.rhs - eq.lhs
-    Expr(:call, _c(equation!),
-        make_ast(normed_eq, model), 
-        call_scope(scope_var, gensym(:mtk_eq))
-    )
+    Expr(:call, _c(equation!), make_ast(normed_eq, model), Scope(root_scope, gensym(:mtk_eq)))
 end
 
 
@@ -216,16 +225,16 @@ function MTKConnector(mtk_component::MTK.ODESystem, ports...)
 end
 
 """
-    `scope_expr` is an expression for what scope to use for everything within this model
+    `scope` is an expression for what scope to use for everything within this model
     By default this will introduce a scope for this model that uses the model's name as its name.
     Setting it to `DAECompiler.Intrinsics.root_scope` to not introduce a new subscope for this model.
 """
-function MTKConnector_AST(model::MTK.ODESystem, ports...; scope_expr=call_scope(DAECompiler.Intrinsics.root_scope, nameof(model)))
+function MTKConnector_AST(model::MTK.ODESystem, ports...; scope=Scope(DAECompiler.Intrinsics.root_scope, nameof(model)))
     model = MTK.expand_connections(model)
     state = MTK.TearingState(model)
     eqs = MTK.equations(state)
 
-    scope_var = gensym(:scope)  # we will put a Scope in a variable with this name, we declare what we will call it first, so can then use it everywhere in generated expressions
+
 
     port_names = gensym.(access_var.(ports))
     port_equations = map(ports, port_names) do port_sym, outer_port_name
@@ -235,7 +244,7 @@ function MTKConnector_AST(model::MTK.ODESystem, ports...; scope_expr=call_scope(
                 drop_leading_namespace(access_var(port_sym), model),# inside of port
                 outer_port_name  # outside of port,   
             ),
-            call_scope(scope_var, Symbol(:port_, outer_port_name))
+            Scope(scope, Symbol(:port_, outer_port_name))
         )
     end
 
@@ -246,10 +255,9 @@ function MTKConnector_AST(model::MTK.ODESystem, ports...; scope_expr=call_scope(
         $(declare_parameters(model, struct_name))
 
         function (this::$struct_name)($(port_names...))
-            $scope_var =  $scope_expr
-            $(declare_vars(model, scope_var))
+            $(declare_vars(model, scope))
             $(declare_derivatives(state))
-            $(declare_equation.(eqs, Ref(model), scope_var)...)
+            $(declare_equation.(eqs, Ref(model), Ref(scope))...)
 
             begin
                 $(port_equations...)

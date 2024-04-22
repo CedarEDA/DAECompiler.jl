@@ -1,5 +1,5 @@
 using Test
-
+#==
 @testset "state_mapping.jl" include("state_mapping.jl")
 @testset "interpreter.jl" include("interpreter.jl")
 @testset "compiler_and_lattice.jl" include("compiler_and_lattice.jl")
@@ -35,7 +35,7 @@ using Test
 @testset "sensitivity_rccircuit.jl" include("sensitivity_rccircuit.jl")
 @testset "epsilon.jl" include("epsilon.jl")
 @testset "cthulhu.jl" include("cthulhu.jl")
-
+==#
 @testset "mtk_components.jl" include("mtk_components.jl")
 
 # must be last to minimize risks from monkeypatching

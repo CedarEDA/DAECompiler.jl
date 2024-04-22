@@ -8,10 +8,10 @@ using StateSelection: MatchedSystemStructure
 using Sundials
 
 const MTK = ModelingToolkit
-using DAECompiler.MTKComponents: access_var, is_differential, isvar, drop_leading_namespace, MTKConnector_AST
+using DAECompiler.MTKComponents: access_var, is_differential, isvar, split_namespaces_var, MTKConnector_AST
 
 function DAECompiler.IRODESystem(model::MTK.ODESystem; debug_config=(;))
-    T = eval(MTKConnector_AST(model; scope_expr=DAECompiler.Intrinsics.root_scope))
+    T = eval(MTKConnector_AST(model; scope=DAECompiler.Intrinsics.root_scope))
     # We assume no user set parameters for the MTK tests
     T_parameterless = T{@NamedTuple{}}
     DAECompiler.IRODESystem(Tuple{T_parameterless}; debug_config)
@@ -125,7 +125,7 @@ function state_default_mapping!(prob, du0::Vector, u0::Vector)
             # If this was a differential, peel it and recurse to get the underlying variable index:
             inner_var = only(arguments(var))
             var_idx = peel_differential_var_index(inner_var)
-
+            
             # if the underlying variable is `nothing`, it's not real, so just pass it on.
             if var_idx === nothing
                 return nothing
@@ -136,10 +136,18 @@ function state_default_mapping!(prob, du0::Vector, u0::Vector)
         else
             # If this is not a differential, just return the index of the variable:
             try
-                @assert isvar(var)
-                unopt_idx = DAECompiler._sym_to_index(getproperty(sys, access_var(var)))
+                # depending on if we came here via sys.ref, or via a MTK variable we may or may not already have a ScopeRef
+                ref = isa(var, DAECompiler.ScopeRef) ? var : getproperty(sys, access_var(var))
 
-                return unopt_idx.var
+                unopt_idx = DAECompiler._sym_to_index(ref)
+
+                # Oops, this variable is not real
+                if unopt_idx[1]
+                    return nothing
+                end
+
+                # Otherwise, return the index
+                return unopt_idx[2]
             catch
                 @error("Unable to index $(var) into $(sys)")
                 rethrow()
@@ -242,20 +250,32 @@ end
 
 
 # Monkey-pathching the code in DAECompiler
+# because we don't just need to handle names that came in from `sys.x.y` (for which we create scopes)
+# but also names that come from variables in scope like references to under other names that use flattened names like `sys₊x₊y` and `x₊y`
+# as well as things that want to call getproperty on the MTK system to check some metadata (that we may not even store)
 function Base.getproperty(sys::IRODESystem, name::Symbol)
-    mtksys = sys_map[getfield(sys, :mi)]
     names = DAECompiler.StructuralAnalysisResult(sys).names
-    if haskey(names, name)
+    namespaces = split_namespaces_var(name)
+    if haskey(names, namespaces[1])
         # Normal DAECompiler way
-        return DAECompiler.ScopeRef(sys, DAECompiler.Scope(DAECompiler.Scope(), name))
-    elseif haskey(names, drop_leading_namespace(name, mtksys))
-        # If it came from something that includes the sys prefix  (probably from the MTK system originally)
-        return DAECompiler.ScopeRef(sys, DAECompiler.Scope(DAECompiler.Scope(), drop_leading_namespace(name, mtksys)))
-    elseif hasproperty(mtksys, name)  # if it is actually from the MTK system (which allows unflattened names)
-        getproperty(mtksys, name)
-    else
-        throw(Base.KeyError(name))  # should be a UndefRef but key error useful for findout what broke it.
+        return return get_scope_ref(sys, namespaces)
+    elseif length(namespaces) > 1 && haskey(names, namespaces[2])
+        # Ignore first namespace it's cos we are not fully consistent with if we include the system name or not
+        return return get_scope_ref(sys, namespaces; start_idx=2)
+    else  # It could be from the mtksys
+        mtksys = sys_map[getfield(sys, :mi)]
+        if hasproperty(mtksys, name)  # if it is actually from the MTK system (which allows unflattened names)
+            return getproperty(mtksys, name)
+        end
     end
+    throw(Base.KeyError(name))  # should be a UndefRef but key error useful for findout what broke it.
+end
+function get_scope_ref(sys, names; start_idx=1)
+    ref = DAECompiler.ScopeRef(sys, DAECompiler.Scope(DAECompiler.Scope(), names[start_idx]))
+    for name in @view names[(start_idx+1):end]
+        ref = getproperty(ref, name)
+    end
+    return ref
 end
 # TODO: actually use this above, so not monkey-patching getproperty on IRODEProblem
 Base.getproperty(sys::MTKAdapter, name::Symbol) = getproperty(getfield(sys, :sys), name)
