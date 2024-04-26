@@ -91,18 +91,18 @@ The `vars` that are being reconstructed must appear in sorted order.
         ir.argtypes[2:end] .= arg_types
 
         mi = get_toplevel_mi_from_ir(ir, get_sys(tsys))
-        infer_ir!(ir, tsys.state, mi)
+        fallback_interp = getfield(get_sys(tsys), :fallback_interp)
+        NewInterp = typeof(fallback_interp)
+        opt_params = OptimizationParams(; compilesig_invokes=false,  preserve_local_sources=true)
+        newinterp = NewInterp(fallback_interp; opt_params)
+        infer_ir!(ir, newinterp, mi)
         widen_extra_info!(ir)
         DebugConfig(tsys).verify_ir_levels && check_for_daecompiler_intrinstics(ir)
 
-        fallback_interp = getfield(get_sys(tsys), :fallback_interp)
         vars_str = join(string.(vars), ",")
         obs_str = join(string.(obs), ",")
         breadcrumb_name = "reconstruct_der.vars=$(vars_str),obs=$(obs_str),state_type=$(eltype(arg_types[4]))"
         with_breadcrumb("ir_levels", breadcrumb_name) do
-            NewInterp = typeof(fallback_interp)
-            opt_params = OptimizationParams(; compilesig_invokes=false,  preserve_local_sources=true)
-            newinterp = NewInterp(fallback_interp; opt_params)
             ir = run_dae_passes_again(newinterp, ir, tsys.state)
             record_ir!(debug_config, "", ir)
         end

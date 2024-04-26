@@ -159,32 +159,8 @@ end
                 if isa(typ, Incidence) || isa(typ, PartialStruct)
                     ir[SSAValue(i)][:type] = remap_incidence(typ, var)
                 end
-                ir[SSAValue(i)][:info] = remap_info(ir[SSAValue(i)][:info], var)
+                ir[SSAValue(i)][:info] = remap_info(ir2->remap_ir!(ir2, var), ir[SSAValue(i)][:info])
             end
-        end
-
-        function remap_info(info, var)
-            # TODO: This is pretty aweful, but it works for now.
-            # It'll go away when we switch to IPO.
-            isa(info, CC.ConstCallInfo) || return info
-            results = map(info.results) do result
-                result === nothing && return result
-                if isa(result, CC.SemiConcreteResult)
-                    let ir = copy(result.ir)
-                        remap_ir!(ir, var)
-                        CC.SemiConcreteResult(result.mi, ir, result.effects)
-                    end
-                elseif isa(result, CC.ConstPropResult)
-                    if isa(result.result.src, DAECache)
-                        # Result could have been discarded (e.g. by limited_src)
-                        remap_ir!(result.result.src.ir, var)
-                    end
-                    return result
-                else
-                    return result
-                end
-            end
-            return CC.ConstCallInfo(info.call, results)
         end
 
         # For everything else, we don't want to schedule the alias until all dependencies
@@ -511,7 +487,7 @@ end
                     for outer ssa in ssas
                         inst = ir[ssa]
                         stmt = inst[:inst]
-                        inst[:info] = remap_info(inst[:info], var)
+                        inst[:info] = remap_info(ir2->remap_ir!(ir2, var), inst[:info])
                         # Determine if this statement is tainted by the variable we're solving for.
                         # If so, we need to copy it, because we'll be re-arranging the code to zero
                         # out that variable. If not, we simply need to move the statement to maintain
@@ -672,7 +648,7 @@ end
             if isa(inst[:type], Union{Incidence, PartialStruct})
                 inst[:type] = remap_incidence(inst[:type], 0)
             end
-            inst[:info] = remap_info(inst[:info], 0)
+            inst[:info] = remap_info(ir2->remap_ir!(ir2, 0), inst[:info])
         end
 
         ir = Core.Compiler.finish(compact)

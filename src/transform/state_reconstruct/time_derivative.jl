@@ -40,18 +40,24 @@ This constructs a function, which for the listed `vars` and `obs` returns their 
     insert_selected_state_time_derivatives!(ir, var_assignment, vars, dvar_out, du)
 
     ir = conclude_reconstruct_like!(ir, (dvar_out, dobs_out), nothing, u, p, t, var_assignment)
-    
+
     store_args_for_replay!(ir, debug_config, "reconstruct_time_der")
     ir = compact!(ir)
     DebugConfig(tsys).verify_ir_levels && check_for_daecompiler_intrinstics(ir)
-    
+
     goldclass_sig = Tuple{Vector{Float64}, Vector{Float64}, Vector{Float64}, Vector{Float64}, p_type, Float64}
     return JITOpaqueClosure{:reconstruct_time_derivative, goldclass_sig}() do arg_types...
         ir = copy(ir)
         ir.argtypes[2:end] .= arg_types
+
+        fallback_interp = getfield(get_sys(tsys), :fallback_interp)
+        NewInterp = typeof(fallback_interp)
+        opt_params = OptimizationParams(; compilesig_invokes=false, preserve_local_sources=true)
+        newinterp = NewInterp(fallback_interp; opt_params)
+
         # Just do a little bit of optimization so that it's properly inferred, etc...
         mi = get_toplevel_mi_from_ir(ir, get_sys(tsys))
-        infer_ir!(ir, tsys.state, mi)
+        infer_ir!(ir, newinterp, mi)
 
         vars_str = join(vars, ",")
         obs_str = join(obs, ",")

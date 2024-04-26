@@ -149,6 +149,7 @@ The `vars` that are being reconstructed must appear in sorted order.
     # Finish, compact and optimize this reconstruction function
     ir_reconstruct = compact!(finish(compact), true)
     ir_reconstruct = store_args_for_replay!(ir_reconstruct, debug_config, "reconstruct")
+    widen_extra_info!(ir_reconstruct)
 
     p_type = parameter_type(get_sys(tsys))
     goldclass_sig = if isdae
@@ -159,19 +160,20 @@ The `vars` that are being reconstructed must appear in sorted order.
     F! = JITOpaqueClosure{:reconstruct, goldclass_sig}() do arg_types...
         ir = copy(ir_reconstruct)
         ir.argtypes[2:end] .= arg_types
-        
+
+        fallback_interp = getfield(get_sys(tsys), :fallback_interp)
+        NewInterp = typeof(fallback_interp)
+        opt_params = OptimizationParams(; compilesig_invokes=false, preserve_local_sources=true)
+        newinterp = NewInterp(fallback_interp; opt_params)
+
         mi = get_toplevel_mi_from_ir(ir, get_sys(tsys))
-        infer_ir!(ir, tsys.state, mi)
-        widen_extra_info!(ir)
+        infer_ir!(ir, newinterp, mi)
         DebugConfig(tsys).verify_ir_levels && check_for_daecompiler_intrinstics(ir)
         fallback_interp = getfield(get_sys(tsys), :fallback_interp)
         vars_str = join(vars, ",")
         obs_str = join(obs, ",")
         breadcrumb_name = "vars=$(vars_str),obs=$(obs_str),state_type=$(eltype(arg_types[1]))"
         with_breadcrumb("ir_levels", breadcrumb_name) do
-            NewInterp = typeof(fallback_interp)
-            opt_params = OptimizationParams(; compilesig_invokes=false, preserve_local_sources=true)
-            newinterp = NewInterp(fallback_interp; opt_params)
             ir = run_dae_passes_again(newinterp, ir, tsys.state)
             record_ir!(debug_config, "", ir)
         end

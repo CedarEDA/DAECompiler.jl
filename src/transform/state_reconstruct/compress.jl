@@ -104,7 +104,12 @@ the usage of `compile_batched_reconstruct_func()`
 
         # Just do a little bit of optimization so that it's properly inferred, etc...
         mi = get_toplevel_mi_from_ir(ir, get_sys(tsys))
-        infer_ir!(ir, tsys.state, mi)
+        fallback_interp = getfield(get_sys(tsys), :fallback_interp)
+        NewInterp = typeof(fallback_interp)
+        opt_params = OptimizationParams(; compilesig_invokes=false,  preserve_local_sources=true)
+        newinterp = NewInterp(fallback_interp; opt_params)
+
+        infer_ir!(ir, newinterp, mi)
         return Core.OpaqueClosure(ir; do_compile=true)
     end
 end
