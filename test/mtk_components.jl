@@ -24,7 +24,7 @@ end
 const fol_mtk = FOL(; name=:fol)
 const FolConnector = MTKConnector(fol_mtk, fol_mtk.x)
 
-struct ScaledFOL{T<:FolConnector}
+struct ScaledFOL{T <: MTKConnector}
     scale::Float64
     fol_conn!::T
 end
@@ -70,6 +70,36 @@ end
     @test issorted(sol[sys.fol.x]; rev=true)  # monotonically decreasing
     #outer variables should work
     @test  sol[sys.scaled_x] == 2.5*sol[sys.x_outer]
+end
+
+@testset "Works on things that have been structural_simplified" begin
+    @mtkmodel FOL_with_aliases begin
+        @parameters begin
+            τ=1.0 # parameters
+        end
+        @variables begin
+            x(t) # dependent variables
+            y(t)
+        end
+        @equations begin
+            D(x) ~ (1 - y) / τ
+            y ~ x
+        end
+    end
+    fol_wa_mtk = structural_simplify(FOL_with_aliases(; name=:fol))
+    FolWAConnector = MTKConnector(fol_wa_mtk, fol_wa_mtk.x)
+
+    p = ScaledFOL(1.0, FolWAConnector())
+    p()  # make sure no errors
+    sys = IRODESystem(Tuple{typeof(p)})
+    prob = ODEProblem(sys, nothing, (0.0, 10.0), p; jac=true)
+    sol = solve(prob, Rodas5P())
+
+    # basic sensibile result:
+    @test sol[sys.fol.x] == sol[sys.x_outer]
+    @test  sol[sys.scaled_x] == sol[sys.x_outer]
+    # can still access variables that structural_simplify would have removed.
+    @test sol[sys.fol.x] == sol[sys.fol.y]
 end
 
 end  # module

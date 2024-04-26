@@ -215,18 +215,15 @@ This
 
 Note: this (like `include` or `eval`) always runs at top-level scope, even if invoked in a function.
 
-!!! warning "Do not call structural_simplify on ODESystem before using in MTKConnector"
+!!! note "There is no need to call structural_simplify on ODESystem before using in MTKConnector"
     You might think it makes sense to simplify the the subsystem before passing it to the MTKConnector.
     However, until the system is connected fully such simplification can produce problematic results,
     In particular, it may (during tearing) simplify away one of the variables that you were going to connect to a port.
     DAECompiler will perform simplifications on the whole system once it is all connected regardless, so there is no need to call `structural_simplify` earlier.
-    This also means you can not use `@mtkbuild` to instantitate the mnodel as this uses `structural_simplify` under-the-hood.
-    You can use `@named` instead. And there is no issue with using `@mtkmodel` to define the model.
+    As such we disregard any simplifications done to the model before we use it.
 """
 function MTKConnector(mtk_component::MTK.ODESystem, ports...)
-    for port in ports
-        port isa MTK.ODESystem && throw(ArgumentError("Port $port is a ODESystem, not a variable (or expression of variables). Perhaps a subsystem. Did you specify a pin rather than the voltage/current across that pin?"))
-    end
+    
     # TODO should this be a macro so that it called `@eval` inside the user's module?
     # We do need to do run time eval, because we can't decide what to construct with just lexical information.
     eval(MTKConnector_AST(mtk_component, ports...))
@@ -238,6 +235,18 @@ end
     Setting it to `DAECompiler.Intrinsics.root_scope` to not introduce a new subscope for this model.
 """
 function MTKConnector_AST(model::MTK.ODESystem, ports...; scope=Scope(DAECompiler.Intrinsics.root_scope, nameof(model)))
+    ### Prechecks
+    for port in ports
+        port isa MTK.ODESystem && throw(ArgumentError("Port $port is a ODESystem, not a variable (or expression of variables). Perhaps a subsystem. Did you specify a pin rather than the voltage/current across that pin?"))
+    end
+
+    while !isnothing(MTK.get_parent(model))
+        # Undo any call to structural_simplify 
+        # (Should we give a warning here? They did waste CPU cycles simplfying it in first place)
+        model = MTK.get_parent(model)
+    end
+
+    ### main generatation of code
     model = MTK.expand_connections(model)
     state = MTK.TearingState(model)
     eqs = MTK.equations(state)
