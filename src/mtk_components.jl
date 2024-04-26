@@ -168,9 +168,14 @@ end
 
 make_ast(op, x, _) = error("$x :: $op :: $(arguments(x))")
 
-function declare_equation(eq::Equation, model, root_scope)
-    normed_eq = eq.rhs - eq.lhs
-    Expr(:call, _c(equation!), make_ast(normed_eq, model), Scope(root_scope, gensym(:mtk_eq)))
+function declare_equations(state, model, root_scope)
+    eqs = MTK.equations(state)
+    eq_calls = map(enumerate(eqs)) do (ii, eq)
+        normed_eq = eq.rhs - eq.lhs
+        scope = Scope(root_scope, Symbol(:mtk_eq_, ii))
+        Expr(:call, _c(equation!), make_ast(normed_eq, model), scope)
+    end
+    return Expr(:block, eq_calls...)
 end
 
 
@@ -249,7 +254,6 @@ function MTKConnector_AST(model::MTK.ODESystem, ports...; scope=Scope(DAECompile
     ### main generatation of code
     model = MTK.expand_connections(model)
     state = MTK.TearingState(model)
-    eqs = MTK.equations(state)
 
 
 
@@ -274,7 +278,7 @@ function MTKConnector_AST(model::MTK.ODESystem, ports...; scope=Scope(DAECompile
         function (this::$struct_name)($(port_names...))
             $(declare_vars(model, scope))
             $(declare_derivatives(state))
-            $(declare_equation.(eqs, Ref(model), Ref(scope))...)
+            $(declare_equations(state, model, scope))
 
             begin
                 $(port_equations...)
