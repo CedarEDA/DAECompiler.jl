@@ -1,6 +1,6 @@
 name = "DAECompiler"
 uuid = "32805668-c3d0-42c2-aafd-0d0a9857a104"
-version = "1.19.0"
+version = "1.19.1"
 authors = ["JuliaHub, Inc. and other contributors"]
 
 [deps]

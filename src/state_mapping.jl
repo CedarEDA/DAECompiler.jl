@@ -88,8 +88,8 @@ end
 function SciMLBase.sym_to_index(sr::ScopeRef{IRODESystem}, transformed_sys::TransformedIRODESystem)
     unopt_idx = _sym_to_index(sr)
     if unopt_idx.var === nothing && unopt_idx.obs === nothing
-        if !isempty(unopt_idx.children)
-            sname = String(getfield(sr, :scope).name)
+        sname = String(getfield(sr, :scope).name)
+        if unopt_idx.children !== nothing && !isempty(unopt_idx.children)
             suggest = first(unopt_idx)[1]
             error("$sname is not a concrete index. Did you mean $sname.var\"$suggest\"")
         else
@@ -140,7 +140,7 @@ function Base.propertynames(sr::ScopeRef)
     stack = sym_stack(scope)
     strct = NameLevel(StructuralAnalysisResult(IRODESystem(sr)).names)
     for s in reverse(stack)
-        strct = strct.chilren[s]
+        strct = strct.children[s]
         strct.children === nothing && return keys(Dict{Symbol, Any}())
     end
     return keys(strct.children)

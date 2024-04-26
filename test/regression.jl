@@ -398,4 +398,15 @@ end
 #@test_throws UnsupportedIRException IRODESystem(Tuple{typeof(too_few_args_singularity)});
 #@test_throws UnsupportedIRException IRODESystem(Tuple{typeof(too_many_args_singularity)});
 
+# propertynames
+function pnames()
+    (;x, y) = variables(Scope(Scope(), :a))
+    equation!(ddt(x)-x)
+    equation!(ddt(y)-y)
+end
+
+let sys = IRODESystem(pnames)
+    @test Set(propertynames(sys.a)) == Set((:x, :y))
+end
+
 end # module regression
