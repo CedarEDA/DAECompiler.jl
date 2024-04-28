@@ -950,7 +950,7 @@ end
         end
     end
 
-    structure = SystemStructure(complete(var_to_diff), complete(eq_to_diff), graph, solvable_graph, nothing, false)
+    structure = SystemStructure(complete(var_to_diff), complete(eq_to_diff), graph, solvable_graph)
 
     if caller !== nothing
         handler_at, handlers = CC.compute_trycatch(ir, Core.Compiler.BitSet())

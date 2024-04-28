@@ -1,5 +1,5 @@
-using ModelingToolkit
-using ModelingToolkit.BipartiteGraphs
+using StateSelection
+using StateSelection.BipartiteGraphs
 
 function build_var_names(names::OrderedDict{LevelKey, NameLevel}, var_to_diff)
     var_names = OrderedDict{Int,String}()
@@ -27,7 +27,7 @@ end
 
 num_selected_states(prob) = num_selected_states(get_transformed_sys(prob), isa(prob, DAEProblem))
 function num_selected_states(tsys::TransformedIRODESystem, isdae)
-    mss = ModelingToolkit.MatchedSystemStructure(tsys.state.structure, tsys.var_eq_matching)
+    mss = StateSelection.MatchedSystemStructure(tsys.state.structure, tsys.var_eq_matching)
     var_assignment, = assign_vars_and_eqs(mss, isdae)
     return length(filter(((state_idx, b),) -> b == 0 && state_idx >= 1, var_assignment))
 end
@@ -42,7 +42,7 @@ function show_assignments(prob::SciMLBase.AbstractDEProblem)
         println("  [$var_idx] $(name)")
     end
 
-    mss = ModelingToolkit.MatchedSystemStructure(sys.state.structure, sys.var_eq_matching)
+    mss = StateSelection.MatchedSystemStructure(sys.state.structure, sys.var_eq_matching)
     @info("Matched system structure:")
     display(mss)
 

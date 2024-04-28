@@ -1,6 +1,6 @@
-function StructuralTransformations.eq_derivative!(state::IRTransformationState, eq)
+function StateSelection.eq_derivative!(state::IRTransformationState, eq)
     s = state.structure
-    eq_diff = StructuralTransformations.eq_derivative_graph!(s, eq)
+    eq_diff = StateSelection.eq_derivative_graph!(s, eq)
     for var in collect(𝑠neighbors(s.graph, eq))
         diffvar = s.var_to_diff[var]
         # If this is solvable, it is linear, so no longer occurs in the derivative
@@ -18,8 +18,8 @@ function StructuralTransformations.eq_derivative!(state::IRTransformationState, 
     end
 end
 
-function StructuralTransformations.var_derivative!(state::IRTransformationState, var)
-    return StructuralTransformations.var_derivative_graph!(state.structure, var)
+function StateSelection.var_derivative!(state::IRTransformationState, var)
+    return StateSelection.var_derivative_graph!(state.structure, var)
 end
 
 function tearing_visit_custom!(ir::IRCode, ssa::Union{SSAValue,Argument}, order, recurse)
@@ -290,7 +290,7 @@ end
                 "During index lowering, after diffractor, function unconditionally errors",
                 ir,
             ))
-            
+
         end
     end
     state.ir = ir

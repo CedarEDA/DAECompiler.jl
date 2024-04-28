@@ -1,4 +1,4 @@
-using ModelingToolkit.StructuralTransformations: DiCMOBiGraph, topological_sort_by_dfs
+using StateSelection.BipartiteGraphs: DiCMOBiGraph, topological_sort_by_dfs
 using Core.Compiler: NewSSAValue, OldSSAValue, Instruction, insert_node_here!, construct_domtree
 
 function type_contains_taint(@nospecialize(incT), var, available)
@@ -75,7 +75,7 @@ end
 
         function schedule_missing_derivative!(v::Int, line=Int32(1))
             @assert vars[v] == SSAValue(0)
-            @assert var_eq_matching[v] in (StructuralTransformations.SelectedState(), unassigned)
+            @assert var_eq_matching[v] in (StateSelection.SelectedState(), unassigned)
             new_node = insert_node_here!(compact, NewInstruction(Expr(:call, state_ddt, v), Incidence(v), line))
             vars[v] = NewSSAValue(new_node.id)
             return new_node
@@ -118,7 +118,7 @@ end
                             # This statement was tainted by an unavailable variable
                             return widenconst(incT)
                         end
-                        @assert var_eq_matching[v] == StructuralTransformations.SelectedState() ||
+                        @assert var_eq_matching[v] == StateSelection.SelectedState() ||
                                 var_eq_matching[v] === unassigned
                         new_row[v_offset] += coeff
                         continue
@@ -173,7 +173,7 @@ end
             # This branch covers variables that are unused in any equations
             # It should have been deleted, but in some cases that does not happen, so we just insert
             # a dummy value and it should get dropped by future compiler passes (e.g. future inlining).
-            elseif isempty(𝑑neighbors(graph, v)) && var_eq_matching[v] isa ModelingToolkit.BipartiteGraphs.Unassigned
+            elseif isempty(𝑑neighbors(graph, v)) && var_eq_matching[v] isa StateSelection.BipartiteGraphs.Unassigned
                 if unassigned_is_nothing
                     return nothing
                 else

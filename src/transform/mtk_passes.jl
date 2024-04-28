@@ -1,11 +1,9 @@
-using ModelingToolkit: nonzerosmap
-using ModelingToolkit: nonzerosmap
-using ModelingToolkit.StructuralTransformations: pantelides!, dummy_derivative_graph!, partial_state_selection_graph!, complete!
-using ModelingToolkit: MatchedSystemStructure
-import ModelingToolkit: alias_elimination!, structural_simplify
+using StateSelection: pantelides!, dummy_derivative_graph!, partial_state_selection_graph!, complete!
+using StateSelection: MatchedSystemStructure
+using StateSelection.CLIL
 
-function ModelingToolkit.alias_elimination!(state::IRTransformationState)
-    ils = ModelingToolkit.alias_eliminate_graph!(state)
+function alias_elimination!(state::IRTransformationState)
+    ils = StateSelection.alias_eliminate_graph!(state)
     s = state.structure
     for g in (s.graph, s.solvable_graph)
         for (ei, e) in enumerate(ils.nzrows)
@@ -73,10 +71,10 @@ end
 
 # TODO: Merge the checking parts of this with MTK, and only change the error
 # reporting parts.
-function ModelingToolkit.check_consistency(state::IRTransformationState, _)
-    neqs = ModelingToolkit.StructuralTransformations.n_concrete_eqs(state)
+function StateSelection.check_consistency(state::IRTransformationState, _)
+    neqs = StateSelection.n_concrete_eqs(state)
     (; graph, var_to_diff) = state.structure
-    highest_vars = computed_highest_diff_variables(state.structure)
+    highest_vars = StateSelection.computed_highest_diff_variables(state.structure)
     n_highest_vars = 0
     for (v, h) in enumerate(highest_vars)
         h || continue
@@ -114,7 +112,7 @@ function ModelingToolkit.check_consistency(state::IRTransformationState, _)
 
     # This is defined to check if Pantelides algorithm terminates. For more
     # details, check the equation (15) of the original paper.
-    extended_graph = (@ModelingToolkit.StructuralTransformations.set graph.fadjlist = Vector{Int}[graph.fadjlist;
+    extended_graph = (@StateSelection.set graph.fadjlist = Vector{Int}[graph.fadjlist;
         map(collect, edges(var_to_diff))])
     extended_var_eq_matching = maximal_matching(extended_graph)
 
@@ -134,11 +132,11 @@ function ModelingToolkit.check_consistency(state::IRTransformationState, _)
 end
 
 """
-    ModelingToolkit.structural_simplify(sys::IRODESystem) -> tsys::TransformedIRODESystem
+    structural_simplify(sys::IRODESystem) -> tsys::TransformedIRODESystem
 
 Perform structural simplifications on `sys::IRODESystem` and transforms it into `tsys::TransformedIRODESystem`.
 """
-function ModelingToolkit.structural_simplify(sys::IRODESystem)
+function structural_simplify(sys::IRODESystem)
     state = IRTransformationState(sys)
     debug_config = DebugConfig(state)
     @may_timeit debug_config "mtk_passes" begin
@@ -147,11 +145,10 @@ function ModelingToolkit.structural_simplify(sys::IRODESystem)
         @may_timeit debug_config "alias_elimination!" begin
             ils = DAECompiler.alias_elimination!(state)
         end
-        state.structure.solvable_graph === nothing && find_solvables!(state)
         complete!(state.structure)
         record_mss!(state, "post_alias_elimination", state.structure)
 
-        ModelingToolkit.check_consistency(state, nothing)
+        StateSelection.check_consistency(state, nothing)
 
         @may_timeit debug_config "pantelides!" begin
             var_eq_matching = pantelides!(state)

@@ -1,12 +1,8 @@
 module DAECompiler
 
 using SciMLBase
-using ModelingToolkit
-if isdefined(ModelingToolkit.StructuralTransformations, :SelectedUnknown)
-import ModelingToolkit.StructuralTransformations.SelectedUnknown as SelectedState
-else
-using ModelingToolkit.StructuralTransformations: SelectedState
-end
+using StateSelection
+using StateSelection: SelectedState, complete
 using Diffractor
 using Base.Experimental: @opaque
 using Base.Meta: isexpr

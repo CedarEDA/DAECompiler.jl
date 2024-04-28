@@ -2,7 +2,7 @@ module invalidation
 
 using Test
 
-using DAECompiler, ModelingToolkit, SciMLBase, OrdinaryDiffEq, Sundials
+using DAECompiler, StateSelection, SciMLBase, OrdinaryDiffEq, Sundials
 using DAECompiler: equation!, state_ddt, variables
 
 const results1 = Number[]

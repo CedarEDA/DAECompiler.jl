@@ -1,3 +1,4 @@
+using StateSelection: DiffGraph
 
 struct Gen
     id::Intrinsics.ScopeIdentity
@@ -71,5 +72,5 @@ function make_structure_from_ipo(ipo::DAEIPOResult)
         add_equation_row!(graph, solvable_graph, ieq, inc)
     end
 
-    structure = SystemStructure(complete(var_to_diff), complete(eq_to_diff), graph, solvable_graph, nothing, false)
+    structure = SystemStructure(complete(var_to_diff), complete(eq_to_diff), graph, solvable_graph)
 end

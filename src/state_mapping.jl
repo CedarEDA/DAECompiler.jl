@@ -1,6 +1,6 @@
 using SciMLBase, SymbolicIndexingInterface
 
-struct ScopeRef{T <: ModelingToolkit.AbstractODESystem}
+struct ScopeRef{T}
     sys::T
     scope::Scope
 end
@@ -45,7 +45,7 @@ end
 function SymbolicIndexingInterface.variable_symbols(tsys::TransformedIRODESystem)
     sys = get_sys(tsys)
     syms = add_recursive_vars!(ScopeRef[], StructuralAnalysisResult(sys).names, sys)
-    nvars = count(x->isa(x, ModelingToolkit.StructuralTransformations.SelectedState), tsys.var_eq_matching)
+    nvars = count(x->isa(x, StateSelection.SelectedState), tsys.var_eq_matching)
     out = [Symbol() for _ in 1:nvars]
     for sym in syms
         is_variable(tsys, sym) || continue

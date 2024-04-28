@@ -1,9 +1,8 @@
-using ModelingToolkit
-using ModelingToolkit: DiffGraph, BipartiteGraph
-using ModelingToolkit: SystemStructure, MatchedSystemStructure, TransformationState
-using ModelingToolkit.BipartiteGraphs
-using ModelingToolkit: SparseMatrixCLIL
-using ModelingToolkit: StructuralTransformations
+using StateSelection
+using StateSelection: DiffGraph, BipartiteGraph
+using StateSelection: MatchedSystemStructure, TransformationState
+using StateSelection.BipartiteGraphs
+using StateSelection.CLIL
 using Core.Compiler: IRCode, SSAValue, NewSSAValue, MethodInstance
 using TimerOutputs: @timeit, TimerOutput
 using Tracy: @tracepoint
@@ -17,6 +16,23 @@ end
 struct SystemStructureRecord
     mss::MatchedSystemStructure
     name::String
+end
+
+Base.@kwdef mutable struct SystemStructure <: StateSelection.SystemStructure
+    # Maps the (index of) a variable to the (index of) the variable describing
+    # its derivative.
+    var_to_diff::DiffGraph
+    eq_to_diff::DiffGraph
+    graph::BipartiteGraph{Int, Nothing}
+    solvable_graph::Union{BipartiteGraph{Int, Nothing}, Nothing}
+end
+StateSelection.n_concrete_eqs(structure::SystemStructure) = StateSelection.n_concrete_eqs(structure.graph)
+
+function Base.copy(structure::SystemStructure)
+    var_types = structure.var_types === nothing ? nothing : copy(structure.var_types)
+    SystemStructure(copy(structure.var_to_diff), copy(structure.eq_to_diff),
+        copy(structure.graph), copy(structure.solvable_graph),
+        var_types, structure.only_discrete)
 end
 
 # Vector containing the IR code each compiler pass generates as we make our way through DAECompiler.
@@ -131,7 +147,7 @@ nullary call represented by `tt`. Following this, it performs structural analysi
 optimized IR code of the entry call. The result of the structural analysis are stored into
 `IRODESystem` and is used when the system is transformed into different ODE/DAE problems.
 """
-struct IRODESystem <: ModelingToolkit.AbstractODESystem
+struct IRODESystem
     interp::DAEInterpreter
     mi::MethodInstance
     fallback_interp::AbstractInterpreter
@@ -317,7 +333,7 @@ function Base.show(io::IO, ::MIME"text/plain", state::IRTransformationState)
     show(io, MIME"text/plain"(), get_sys(state))
 end
 
-function ModelingToolkit.linear_subsys_adjmat!(irs::IRTransformationState)
+function StateSelection.linear_subsys_adjmat!(irs::IRTransformationState)
     graph = irs.structure.graph
     eadj = Vector{Int}[]
     cadj = Vector{Int}[]
@@ -355,11 +371,6 @@ function print_linear_incidence(irs::IRTransformationState)
         (1 ∉ rowvals(inc.row)) || continue
         println(i, " => ", inc)
     end
-end
-
-function ModelingToolkit.StructuralTransformations.find_solvables!(state::IRTransformationState; kwargs...)
-    # Nothing to be done for now, we did this at system init.
-    return nothing
 end
 
 # TODO: This should go into ModelingToolkit

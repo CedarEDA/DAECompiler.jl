@@ -1,7 +1,7 @@
 using Core: CodeInfo
 using Core.Compiler: IRCode, NewInstruction, InliningState,
     adce_pass!, compact!, insert_node!, quoted, sroa_pass!, ssa_inlining_pass!
-using ModelingToolkit: MatchedSystemStructure
+using StateSelection: MatchedSystemStructure
 using SparseArrays
 using StaticArraysCore: StaticArraysCore
 using DiffEqCallbacks
@@ -51,7 +51,7 @@ get_sys(tsys::TransformedIRODESystem) = get_sys(tsys.state)
 get_sys(state::IRTransformationState) = state.sys
 
 
-function ModelingToolkit.MatchedSystemStructure(tsys::TransformedIRODESystem)
+function StateSelection.MatchedSystemStructure(tsys::TransformedIRODESystem)
     MatchedSystemStructure(tsys.state.structure, tsys.var_eq_matching)
 end
 
@@ -370,7 +370,7 @@ function jacobian_prototype(graph, var_to_diff, var_eq_matching, var_assignment,
             push!(I, row); push!(J, du_assgn[1]); push!(V, NaN)
             row = du_assgn[1]
         end
-        vars = StructuralTransformations.neighborhood(dig, var_to_diff[i], Inf; dir = :in)
+        vars = StateSelection.neighborhood(dig, var_to_diff[i], Inf; dir = :in)
         for j in vars
             (var_assignment[j][1] == 0) && continue
             col = var_assignment[j][1]
@@ -382,7 +382,7 @@ function jacobian_prototype(graph, var_to_diff, var_eq_matching, var_assignment,
         allvars = Int[]
         # TODO: Make a Graphs.jl method that does this
         for var in 𝑠neighbors(graph, eq)
-            append!(allvars, StructuralTransformations.neighborhood(dig, var, Inf; dir = :in))
+            append!(allvars, StateSelection.neighborhood(dig, var, Inf; dir = :in))
         end
         vars = unique(allvars)
         for j in vars

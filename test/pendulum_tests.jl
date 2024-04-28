@@ -2,7 +2,7 @@ module pendulum
 
 using Test
 using DAECompiler, SciMLBase, OrdinaryDiffEq
-using ModelingToolkit: MatchedSystemStructure
+using StateSelection: MatchedSystemStructure
 using DAECompiler: assign_vars_and_eqs
 
 include("pendulum.jl")

@@ -2,7 +2,7 @@ module reconstruct
 
 using Test
 
-using DAECompiler, ModelingToolkit, SciMLBase, OrdinaryDiffEq, ForwardDiff
+using DAECompiler, StateSelection, SciMLBase, OrdinaryDiffEq, ForwardDiff
 using DAECompiler.Intrinsics
 include(joinpath(Base.pkgdir(DAECompiler), "test", "lorenz.jl"))
 

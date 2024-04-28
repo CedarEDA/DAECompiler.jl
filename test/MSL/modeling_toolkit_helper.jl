@@ -187,15 +187,20 @@ end
 
 #🏴‍☠️🏴‍☠️🏴‍☠️ Begin Really Evil Type Piracy: 🏴‍☠️🏴‍☠️🏴‍☠️
 
+struct MTKAdapter <: MTK.AbstractSystem
+    sys::IRODESystem
+end
+
 # Keep track of the original sys, so that we can get at the MTK default values
 sys_map = IdDict{Core.MethodInstance,MTK.AbstractSystem}()
 function MTK.structural_simplify(sys::MTK.AbstractSystem)
     # Don't do the MTK structural_simplify at all, instead convert to a IRODEProblem
     daecompiler_sys = IRODESystem(sys)
     sys_map[getfield(daecompiler_sys,:mi)] = sys
-    return daecompiler_sys
+    return MTKAdapter(daecompiler_sys)
 end
 
+using StateSelection: MatchedSystemStructure
 function state_default_mapping!(prob, du0::Vector, u0::Vector)
     sys = get_sys(prob)
     # Construct the optimized variable matching datastructures
@@ -310,21 +315,23 @@ function state_default_mapping!(prob, du0::Vector, u0::Vector)
 end
 
 # Hack in support for initial condition hints
-using ModelingToolkit: MatchedSystemStructure
-function SciMLBase.ODEProblem(sys::IRODESystem, u0::Vector, tspan, p = nothing; kw...)
+function SciMLBase.ODEProblem(sys::MTKAdapter, u0::Vector, tspan, p = nothing; kw...)
+    sys = getfield(sys, :sys)
     prob = ODEProblem(sys, nothing, tspan, p; jac=true, initializealg=CustomBrownFullBasicInit(), kw...)
     state_default_mapping!(prob, [], u0)
     return prob
 end
 
-function SciMLBase.DAEProblem(sys::IRODESystem, du0::Vector, u0::Vector, tspan, p = nothing; kw...)
+function SciMLBase.DAEProblem(sys::MTKAdapter, du0::Vector, u0::Vector, tspan, p = nothing; kw...)
+    sys = getfield(sys, :sys)
     # don't use CustomBrownFullBasicInit() as we use IDA to solve DAEs and that handles things fine without it and doesn't support it.
     prob = DAEProblem(sys, nothing, nothing, tspan, p; jac=true, kw...)
     state_default_mapping!(prob, du0, u0)
     return prob
 end
 
-function MTK.StructuralTransformations.ODAEProblem{iip}(sys::IRODESystem, u0map, tspan, parammap=nothing; kw...) where iip
+function MTK.StructuralTransformations.ODAEProblem{iip}(sys::MTKAdapter, u0map, tspan, parammap=nothing; kw...) where iip
+    sys = getfield(sys, :sys)
     return ODEProblem(sys, u0map, tspan; kw...)
 end
 
@@ -351,7 +358,7 @@ function Base.getproperty(sys::IRODESystem, name::Symbol)
         throw(Base.KeyError(name))  # should be a UndefRef but key error useful for findout what broke it.
     end
 end
-
+Base.getproperty(sys::MTKAdapter, name::Symbol) = getproperty(getfield(sys, :sys), name)
 
 Core.eval(OrdinaryDiffEq, quote
     # DFBDF doesn't support things we need like
@@ -411,12 +418,12 @@ for prop in [
     fname1 = Symbol(:get_, prop)
     fname2 = Symbol(:has_, prop)
     @eval begin
-        MTK.$fname1(sys::IRODESystem) = getfield(sys_map[getfield(sys,:mi)], $(QuoteNode(prop)))
-        MTK.$fname2(sys::IRODESystem) = isdefined(sys_map[getfield(sys,:mi)], $(QuoteNode(prop)))
+        MTK.$fname1(sys::MTKAdapter) = getfield(sys_map[getfield(getfield(sys, :sys),:mi)], $(QuoteNode(prop)))
+        MTK.$fname2(sys::MTKAdapter) = isdefined(sys_map[getfield(getfield(sys, :sys),:mi)], $(QuoteNode(prop)))
     end
 end
 
 # We do not cache like that so say we do not have a cache
-ModelingToolkit.get_index_cache(sys::IRODESystem) = nothing
-ModelingToolkit.has_index_cache(sys::IRODESystem) = false
+ModelingToolkit.get_index_cache(sys::MTKAdapter) = nothing
+ModelingToolkit.has_index_cache(sys::MTKAdapter) = false
 #🏴‍☠️🏴‍☠️🏴‍☠️ END Evil Piracy 🏴‍☠️🏴‍☠️🏴‍☠️

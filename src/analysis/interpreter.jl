@@ -9,7 +9,7 @@ using .CC: AbstractInterpreter, NativeInterpreter, InferenceParams, Optimization
     IRCode, LazyDomtree, IRInterpretationState, set_inlineable!, block_for_inst,
     BitSetBoundedMinPrioritySet, AbsIntState
 using Base: IdSet
-using ModelingToolkit: DiffGraph
+using StateSelection: DiffGraph
 
 using Cthulhu
 using ChainRulesCore

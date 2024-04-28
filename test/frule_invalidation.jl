@@ -6,7 +6,7 @@ export UTIL_EX, correct_res
 
 const UTIL_EX = quote
 
-using DAECompiler, ModelingToolkit, SciMLBase, OrdinaryDiffEq, Sundials
+using DAECompiler, StateSelection, SciMLBase, OrdinaryDiffEq, Sundials
 using DAECompiler.Intrinsics
 using DAECompiler.Intrinsics: state_ddt
 
