@@ -242,7 +242,7 @@ end
 function MTKConnector_AST(model::MTK.ODESystem, ports...; scope=Scope(DAECompiler.Intrinsics.root_scope, nameof(model)))
     ### Prechecks
     for port in ports
-        port isa MTK.ODESystem && throw(ArgumentError("Port $port is a ODESystem, not a variable (or expression of variables). Perhaps a subsystem. Did you specify a pin rather than the voltage/current across that pin?"))
+        port isa MTK.ODESystem && throw(ArgumentError("Port $(nameof(port)) is a ODESystem, not a variable (or expression of variables). Perhaps a subsystem. Did you specify a pin rather than the voltage at /current through that pin?"))
     end
 
     while !isnothing(MTK.get_parent(model))
