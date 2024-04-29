@@ -168,12 +168,29 @@ end
 
 make_ast(op, x, _) = error("$x :: $op :: $(arguments(x))")
 
-function declare_equations(state, model, root_scope)
+function declare_equations(state, model, root_scope, ports)
+    flow_ports = [port for port in ports if MTK.Flow === MTK.get_connection_type(MTK.value(port))]
+    flow_port_var_names =  inner_var_name.(flow_ports, Ref(model))
+
     eqs = MTK.equations(state)
-    eq_calls = map(enumerate(eqs)) do (ii, eq)
+    eq_calls = Expr[]
+    sizehint!(eq_calls, length(eqs))
+    for (ii, eq) in enumerate(eqs)
+        # Do not insert any code for setting singleton flow variables to zero
+        # Since these are often our Ports, which we plan to connect up after.
+        # HACK: it is surprisingly hard to get from Port to variable due to namespacing, so we just do a string comparison
+        # This is basically fine as MTK does identify things by textual name (rather than identity)
+        if isa(eq.lhs, Number) && iszero(eq.lhs) && # zero left hand size
+            MTK.get_connection_type(eq.rhs) === MTK.Flow && # righthand side is a flow variable
+            access_var(eq.rhs) ∈ flow_port_var_names  # Name matches one of the ports
+
+            continue
+        end
+
         normed_eq = eq.rhs - eq.lhs
+
         scope = Scope(root_scope, Symbol(:mtk_eq_, ii))
-        Expr(:call, _c(equation!), make_ast(normed_eq, model), scope)
+        push!(eq_calls, Expr(:call, _c(equation!), make_ast(normed_eq, model), scope))
     end
     return Expr(:block, eq_calls...)
 end
@@ -234,6 +251,8 @@ function MTKConnector(mtk_component::MTK.ODESystem, ports...)
     eval(MTKConnector_AST(mtk_component, ports...))
 end
 
+inner_var_name(port_sym, model) = drop_leading_namespace(access_var(port_sym), model)
+
 """
     `scope` is an expression for what scope to use for everything within this model
     By default this will introduce a scope for this model that uses the model's name as its name.
@@ -261,10 +280,7 @@ function MTKConnector_AST(model::MTK.ODESystem, ports...; scope=Scope(DAECompile
     port_equations = map(ports, port_names) do port_sym, outer_port_name
         # remove namespace as we are currently inside it
         Expr(:call, _c(equation!),
-            Expr(:call, _c(-),
-                drop_leading_namespace(access_var(port_sym), model),# inside of port
-                outer_port_name  # outside of port,   
-            ),
+            Expr(:call, _c(-), inner_var_name(port_sym, model), outer_port_name),
             Scope(scope, Symbol(:port_, outer_port_name))
         )
     end
@@ -278,7 +294,7 @@ function MTKConnector_AST(model::MTK.ODESystem, ports...; scope=Scope(DAECompile
         function (this::$struct_name)($(port_names...))
             $(declare_vars(model, scope))
             $(declare_derivatives(state))
-            $(declare_equations(state, model, scope))
+            $(declare_equations(state, model, scope, ports))
 
             begin
                 $(port_equations...)

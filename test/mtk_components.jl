@@ -102,4 +102,23 @@ end
     @test sol[sys.fol.x] == sol[sys.fol.y]
 end
 
+using ModelingToolkitStandardLibrary.Electrical: Resistor
+@testset "Declare Equations doesn't zero flow ports" begin
+    # this unit tests the internals
+
+    is_zeroing_eq(expr) = Meta.isexpr(expr, :call, 3) && expr.args[1]==equation! && expr.args[2] isa Symbol
+
+    r = Resistor(R=10.0, name=:R)
+    model = ModelingToolkit.expand_connections(r)
+    state = ModelingToolkit.TearingState(model)
+    full_equations = DAECompiler.MTKComponents.declare_equations(state, r, Scope(), tuple()).args
+    @assert length(full_equations) == 6
+    @assert count(is_zeroing_eq, full_equations) == 2
+
+    equations_with_ports_specified = DAECompiler.MTKComponents.declare_equations(state, r, Scope(), (r.n.i, r.n.v, r.p.i, r.p.v)).args
+    @test length(equations_with_ports_specified) == 4   # should have 2 less as the ones for zeroing r.n.i and r.p.i should be gone.
+    @test equations_with_ports_specified ⊆ full_equations
+    @test count(is_zeroing_eq, equations_with_ports_specified) == 0
+end
+
 end  # module
