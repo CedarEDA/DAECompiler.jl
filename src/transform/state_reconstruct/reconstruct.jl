@@ -143,8 +143,8 @@ The `vars` that are being reconstructed must appear in sorted order.
     end
 
     # Construct a tuple for our return value:
-    tup = insert_node_here!(compact, NewInstruction(Expr(:call, Core.tuple, u_out, obs_out), Any, Int32(1)))
-    insert_node_here!(compact, NewInstruction(ReturnNode(tup), Nothing, Int32(1)))
+    tup = insert_node_here!(compact, NewInstruction(Expr(:call, Core.tuple, u_out, obs_out), Any, Int32(1)), true)
+    insert_node_here!(compact, NewInstruction(ReturnNode(tup), Nothing, Int32(1)), true)
 
     # Finish, compact and optimize this reconstruction function
     ir_reconstruct = compact!(finish(compact), true)

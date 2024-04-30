@@ -59,10 +59,10 @@ their timepoints.
     end
 
     # At the end, if `next_t_ssa == Inf`, return nothing, otherwise return it.
-    next_t_ssa = insert_node_here!(compact, NewInstruction(Expr(:call, Base.getindex, next_t_ssa), Float64, Int32(1)))
-    comp_ssa = insert_node_here!(compact, NewInstruction(Expr(:call, Base.:(==), next_t_ssa, Inf), Bool, Int32(1)))
-    ret_val = insert_node_here!(compact, NewInstruction(Expr(:call, Core.ifelse, comp_ssa, nothing, next_t_ssa), Union{Nothing,Float64}, Int32(1)))
-    insert_node_here!(compact, NewInstruction(ReturnNode(ret_val), Nothing, Int32(1)))
+    next_t_ssa = insert_node_here!(compact, NewInstruction(Expr(:call, Base.getindex, next_t_ssa), Float64, Int32(1)), true)
+    comp_ssa = insert_node_here!(compact, NewInstruction(Expr(:call, Base.:(==), next_t_ssa, Inf), Bool, Int32(1)), true)
+    ret_val = insert_node_here!(compact, NewInstruction(Expr(:call, Core.ifelse, comp_ssa, nothing, next_t_ssa), Union{Nothing,Float64}, Int32(1)), true)
+    insert_node_here!(compact, NewInstruction(ReturnNode(ret_val), Nothing, Int32(1)), true)
 
     # Finish, compact and optimize this callback function
     ir_callback = compact!(finish(compact), true)
