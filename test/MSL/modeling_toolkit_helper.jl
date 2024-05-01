@@ -138,16 +138,8 @@ function state_default_mapping!(prob, du0::Vector, u0::Vector)
             try
                 # depending on if we came here via sys.ref, or via a MTK variable we may or may not already have a ScopeRef
                 ref = isa(var, DAECompiler.ScopeRef) ? var : getproperty(sys, access_var(var))
-
-                unopt_idx = DAECompiler._sym_to_index(ref)
-
-                # Oops, this variable is not real
-                if unopt_idx[1]
-                    return nothing
-                end
-
-                # Otherwise, return the index
-                return unopt_idx[2]
+                unopt_idx = DAECompiler._sym_to_index(ref)                
+                return unopt_idx.var
             catch
                 @error("Unable to index $(var) into $(sys)")
                 rethrow()
