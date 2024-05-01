@@ -110,13 +110,13 @@ end
 deep_zero(T::Type{<:Number}) = zero(T)
 deep_zero(T::Type{<:Array}) = error("Array within tuples/structs not supported")  # would need also reference to value to handle then
 deep_zero(T::Type{Tuple{}}) = NoTangent()
-function deep_zero(T::Type{<:Tuple})
+Base.@assume_effects :foldable function deep_zero(T::Type{<:Tuple})
     tup = ntuple(Val{fieldcount(T)}()) do ii
         deep_zero(fieldtype(T, ii))
     end
     return Tangent{T, typeof(tup)}(tup)
 end
-function deep_zero(T)  # general struct
+Base.@assume_effects :foldable function deep_zero(T)  # general struct
     fieldcount(T) == 0 && return NoTangent()
     tup = ntuple(Val{fieldcount(T)}()) do ii
         deep_zero(fieldtype(T, ii))

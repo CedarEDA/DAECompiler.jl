@@ -1,7 +1,8 @@
 module jacobian_batching
 using Test
-using DAECompiler: basis_tangents, basis_bob, BatchOfBundles
+using DAECompiler: basis_tangents, basis_bob, BatchOfBundles, deep_zero
 using Diffractor: TaylorBundle, primal, first_partial
+using InteractiveUtils: @code_typed
 using ChainRulesCore
 
 @testset "basis_tangents" begin
@@ -87,6 +88,20 @@ using ChainRulesCore
         )
     end
 
+end
+
+@testset "deep_zero" begin
+    NT = @NamedTuple{params::@NamedTuple{c::Float64, r::Float64}}
+
+    # zero tangent should be correct
+    zero_tangent = deep_zero(NT)
+    @test zero_tangent === Tangent{
+        @NamedTuple{params::@NamedTuple{c::Float64, r::Float64}}
+    }(params=Tangent{@NamedTuple{c::Float64, r::Float64}}(c=0.0, r=0.0))
+
+    # return type should be fully-concrete (and correct)
+    RT = (@code_typed deep_zero(NT)).second
+    @test RT === typeof(zero_tangent)
 end
 
 @testset "basis_bob" begin
