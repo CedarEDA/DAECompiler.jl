@@ -74,8 +74,8 @@ function paramjac_visit_custom!(ir::IRCode, ssa::Union{SSAValue,Argument}, order
     return false
 end
 
-zero_tangents(primal, quantity) = ntuple((_)->DAECompiler.deep_zero(typeof(primal)), quantity)
-padded_basis_bob(primal, left_padding, right_padding) = BatchOfBundles(primal, (
+zero_tangents(primal, n::Val{N}) where N = ntuple((_)->DAECompiler.deep_zero(typeof(primal)), n)
+padded_basis_bob(primal, left_padding::Val{N}, right_padding::Val{M}) where {N,M} = BatchOfBundles(primal, (
     zero_tangents(primal, left_padding)...,
     basis_tangents(primal)...,
     zero_tangents(primal, right_padding)...,
@@ -86,7 +86,7 @@ function insert_param_bob(ir, p; left_padding=0, right_padding=0)
     else
         # XXX: Using this function call for all of our jacobians seems to trigger a segfault
         #      in the `sensitivity/amplifier_ibias` example in CedarEDA
-        new_inst = NewInstruction(Expr(:call, padded_basis_bob, p, left_padding, right_padding))
+        new_inst = NewInstruction(Expr(:call, padded_basis_bob, p, Val(left_padding), Val(right_padding)))
     end
     return insert_node!(ir, SSAValue(1), new_inst, #= attach_after =# false)
 end
