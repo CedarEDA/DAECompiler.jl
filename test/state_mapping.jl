@@ -3,6 +3,9 @@ using SciMLBase
 using Random
 using DAECompiler: DAECompiler
 using Test
+using DAECompiler
+using DAECompiler.Intrinsics
+using SymbolicIndexingInterface
 
 @testset "spit and join syms" begin
     split_and_sort_syms = DAECompiler.split_and_sort_syms
@@ -36,6 +39,23 @@ using Test
 
     # check passing in inds from earlier also works the same:
     @test merged_data == join_syms(syms, var_data, obs_data, (var_inds, obs_inds))
+end
+
+@testset "variable_symbols" begin
+    function foo()
+        x = variable(:x)
+        A = Scope(Scope(), :A)
+        Ax = variable(Scope(A, :x))
+        AA =Scope(A, :AA)
+        AAx = variable(Scope(AA, :x))
+
+        equation!(x - ddt(x))
+        equation!(Ax - ddt(Ax))
+        equation!(AAx - ddt(AAx))
+    end
+    sys = IRODESystem(Tuple{typeof(foo)})
+    tsys = TransformedIRODESystem(sys)
+    @test SymbolicIndexingInterface.variable_symbols(tsys) == [Symbol("▫.x"), Symbol("▫.A.x"), Symbol("▫.A.AA.x")]
 end
 
 end  # module

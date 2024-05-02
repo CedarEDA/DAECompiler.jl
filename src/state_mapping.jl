@@ -31,11 +31,11 @@ SymbolicIndexingInterface.constant_structure(sys::TransformedIRODESystem) = fals
 #SymbolicIndexingInterface.variable_symbols(tsys::TransformedIRODESystem) = ()
 # TODO: do this properly once we have syntax for time derivatives of variables.
 # unitl then, we can't give a symbolic name to every state.
-function add_recursive_vars!(syms, strct::Dict, sys)
-    for (sym, val) in strct
-        if val isa Dict
-            add_recursive_vars!(syms, val, getproperty(sys, sym))
-        elseif !val[1] # !observed
+function add_recursive_vars!(syms, lvl_children::AbstractDict, sys)
+    for (sym, child) in lvl_children
+        if !isnothing(child.children)
+            add_recursive_vars!(syms, child.children, getproperty(sys, sym))
+        elseif !isnothing(child.var)  # only record vars, not other names
             push!(syms, getproperty(sys, sym))
         end
     end
