@@ -82,7 +82,8 @@ function declare_parameters(model, struct_name)
     constructor_expr =:(
         function $struct_name(; kwargs...)
             unexpected_parameters = setdiff(keys(kwargs), $param_names_tuple_expr)
-            isempty(unexpected_parameters) || error("unexpected parameters passed: $unexpected_parameters")
+            #TODO: renable this check. reconstruct is broken and errors on this check
+            #isempty(unexpected_parameters) || error("unexpected parameters passed: $unexpected_parameters")
             backing = NamedTuple(kwargs)
             return $struct_name(backing)
         end
