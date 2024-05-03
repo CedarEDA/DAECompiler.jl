@@ -117,7 +117,7 @@ function StateSelection.check_consistency(state::IRTransformationState, _)
 
     unassigned_var = []
     for (vj, eq) in enumerate(extended_var_eq_matching)
-        if eq === unassigned && !isempty(𝑑neighbors(graph, vj))
+        if eq === unassigned && vj ∈ 𝑑vertices(graph) && !isempty(𝑑neighbors(graph, vj))
             push!(unassigned_var, vj)
         end
     end
