@@ -1,6 +1,7 @@
 using OrdinaryDiffEq
 using ModelingToolkit
 using DAECompiler
+using DAECompiler: batch_reconstruct
 using ModelingToolkit.SymbolicUtils: BasicSymbolic, issym, isterm
 using ModelingToolkit: Symbolics
 using SymbolicIndexingInterface
@@ -8,7 +9,14 @@ using StateSelection: MatchedSystemStructure
 using Sundials
 
 const MTK = ModelingToolkit
-using DAECompiler.MTKComponents: access_var, is_differential, isvar, split_namespaces_var, MTKConnector_AST
+
+const DMTK = Base.get_extension(DAECompiler, :DAECompilerModelingToolkitExt)
+isnothing(DMTK) && error("Something went weird loading the DAECompilerModelingToolkitExt")
+const access_var = DMTK.access_var
+const is_differential = DMTK.is_differential
+const isvar = DMTK.isvar
+const split_namespaces_var = DMTK.split_namespaces_var
+const MTKConnector_AST = DMTK.MTKConnector_AST
 
 function DAECompiler.IRODESystem(model::MTK.ODESystem; debug_config=(;))
     T = eval(MTKConnector_AST(model; scope=DAECompiler.Intrinsics.root_scope))
@@ -18,7 +26,6 @@ function DAECompiler.IRODESystem(model::MTK.ODESystem; debug_config=(;))
 end
 
 
-using DAECompiler: batch_reconstruct
 function reconstruct_helper(ro, sym::Union{Num,BasicSymbolic}, u, p, t)
     replacements = Dict()
 
@@ -76,19 +83,24 @@ end
 
 #🏴‍☠️🏴‍☠️🏴‍☠️ Begin Really Evil Type Piracy: 🏴‍☠️🏴‍☠️🏴‍☠️
 
-struct MTKAdapter <: MTK.AbstractSystem
+# IRODESystem doesn't subtype MTK.AbstractSystem anymore
+# so we introduce a wrapper, to make it subtype
+struct MTKAdapterSystem <: MTK.AbstractSystem
     sys::IRODESystem
 end
+DAECompiler.get_sys(adpater::MTKAdapterSystem) = getfield(adpater, :sys)
 
-# Keep track of the original sys, so that we can get at the MTK default values
-sys_map = IdDict{Core.MethodInstance,MTK.AbstractSystem}()
+# Keep track of the original MTK model, so that we can get at the MTK default values
+const sys_map = IdDict{Core.MethodInstance,MTK.AbstractSystem}()
+sys_map_key(adapter_sys::MTKAdapterSystem) = sys_map_key(get_sys(adapter_sys))
+sys_map_key(sys::IRODESystem) = getfield(sys, :mi)
+
 function MTK.structural_simplify(model::MTK.AbstractSystem)
     # Don't do the MTK structural_simplify at all, instead convert to a IRODEProblem
     daecompiler_sys = IRODESystem(model)
-    sys_map[getfield(daecompiler_sys,:mi)] = model
-    return daecompiler_sys
+    sys_map[sys_map_key(daecompiler_sys)] = model
+    return MTKAdapterSystem(daecompiler_sys)
 end
-
 
 
 # Given a symbolic expression `sym`, run `substitute()` on it with the defaults from `model`
@@ -180,7 +192,7 @@ function state_default_mapping!(prob, du0::Vector, u0::Vector)
     if prob.u0 !== nothing
         new_u0 = copy(prob.u0)
         # First, insert "default" values:
-        mtksys = sys_map[getfield(sys, :mi)]
+        mtksys = sys_map[sys_map_key(sys)]
         defaults = MTK.defaults(mtksys)
         for var in unknowns(mtksys)
             if var ∈ keys(defaults)
@@ -223,16 +235,16 @@ function state_default_mapping!(prob, du0::Vector, u0::Vector)
 end
 
 # Hack in support for initial condition hints
-function SciMLBase.ODEProblem(sys_adapt::MTKAdapter, u0::Vector, tspan, p = nothing; kw...)
-    sys = getfield(sys_adapt, :sys)
+function SciMLBase.ODEProblem(sys_adapt::MTKAdapterSystem, u0::Vector, tspan, p = nothing; kw...)
+    sys::IRODESystem = get_sys(sys_adapt)
     isnothing(p) || isempty(p) || error("parameter merging not yet supported")  # to do this we would need to define the MTKConnection type inside ODEProblem then create the IRODESystem from that (viable)
     prob = ODEProblem(sys, nothing, tspan, p; jac=true, initializealg=CustomBrownFullBasicInit(), kw...)
     state_default_mapping!(prob, [], u0)
     return prob
 end
 
-function SciMLBase.DAEProblem(sys::MTKAdapter, du0::Vector, u0::Vector, tspan, p = nothing; kw...)
-    sys = getfield(sys, :sys)
+function SciMLBase.DAEProblem(sys_adapt::MTKAdapterSystem, du0::Vector, u0::Vector, tspan, p = nothing; kw...)
+    sys::IRODESystem = get_sys(sys_adapt)
     # don't use CustomBrownFullBasicInit() as we use IDA to solve DAEs and that handles things fine without it and doesn't support it.
     isnothing(p) || isempty(p) || error("param_merging not yet supported")
     prob = DAEProblem(sys, nothing, nothing, tspan, nothing; jac=true, kw...)
@@ -255,7 +267,7 @@ function Base.getproperty(sys::IRODESystem, name::Symbol)
         # Ignore first namespace it's cos we are not fully consistent with if we include the system name or not
         return return get_scope_ref(sys, namespaces; start_idx=2)
     else  # It could be from the mtksys
-        mtksys = sys_map[getfield(sys, :mi)]
+        mtksys = sys_map[sys_map_key(sys)]
         if hasproperty(mtksys, name)  # if it is actually from the MTK system (which allows unflattened names)
             return getproperty(mtksys, name)
         end
@@ -269,8 +281,7 @@ function get_scope_ref(sys, names; start_idx=1)
     end
     return ref
 end
-# TODO: actually use this above, so not monkey-patching getproperty on IRODEProblem
-Base.getproperty(sys::MTKAdapter, name::Symbol) = getproperty(getfield(sys, :sys), name)
+Base.getproperty(sys::MTKAdapterSystem, name::Symbol) = getproperty(get_sys(sys), name)
 
 Core.eval(OrdinaryDiffEq, quote
     # DFBDF doesn't support things we need like
@@ -330,12 +341,12 @@ for prop in [
     fname1 = Symbol(:get_, prop)
     fname2 = Symbol(:has_, prop)
     @eval begin
-        MTK.$fname1(sys::MTKAdapter) = getfield(sys_map[getfield(getfield(sys, :sys),:mi)], $(QuoteNode(prop)))
-        MTK.$fname2(sys::MTKAdapter) = isdefined(sys_map[getfield(getfield(sys, :sys),:mi)], $(QuoteNode(prop)))
+        MTK.$fname1(sys::MTKAdapterSystem) = getfield(sys_map[sys_map_key(sys)], $(QuoteNode(prop)))
+        MTK.$fname2(sys::MTKAdapterSystem) = isdefined(sys_map[sys_map_key(sys)], $(QuoteNode(prop)))
     end
 end
 
 # We do not cache like that so say we do not have a cache
-ModelingToolkit.get_index_cache(sys::MTKAdapter) = nothing
-ModelingToolkit.has_index_cache(sys::MTKAdapter) = false
+ModelingToolkit.get_index_cache(sys::MTKAdapterSystem) = nothing
+ModelingToolkit.has_index_cache(sys::MTKAdapterSystem) = false
 #🏴‍☠️🏴‍☠️🏴‍☠️ END Evil Piracy 🏴‍☠️🏴‍☠️🏴‍☠️

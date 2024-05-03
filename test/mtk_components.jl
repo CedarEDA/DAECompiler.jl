@@ -2,11 +2,13 @@ module mtk_components
 
 using DAECompiler
 using DAECompiler.Intrinsics
-using DAECompiler.MTKComponents
 using ModelingToolkit
 using ModelingToolkit: t_nounits as t, D_nounits as D
 using OrdinaryDiffEq
 using Test
+
+const DMTK = Base.get_extension(DAECompiler, :DAECompilerModelingToolkitExt)
+isnothing(DMTK) && error("Something went weird loading the DAECompilerModelingToolkitExt")
 
 @mtkmodel FOL begin
     @parameters begin
@@ -111,11 +113,11 @@ using ModelingToolkitStandardLibrary.Electrical: Resistor
     r = Resistor(R=10.0, name=:R)
     model = ModelingToolkit.expand_connections(r)
     state = ModelingToolkit.TearingState(model)
-    full_equations = DAECompiler.MTKComponents.declare_equations(state, r, Scope(), tuple()).args
+    full_equations = DMTK.declare_equations(state, r, Scope(), tuple()).args
     @assert length(full_equations) == 6
     @assert count(is_zeroing_eq, full_equations) == 2
 
-    equations_with_ports_specified = DAECompiler.MTKComponents.declare_equations(state, r, Scope(), (r.n.i, r.n.v, r.p.i, r.p.v)).args
+    equations_with_ports_specified = DMTK.declare_equations(state, r, Scope(), (r.n.i, r.n.v, r.p.i, r.p.v)).args
     @test length(equations_with_ports_specified) == 4   # should have 2 less as the ones for zeroing r.n.i and r.p.i should be gone.
     @test equations_with_ports_specified ⊆ full_equations
     @test count(is_zeroing_eq, equations_with_ports_specified) == 0

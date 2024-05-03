@@ -13,6 +13,7 @@ using OrderedCollections
 
 export IRTransformationState, IRODESystem, TransformedIRODESystem
 export get_epsjac, reconstruct_sensitivities, get_transformed_sys, get_sys, select_ir
+export MTKConnector
 
 function reconstruct_sensitivities(args...)
     error("This method requires SciMLSensitivity")
@@ -65,8 +66,6 @@ include("analysis/debugging.jl")
 include("analysis/extra_rules.jl")
 include("state_mapping.jl")
 include("custom_init.jl")
-
-include("mtk_components.jl")
 
 include("../ext/DAECompilerSciMLSensitivityExt.jl")
 
@@ -144,5 +143,55 @@ function default_stacksize!()
     end
 end
 push_inithook!(default_stacksize!) # ensure we do not run out of stack.
+
+
+
+"""
+    MTKConnector(mtk_component::MTK.ODESystem, ports...)
+
+Declares a connector function that allows you to call a component defined in MTK from DAECompiler.
+
+!!! note "for this to function ModelingToolkit must be loaded"
+    DAECompiler itself only provides a stub-defination of this type.
+    The full implementation is in the DAECompiler-ModelingToolkit extension module.
+    Which is automatically loaded if DAECompiler and ModelingToolkit are both loaded.
+
+It takes a component as represented by an ODESystem, and a list of "ports" which correpond to variables in the component,
+as identified by their references in the component.
+This returns a constructor for a struct that accepts any of the parameters the mtk_component accepted, passed by keyword argument.
+The struct itself (once constructed by passing zero or more parameters) accepts in positional arguments in order correponding to each port declared earlier a variable
+(or even an expression) respectively  and will impose the connection between that variable in the outer system and the variable inside the port.
+
+Generally if you have parameters you want to be user-setable you will make the struct a field of your DAE system (but make sure it is concetely typed field e.g. by making it type-parametric and passing in an instance)
+If on the other hand, you have no parameters, or you don't need them to be user-setable and want to hard code their value, you can instead put it in a `const` global variable.
+
+Example:
+```
+# At top-level
+const foo = ODESystem(...; name=:myfoo) # with parameter `a` and variables `x` and `y`
+const FooConn = MTKConnector(foo, foo.x)`
+const foo_conn! = FooConn(a=1.5)
+#...
+function (this::BarCedarSystem)()
+    (;outer_x,) = variables()
+    foo_conn!(outer_x)
+    #...
+end
+sys = IRODESystem(Tuple{CedarSystem})
+
+sys.myfoo.y  # references the value `y` from within the `foo` that is within the system
+```
+This 
+
+Note: this (like `include` or `eval`) always runs at top-level scope, even if invoked in a function.
+
+!!! note "There is no need to call structural_simplify on ODESystem before using in MTKConnector"
+    You might think it makes sense to simplify the the subsystem before passing it to the MTKConnector.
+    However, until the system is connected fully such simplification can produce problematic results,
+    In particular, it may (during tearing) simplify away one of the variables that you were going to connect to a port.
+    DAECompiler will perform simplifications on the whole system once it is all connected regardless, so there is no need to call `structural_simplify` earlier.
+    As such we disregard any simplifications done to the model before we use it.
+"""
+abstract type MTKConnector end
 
 end # module

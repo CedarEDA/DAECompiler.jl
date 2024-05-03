@@ -2,7 +2,7 @@
 
 julia_version = "1.12.0-DEV"
 manifest_format = "2.0"
-project_hash = "4415b16dce888f1197c09caf38acbffe7aa999e2"
+project_hash = "9be0a698f865d3d4686aeb06d1a08e46ccbad8b3"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "016833eb52ba2d6bea9fcb50ca295980e728ee24"
@@ -260,6 +260,12 @@ deps = ["Accessors", "CentralizedCaches", "ChainRules", "ChainRulesCore", "Cthul
 path = "."
 uuid = "32805668-c3d0-42c2-aafd-0d0a9857a104"
 version = "1.19.1"
+
+    [deps.DAECompiler.extensions]
+    DAECompilerModelingToolkitExt = "ModelingToolkit"
+
+    [deps.DAECompiler.weakdeps]
+    ModelingToolkit = "961ee093-0014-501f-94e3-6117800e7a78"
 
 [[deps.DataAPI]]
 git-tree-sha1 = "abe83f3a2f1b857aac70ef8b269080af17764bbe"
