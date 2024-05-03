@@ -83,10 +83,8 @@ function StateSelection.check_consistency(state::IRTransformationState, _)
     end
     is_balanced = n_highest_vars == neqs
 
-    find_variable_names(idxs) =
-        Union{Nothing, Symbol}[
-            findfirst(x->x.eq==idx,
-                    getfield(get_sys(state), :result).names) for idx in idxs]
+    eq_num2name = Dict(_eq_names_flattened(state))
+    find_equation_names(idxs) = get.(Ref(eq_num2name), idxs, nothing)
 
     if neqs > 0 && !is_balanced
         (eqs, vars) = find_eqs_vars(state)
@@ -98,8 +96,9 @@ function StateSelection.check_consistency(state::IRTransformationState, _)
         if iseqs
             eq_var_matching = invview(complete(var_eq_matching, nsrcs(graph))) # extra equations
             bad_idxs = findall(isequal(unassigned), @view eq_var_matching[1:nsrcs(graph)])
-            names = find_variable_names(bad_idxs)
+            names = find_equation_names(bad_idxs)
         else
+            
             bad_idxs = findall(isequal(unassigned), var_eq_matching)
             names = Union{Nothing, Symbol}[
                 findfirst(x->x.var == idx,
@@ -127,8 +126,23 @@ function StateSelection.check_consistency(state::IRTransformationState, _)
         (_, vars) = find_eqs_vars(state)
 
         throw(BadSystemException(neqs, n_highest_vars, copy(state.ir),
-            find_variable_names(unassigned_var), vars[unassigned_var]))
+            find_equation_names(unassigned_var), vars[unassigned_var]))
     end
+end
+
+_eq_names_flattened(state::IRTransformationState) = _eq_names_flattened(getfield(get_sys(state), :result).names)
+function _eq_names_flattened(lvl_children, prefix=:▫)
+    ret = Pair{Int, Symbol}[]
+    for (name, sublvl) in lvl_children
+        sublvl_prefix = Symbol(prefix, :., name)
+        if !isnothing(sublvl.children)
+            append!(ret, _eq_names_flattened(sublvl.children, sublvl_prefix))
+        elseif !isnothing(sublvl.eq)
+            # NB: if we need this for other named things, it is trivial to generalize this to take the fieldname as a argument
+            push!(ret, sublvl.eq => sublvl_prefix)
+        end
+    end
+    return ret
 end
 
 """

@@ -57,12 +57,15 @@ end
 
 function unblanaced_too_many_eqs()
     (;x) = variables()
-    equation!.((x, x^2))
+    equation!(x, :foo)
+    qux_scope = Scope(Scope(Scope(), :Bar), :qux)
+    equation!(x^2, qux_scope)
 end
 let sys = IRODESystem(unblanaced_too_many_eqs)
     @test_throws ["The system is unbalanced.",
         "There are 1 highest order differentiated variable(s) and 2 equation(s).",
-        "This equation was potentially redundant:"] ODEProblem(sys, nothing, (0., 1.))
+        r"(▫.Bar.qux)|(▫.foo)",
+        "was potentially redundant:"] ODEProblem(sys, nothing, (0., 1.))
 end
 
 function structurally_singular()
