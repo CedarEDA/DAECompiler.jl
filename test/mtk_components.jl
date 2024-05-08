@@ -24,7 +24,7 @@ end
 
 
 const fol_mtk = FOL(; name=:fol)
-const FolConnector = MTKConnector(fol_mtk, fol_mtk.x)
+const FolConnector = @declare_MTKConnector(fol_mtk, fol_mtk.x)
 
 struct ScaledFOL{T <: MTKConnector}
     scale::Float64
@@ -56,7 +56,7 @@ end
 ###
 # Now let's set τ to a negative value
 # This isn't realistic for a FOL (first order lag) 
-# but it *is* something that we can simulate
+# but it *is* something that we can simulate, to check parameters are handled right
 @testset "Nonphysical case" begin
     p = ScaledFOL(2.5, FolConnector(τ=-1.0))
     p()  # make sure no errors
@@ -89,7 +89,7 @@ end
         end
     end
     fol_wa_mtk = structural_simplify(FOL_with_aliases(; name=:fol))
-    FolWAConnector = MTKConnector(fol_wa_mtk, fol_wa_mtk.x)
+    FolWAConnector = @declare_MTKConnector(fol_wa_mtk, fol_wa_mtk.x)
 
     p = ScaledFOL(1.0, FolWAConnector())
     p()  # make sure no errors

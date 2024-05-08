@@ -207,11 +207,10 @@ end
 
 ############################################################
 
-function DAECompiler.MTKConnector(mtk_component::MTK.ODESystem, ports...)
-    
-    # TODO should this be a macro so that it called `@eval` inside the user's module?
+macro DAECompiler.declare_MTKConnector(mtk_component, ports...)
     # We do need to do run time eval, because we can't decide what to construct with just lexical information.
-    eval(MTKConnector_AST(mtk_component, ports...))
+    # we need the values of the 
+    :(Base.eval(@__MODULE__, $MTKConnector_AST($(esc(mtk_component)), $(esc.(ports)...))))
 end
 
 inner_var_name(port_sym, model) = drop_leading_namespace(access_var(port_sym), model)

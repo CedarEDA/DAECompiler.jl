@@ -13,7 +13,7 @@ using OrderedCollections
 
 export IRTransformationState, IRODESystem, TransformedIRODESystem
 export get_epsjac, reconstruct_sensitivities, get_transformed_sys, get_sys, select_ir
-export MTKConnector
+export MTKConnector, @declare_MTKConnector
 
 function reconstruct_sensitivities(args...)
     error("This method requires SciMLSensitivity")
@@ -147,7 +147,7 @@ push_inithook!(default_stacksize!) # ensure we do not run out of stack.
 
 
 """
-    MTKConnector(mtk_component::MTK.ODESystem, ports...)
+    @declare_MTKConnector(mtk_component::MTK.ODESystem, ports...)
 
 Declares a connector function that allows you to call a component defined in MTK from DAECompiler.
 
@@ -162,35 +162,56 @@ This returns a constructor for a struct that accepts any of the parameters the m
 The struct itself (once constructed by passing zero or more parameters) accepts in positional arguments in order correponding to each port declared earlier a variable
 (or even an expression) respectively  and will impose the connection between that variable in the outer system and the variable inside the port.
 
-Generally if you have parameters you want to be user-setable you will make the struct a field of your DAE system (but make sure it is concetely typed field e.g. by making it type-parametric and passing in an instance)
-If on the other hand, you have no parameters, or you don't need them to be user-setable and want to hard code their value, you can instead put it in a `const` global variable.
-
-Example:
-```
-# At top-level
-const foo = ODESystem(...; name=:myfoo) # with parameter `a` and variables `x` and `y`
-const FooConn = MTKConnector(foo, foo.x)`
-const foo_conn! = FooConn(a=1.5)
-#...
-function (this::BarCedarSystem)()
-    (;outer_x,) = variables()
-    foo_conn!(outer_x)
-    #...
-end
-sys = IRODESystem(Tuple{CedarSystem})
-
-sys.myfoo.y  # references the value `y` from within the `foo` that is within the system
-```
-This 
+See [`MTKConnector`](@ref) for more info.
 
 Note: this (like `include` or `eval`) always runs at top-level scope, even if invoked in a function.
 
-!!! note "There is no need to call structural_simplify on ODESystem before using in MTKConnector"
-    You might think it makes sense to simplify the the subsystem before passing it to the MTKConnector.
+!!! note "There is no need to call structural_simplify on ODESystem before using in @declare_MTKConnector"
+    You might think it makes sense to simplify the the subsystem before passing it to the @declare_MTKConnector.
     However, until the system is connected fully such simplification can produce problematic results,
     In particular, it may (during tearing) simplify away one of the variables that you were going to connect to a port.
     DAECompiler will perform simplifications on the whole system once it is all connected regardless, so there is no need to call `structural_simplify` earlier.
     As such we disregard any simplifications done to the model before we use it.
+"""
+macro declare_MTKConnector(args...)
+    error("ModelingToolkit must be loaded for this macro to be used")
+end
+
+"""
+    MTKConnector
+
+Abstract type for a MTK model (ODESystem) that has been rewrappen to expose as a DAECompiler functor.
+It's subtypes are created using `@declare_MTKConnector(mtk_model, mtk_ports...)`
+Such subtypes provides:
+ - `propertynames`/`getproperties` that returns the values of the parameters,
+ - a constructor that takes a set of keyword argument for overriding the values of hte parameters
+ - a functor that takes DAECompiler values/expressions that are used to override the ports
+
+To work at a higher level of abstraction (e.g. CedarSim `AbstractNet`s) you will likely want to add aditional functor overloads.
+
+
+Generally if you have parameters you want to be user-setable you will make the MTKConnector struct a field of your DAE system.
+In this case you should make sure it is concetely typed field e.g. by making it type-parametric and passing in an instance.
+If on the other hand, you have no parameters, or you don't need them to be user-setable and want to hard code their value, you can instead put it in a `const` global variable
+(In CedarSim it works to interpolate in an instance into the SPICE code).
+
+Usage Example:
+```
+# At top-level
+const foo = ODESystem(...; name=:myfoo) # with parameter `a` and variables `x` and `y`
+const FooConn = @declare_MTKConnector(foo, foo.x)`
+const foo_conn! = FooConn(a=1.5)
+#...
+function (this::MyDAESystem)()
+    (;outer_x,) = variables()
+    foo_conn!(outer_x)
+    #...
+end
+sys = IRODESystem(Tuple{MyDAESystem})
+
+sys.myfoo.y  # references the value `y` from within the `foo` that is within the system
+```
+
 """
 abstract type MTKConnector end
 
