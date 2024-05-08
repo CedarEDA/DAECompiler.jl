@@ -80,11 +80,13 @@ function declare_parameters(model, struct_name)
     
     
     constructor_expr =:(
+        @generated function _check_parameter_names(::Type{$struct_name}, param_kwargs::NamedTuple)
+            unexpected_parameters = setdiff(fieldnames(param_kwargs), $param_names_tuple_expr)
+            !isempty(unexpected_parameters) && error("unexpected parameters passed: $unexpected_parameters")
+        end;
         function $struct_name(; kwargs...)
-            unexpected_parameters = setdiff(keys(kwargs), $param_names_tuple_expr)
-            #TODO: renable this check. reconstruct is broken and errors on this check
-            #isempty(unexpected_parameters) || error("unexpected parameters passed: $unexpected_parameters")
             backing = NamedTuple(kwargs)
+            _check_parameter_names($struct_name, backing)
             return $struct_name(backing)
         end
     )
