@@ -20,7 +20,7 @@ split_namespaces_var(x) = split_namespaces_var(access_var(x))
 _get_scope!(scope, sub_scopes::Dict{Symbol}) = scope
 function _get_scope!(parent_scope, sib_scopes::Dict{Symbol}, namespace::Symbol, var_name_tail::Symbol...)
     scope, subscopes = get!(sib_scopes, namespace) do
-        :(Scope($parent_scope, $(Meta.quot(namespace)))) => Dict{Symbol, Pair}()
+        :($(_c(Scope))($parent_scope, $(Meta.quot(namespace)))) => Dict{Symbol, Pair}()
     end
     return _get_scope!(scope, subscopes, var_name_tail...)
 end
