@@ -185,7 +185,8 @@ It's subtypes are created using `@declare_MTKConnector(mtk_model, mtk_ports...)`
 Such subtypes provides:
  - `propertynames`/`getproperties` that returns the values of the parameters,
  - a constructor that takes a set of keyword argument for overriding the values of hte parameters
- - a functor that takes DAECompiler values/expressions that are used to override the ports
+ - a functor that takes DAECompiler values/expressions that are used to override the ports,
+ and a [`Scope`](@ref) to use for variables and equations created with-in it. (default: no subscope)
 
 To work at a higher level of abstraction (e.g. CedarSim `AbstractNet`s) you will likely want to add aditional functor overloads.
 
@@ -198,13 +199,14 @@ If on the other hand, you have no parameters, or you don't need them to be user-
 Usage Example:
 ```
 # At top-level
-const foo = ODESystem(...; name=:myfoo) # with parameter `a` and variables `x` and `y`
+# consider some MTK OD system with parameter `a` and variables `x` and `y`
+const foo = ODESystem(...; name=:myfoo_mtk) # Note the name we pass here has no effect but is required by ODESystem constructor
 const FooConn = @declare_MTKConnector(foo, foo.x)`
 const foo_conn! = FooConn(a=1.5)
 #...
 function (this::MyDAESystem)()
     (;outer_x,) = variables()
-    foo_conn!(outer_x)
+    foo_conn!(outer_x; dscope=Scope(Scope(), :myfoo))
     #...
 end
 sys = IRODESystem(Tuple{MyDAESystem})

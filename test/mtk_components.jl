@@ -23,7 +23,7 @@ isnothing(DMTK) && error("Something went weird loading the DAECompilerModelingTo
 end
 
 
-const fol_mtk = FOL(; name=:fol)
+const fol_mtk = FOL(; name=:fol_mtk)
 const FolConnector = @declare_MTKConnector(fol_mtk, fol_mtk.x)
 
 struct ScaledFOL{T <: MTKConnector}
@@ -33,7 +33,7 @@ end
 
 function (this::ScaledFOL)()
     (; scaled_x, x_outer) = variables()
-    this.fol_conn!(x_outer) 
+    this.fol_conn!(x_outer; dscope=Scope(Scope(), :fol))
     equation!(scaled_x - this.scale * x_outer)
 end
 @testset "Normal case" begin
@@ -88,7 +88,7 @@ end
             y ~ x
         end
     end
-    fol_wa_mtk = structural_simplify(FOL_with_aliases(; name=:fol))
+    fol_wa_mtk = structural_simplify(FOL_with_aliases(; name=:fol_mtk))
     FolWAConnector = @declare_MTKConnector(fol_wa_mtk, fol_wa_mtk.x)
 
     p = ScaledFOL(1.0, FolWAConnector())
@@ -110,14 +110,14 @@ using ModelingToolkitStandardLibrary.Electrical: Resistor
 
     is_zeroing_eq(expr) = Meta.isexpr(expr, :call, 3) && expr.args[1]==equation! && expr.args[2] isa Symbol
 
-    r = Resistor(R=10.0, name=:R)
+    r = Resistor(R=10.0, name=:R_mtk)
     model = ModelingToolkit.expand_connections(r)
     state = ModelingToolkit.TearingState(model)
-    full_equations = DMTK.declare_equations(state, r, Scope(), tuple()).args
+    full_equations = DMTK.declare_equations(state, r, :dscope, tuple()).args
     @assert length(full_equations) == 6
     @assert count(is_zeroing_eq, full_equations) == 2
 
-    equations_with_ports_specified = DMTK.declare_equations(state, r, Scope(), (r.n.i, r.n.v, r.p.i, r.p.v)).args
+    equations_with_ports_specified = DMTK.declare_equations(state, r, :dscope, (r.n.i, r.n.v, r.p.i, r.p.v)).args
     @test length(equations_with_ports_specified) == 4   # should have 2 less as the ones for zeroing r.n.i and r.p.i should be gone.
     @test equations_with_ports_specified ⊆ full_equations
     @test count(is_zeroing_eq, equations_with_ports_specified) == 0

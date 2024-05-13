@@ -10,8 +10,6 @@ using SymbolicIndexingInterface
 using SciMLBase
 
 
-
-
 _c(x) = x
 #_c(x) = nameof(x)  # uncomment this to disable interpolating function objects into AST, so as to get nicer printing ASTs
 
@@ -22,7 +20,7 @@ split_namespaces_var(x) = split_namespaces_var(access_var(x))
 _get_scope!(scope, sub_scopes::Dict{Symbol}) = scope
 function _get_scope!(parent_scope, sib_scopes::Dict{Symbol}, namespace::Symbol, var_name_tail::Symbol...)
     scope, subscopes = get!(sib_scopes, namespace) do
-        Scope(parent_scope, namespace) => Dict{Symbol, Pair}()
+        :(Scope($parent_scope, $(Meta.quot(namespace)))) => Dict{Symbol, Pair}()
     end
     return _get_scope!(scope, subscopes, var_name_tail...)
 end
@@ -178,8 +176,7 @@ function declare_equations(state, model, root_scope, ports)
     eq_calls = Expr[]
     sizehint!(eq_calls, length(eqs))
     for (ii, eq) in enumerate(eqs)
-        # Do not insert any code for setting singleton flow variables to zero
-        # Since these are often our Ports, which we plan to connect up after.
+        # Do not insert any code for setting our Port singleton flow variables to zero, as we plan to connect up them up after.
         # HACK: it is surprisingly hard to get from Port to variable due to namespacing, so we just do a string comparison
         # This is basically fine as MTK does identify things by textual name (rather than identity)
         if isa(eq.lhs, Number) && iszero(eq.lhs) && # zero left hand size
@@ -191,7 +188,7 @@ function declare_equations(state, model, root_scope, ports)
 
         normed_eq = eq.rhs - eq.lhs
 
-        scope = Scope(root_scope, Symbol(:mtk_eq_, ii))
+        scope = :($(_c(Scope))($root_scope, $(Meta.quot(Symbol(:mtk_eq_, ii)))))
         push!(eq_calls, Expr(:call, _c(equation!), make_ast(normed_eq, model), scope))
     end
     return Expr(:block, eq_calls...)
@@ -215,12 +212,7 @@ end
 
 inner_var_name(port_sym, model) = drop_leading_namespace(access_var(port_sym), model)
 
-"""
-    `scope` is an expression for what scope to use for everything within this model
-    By default this will introduce a scope for this model that uses the model's name as its name.
-    Setting it to `DAECompiler.Intrinsics.root_scope` to not introduce a new subscope for this model.
-"""
-function MTKConnector_AST(model::MTK.ODESystem, ports...; scope=Scope(DAECompiler.Intrinsics.root_scope, nameof(model)))
+function MTKConnector_AST(model::MTK.ODESystem, ports...)
     ### Prechecks
     for port in ports
         port isa MTK.ODESystem && throw(ArgumentError("Port $(nameof(port)) is a ODESystem, not a variable (or expression of variables). Perhaps a subsystem. Did you specify a pin rather than the voltage at /current through that pin?"))
@@ -236,14 +228,12 @@ function MTKConnector_AST(model::MTK.ODESystem, ports...; scope=Scope(DAECompile
     model = MTK.expand_connections(model)
     state = MTK.TearingState(model)
 
-
-
     port_names = gensym.(access_var.(ports))
     port_equations = map(ports, port_names) do port_sym, outer_port_name
         # remove namespace as we are currently inside it
         Expr(:call, _c(equation!),
             Expr(:call, _c(-), inner_var_name(port_sym, model), outer_port_name),
-            Scope(scope, Symbol(:port_, outer_port_name))
+            :($(_c(Scope))(dscope, $(Meta.quot(Symbol(:port_, outer_port_name)))))
         )
     end
 
@@ -253,10 +243,10 @@ function MTKConnector_AST(model::MTK.ODESystem, ports...; scope=Scope(DAECompile
     return quote
         $(declare_parameters(model, struct_name))
 
-        function (this::$struct_name)($(port_names...))
-            $(declare_vars(model, scope))
+        function (this::$struct_name)($(port_names...); dscope=$(_c(Scope))())
+            $(declare_vars(model, :dscope))
             $(declare_derivatives(state))
-            $(declare_equations(state, model, scope, ports))
+            $(declare_equations(state, model, :dscope, ports))
 
             begin
                 $(port_equations...)

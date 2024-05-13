@@ -36,7 +36,6 @@ msl_test(name) = @show joinpath(msl_dir, "test", name)
     @safetestset "Magnetic" include($(@eval msl_test("Magnetic/magnetic.jl")))
 
     # Mechanical
-    # 1 test is broken here as something is going wrong in Bareiss that we don't understand casing an assertion to fail.
     @safetestset "Mechanical Rotation" include($(@eval msl_test("Mechanical/rotational.jl")))
     @safetestset "Mechanical Translation" include($(@eval msl_test("Mechanical/translational.jl")))
     @safetestset "Mechanical Translation Modelica" include($(@eval msl_test("Mechanical/translational_modelica.jl")))

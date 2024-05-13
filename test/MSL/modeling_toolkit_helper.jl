@@ -16,10 +16,9 @@ const access_var = DMTK.access_var
 const is_differential = DMTK.is_differential
 const isvar = DMTK.isvar
 const split_namespaces_var = DMTK.split_namespaces_var
-const MTKConnector_AST = DMTK.MTKConnector_AST
 
 function DAECompiler.IRODESystem(model::MTK.ODESystem; debug_config=(;))
-    T = eval(MTKConnector_AST(model; scope=DAECompiler.Intrinsics.root_scope))
+    T = @declare_MTKConnector model
     # We assume no user set parameters for the MTK tests
     T_parameterless = T{@NamedTuple{}}
     DAECompiler.IRODESystem(Tuple{T_parameterless}; debug_config)
