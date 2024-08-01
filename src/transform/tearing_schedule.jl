@@ -61,8 +61,10 @@ end
     record_ir!(state, "pre_tearing", ir)
 
     compact = IncrementalCompact(ir)
-    (eqs, vars) = find_eqs_vars(state, compact)
+    (eqs, vars) = find_eqs_vars(state.structure.graph, compact)
     ir = Core.Compiler.finish(compact)
+
+    ipo_result = getfield(state.sys, :result)
 
     @may_timeit debug_config "tearing" begin
         domtree = construct_domtree(ir.cfg.blocks)
@@ -249,15 +251,7 @@ end
                 idx = eqintrossa.id
                 # If we have line info for this equation, use it, otherwise default to `:1`.
                 line_entry = idx != 0 ? ir[SSAValue(idx)][:line] : Int32(1)
-                function ir_add!(_a, _b)
-                    a, b = _a, _b
-                    b === nothing && return _a
-                    a === nothing && return _b
-                    ni = NewInstruction(Expr(:call, +, a, b), Any, line_entry)
-                    z = insert_node_here!(compact, ni)
-                    compact[z][:flag] |= CC.IR_FLAG_REFINED
-                    z
-                end
+                _ir_add!(_a, _b) = ir_add!(compact, line_entry, _a, _b)
                 function var_at_level(var)
                     let vdiff_level = diff_level
                         while vdiff_level > 0
@@ -281,7 +275,7 @@ end
                 else
                     # We have avarcoeff * avar + ∑ coeff * var = 0.
                     # Rewrite to avar = (∑ (-coeff * var)) / avarcoeff
-                    new_ssa = mapfoldl(ir_add!, coeffs) do (thisvar, coeff)
+                    new_ssa = mapfoldl(_ir_add!, coeffs) do (thisvar, coeff)
                         if thisvar === var
                             avarcoeff = coeff
                             return nothing

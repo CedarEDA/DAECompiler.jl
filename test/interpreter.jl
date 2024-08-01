@@ -19,8 +19,8 @@ end
 
 let x = Lorenz1(10.0, 28.0, 8.0/3.0)
     x() # Sanity check
-    interp, frame = DAECompiler.typeinf_dae(Tuple{typeof(x)})
-    @test  has_dae_intrinsics(interp, frame.linfo)
+    interp, ci = DAECompiler.typeinf_dae(Tuple{typeof(x)})
+    @test  has_dae_intrinsics(interp, ci.def)
     @test !has_dae_intrinsics(interp, Tuple{typeof(-),Float64,Float64})
     @test !has_dae_intrinsics(interp, Tuple{typeof(*),Float64,Float64})
 end

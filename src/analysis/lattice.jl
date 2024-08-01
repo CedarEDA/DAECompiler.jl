@@ -220,6 +220,14 @@ end
 Base.copy(inc::Incidence) = Incidence(inc.typ, copy(inc.row), copy(inc.eps))
 Base.isempty(inc::Incidence) = iszero(inc.row) && isempty(inc.eps)  # slightly weaker than iszero as that also requires it to be Const(0.0)
 
+#################################### Eq ########################################
+struct Eq
+    id::Int
+end
+
+idnum(x::Eq) = x.id
+
+########################### Dependence Queries ################################
 "returns true if the incidence of this data is known and can be directly processed by `has_dependence` etc"
 has_simple_incidence_info(::Incidence) = true
 has_simple_incidence_info(::Const) = true
@@ -237,6 +245,21 @@ end
 has_dependence(::Const) = false
 has_dependence(ps::PartialStruct) = any(has_dependence, ps.fields)
 has_dependence(::Type) = true
+has_dependence(::Eq) = false
+
+
+"""
+returns true if statement may depend on time or state.
+NOTE: this ignores epsilon dependency, which is not normally relevant
+To include that you must do `has_dependence(x) || has_epsilon_dependence(x)`
+"""
+function has_dependence_other_than(typ::Incidence, allowed::BitSet)
+    return any(x->!(x-1 in allowed), rowvals(typ.row))
+end
+has_dependence_other_than(::Const, allowed::BitSet) = false
+has_dependence_other_than(ps::PartialStruct, allowed::BitSet) = any(f->has_dependence_other_than(f, allowed), ps.fields)
+has_dependence_other_than(::Type, allowed::BitSet) = true
+has_dependence_other_than(::Eq, allowed::BitSet) = false
 
 "returns true if statement may depend on time"
 function has_time_dependence(typ::Incidence)
@@ -268,12 +291,6 @@ function has_state_dependence(typ::Incidence, state_var_nums)
 end
 has_state_dependence(::Const, _) = false
 
-#################################### Eq ########################################
-struct Eq
-    id::Int
-end
-
-idnum(x::Eq) = x.id
 
 ################################ PartialScope ###################################
 """

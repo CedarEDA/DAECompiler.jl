@@ -29,7 +29,7 @@ end
     daesol = solve(daeprob, IDA())
 
     odeprob = ODEProblem(sys, u0, tspan, rober);
-    odesol = solve(odeprob, FBDF(autodiff=false))
+    odesol = solve(odeprob, FBDF(autodiff=false), abstol=1e-7)
 
     for (sol, name) in ((daesol, "DAEProblem"), (odesol, "ODEProblem"))
         @testset "$(name)" begin

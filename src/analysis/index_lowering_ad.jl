@@ -58,12 +58,16 @@ function tearing_visit_custom!(ir::IRCode, ssa::Union{SSAValue,Argument}, order,
     return !has_dependence(typ)
 end
 
+struct SolvedVariable
+    ssa::Union{SSAValue, Float64}
+end
+
 """
 Scan `compact` for all variables and equations.
 """
-function find_eqs_vars(state, compact::IncrementalCompact)
-    eqs = Pair{SSAValue, Vector{SSAValue}}[ SSAValue(0) => SSAValue[] for _ in 1:nsrcs(state.structure.graph)]
-    vars = Union{SSAValue, NewSSAValue}[SSAValue(0) for _ in 1:ndsts(state.structure.graph)]
+function find_eqs_vars(graph, compact::IncrementalCompact)
+    eqs = Pair{SSAValue, Vector{SSAValue}}[ SSAValue(0) => SSAValue[] for _ in 1:nsrcs(graph)]
+    vars = Union{SSAValue, NewSSAValue, SolvedVariable}[SSAValue(0) for _ in 1:ndsts(graph)]
     for ((_, i), stmt) in compact
         if is_known_invoke_or_call(stmt, equation, compact)
             eq = compact[SSAValue(i)][:type].id
@@ -73,6 +77,8 @@ function find_eqs_vars(state, compact::IncrementalCompact)
             vars[var] = SSAValue(i)
         elseif is_equation_call(stmt, compact)
             push!(eqs[idnum(argextype(_eq_function_arg(stmt), compact))][2], SSAValue(i))
+        elseif is_known_invoke_or_call(stmt, solved_variable, compact)
+            vars[stmt.args[end-1]] = SolvedVariable(stmt.args[end])
         end
     end
     (eqs, vars)
@@ -80,7 +86,7 @@ end
 
 function find_eqs_vars(state)
     compact = IncrementalCompact(copy(state.ir))
-    find_eqs_vars(state, compact)
+    find_eqs_vars(state.structure.graph, compact)
 end
 
 @breadcrumb "ir_levels" function index_lowering_ad!(state, ils)
@@ -90,6 +96,7 @@ end
     (; var_to_diff, eq_to_diff, graph, solvable_graph) = state.structure
     linear_eqs = Dict(e=>(ei, 0) for (ei, e) in enumerate(ils.nzrows))
 
+
     # Start with a round of optimization to clean up the the IR. In general,
     # cleaning up the IR here is quite profitable, because Diffractor can
     # increase the size of the IR significantly.
@@ -97,7 +104,7 @@ end
     compact = IncrementalCompact(ir)
 
     # TODO: This could all be combined with the below into a single pass
-    (eqs, vars) = find_eqs_vars(state, compact)
+    (eqs, vars) = find_eqs_vars(state.structure.graph, compact)
     ir = finish(compact)
     record_ir!(state, "pre_diffractor_opt", ir)
 
@@ -135,6 +142,10 @@ end
     append!(eqs, (SSAValue(0)=>SSAValue[] for _ in 1:(length(eq_to_diff)-length(eqs))))
     append!(vars, fill(SSAValue(0), length(var_to_diff)-length(vars)))
     @may_timeit debug_config "diffractor" if !isempty(diff_ssas)
+        if getfield(state.sys, :result).ncallees != 0
+            error("Index lowering AD not implemented in IPO mode")
+        end
+
         domtree = construct_domtree(ir.cfg.blocks)
 
         function diff_one!(ir, ssa, dvar)
@@ -276,7 +287,7 @@ end
 
         # Rename state
         compact = IncrementalCompact(ir)
-        (eqs, vars) = find_eqs_vars(state, compact)
+        (eqs, vars) = find_eqs_vars(state.structure.graph, compact)
         # Some variables may look dead, but are used in linear equations
         # don't dce them just yet - we'll dce them below
         CC.non_dce_finish!(compact)

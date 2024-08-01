@@ -45,6 +45,21 @@ struct DAEGlobalCache
 end
 DAEGlobalCache() = @new_cache DAEGlobalCache(IdDict{MethodInstance,CodeInstance}())
 Base.empty!(cache::DAEGlobalCache) = empty!(cache.cache)
+CC.get(wvc::CC.WorldView{DAEGlobalCache}, key, default) =
+    Base.get(wvc.cache.cache, key, default)
+CC.getindex(wvc::CC.WorldView{DAEGlobalCache}, key) =
+    Base.getindex(wvc.cache.cache, key)
+CC.get(cache::DAEGlobalCache, key, default) =
+    Base.get(cache.cache, key, default)
+Base.get(cache::DAEGlobalCache, key, default) =
+    Base.get(cache.cache, key, default)
+CC.haskey(wvc::CC.WorldView{DAEGlobalCache}, key) =
+    Base.haskey(wvc.cache.cache, key)
+CC.setindex!(cache::DAEGlobalCache, val, key) =
+    Base.setindex!(cache.cache, val, key)
+CC.getindex(cache::DAEGlobalCache, key) =
+    Base.getindex(cache.cache, key)
+
 const GLOBAL_CODE_CACHE = @new_cache Dict{UInt, DAEGlobalCache}()
 function get_code_cache(args...)
     @static if !(VERSION ≥ v"1.11.0-DEV.1255")
@@ -81,6 +96,8 @@ struct DAEInterpreter <: AbstractInterpreter
     dae_cache::IdDict{InferenceResult,DAEInfo}
 
     var_to_diff::DiffGraph
+    var_kind::Vector{VarEqKind}
+    eq_kind::Vector{VarEqKind}
 
     # For debugging/Cthulhu integration only (TODO: Only collect this optionally)
     unopt::Dict{Union{MethodInstance,InferenceResult}, Cthulhu.InferredSource}
@@ -95,6 +112,8 @@ struct DAEInterpreter <: AbstractInterpreter
         code_cache::Union{DAEGlobalCache, Nothing} = nothing,
         dae_cache::IdDict{InferenceResult,DAEInfo} = IdDict{InferenceResult,DAEInfo}(), # we intentionally don't track this with `new_cache` as its not used again after inference is done and is kept only for debugging
         var_to_diff::DiffGraph = DiffGraph(0),
+        var_kind::Vector{VarEqKind} = VarEqKind[],
+        eq_kind::Vector{VarEqKind} = VarEqKind[],
         ipo_analysis_mode::Bool = false,
         in_analysis::Bool = false)
         if code_cache === nothing
@@ -106,7 +125,7 @@ struct DAEInterpreter <: AbstractInterpreter
             method_table = CachedMethodTable(InternalMethodTable(world))
         end
         return new(world, method_table, inf_cache, code_cache, dae_cache,
-            var_to_diff,
+            var_to_diff, var_kind, eq_kind,
             Dict{Union{MethodInstance,InferenceResult}, Cthulhu.InferredSource}(),
             Dict{Union{MethodInstance,InferenceResult}, Cthulhu.PC2Remarks}(),
             ipo_analysis_mode, in_analysis)
@@ -118,10 +137,12 @@ struct DAEInterpreter <: AbstractInterpreter
         code_cache::DAEGlobalCache = interp.code_cache,
         dae_cache::IdDict{InferenceResult,DAEInfo} = interp.dae_cache,
         var_to_diff::DiffGraph = DiffGraph(0),
+        var_kind::Vector{VarEqKind} = VarEqKind[],
+        eq_kind::Vector{VarEqKind} = VarEqKind[],
         ipo_analysis_mode = interp.ipo_analysis_mode,
         in_analysis = interp.in_analysis)
         return new(world, method_table, inf_cache, code_cache, dae_cache,
-            var_to_diff,
+            var_to_diff, var_kind, eq_kind,
             interp.unopt,
             interp.remarks,
             ipo_analysis_mode,
@@ -129,7 +150,7 @@ struct DAEInterpreter <: AbstractInterpreter
     end
 end
 
-Diffractor.disable_forward(interp::DAEInterpreter) = CC.NativeInterpreter()
+Diffractor.disable_forward(interp::DAEInterpreter) = CC.NativeInterpreter(interp.world)
 
 function CC.InferenceParams(::DAEInterpreter)
     return CC.InferenceParams(;
@@ -148,8 +169,54 @@ end
 #=CC.=#get_inference_world(interp::DAEInterpreter) = interp.world
 CC.get_inference_cache(interp::DAEInterpreter) = interp.inf_cache
 
-CC.cache_owner(interp::DAEInterpreter) = interp.code_cache
-CC.method_table(interp::DAEInterpreter) = interp.method_table
+if Base.__has_internal_change(v"1.12-alpha", :methodspecialization)
+    """
+        struct AnalysisSpec
+
+    The cache partition for DAECompiler analysis results. This is essentially
+    equivalent to a regular type inference, except that optimization ir prohibited
+    from inlining any functions that have frules and we perform the DAE analysis
+    on every ir after optimization.
+    """
+    struct AnalysisSpec; end
+
+    """
+        struct RHSSpec
+
+    Cache partition for the RHS
+    """
+    struct RHSSpec
+        key::TornCacheKey
+        ordinal::Int
+    end
+
+    Base.show(io::IO, ms::MethodSpecialization{RHSSpec}) = print(io, "RHS Spec#$(ms.data.ordinal) for ", ms.def)
+
+
+    """
+        struct SICMSpec
+
+    Cache partition for the state-invariant prologue
+    """
+    struct SICMSpec
+        key::TornCacheKey
+    end
+
+    Base.show(io::IO, ms::MethodSpecialization{SICMSpec}) = print(io, "SICM Spec for ", ms.def)
+
+    function CC.code_cache(interp::DAEInterpreter)
+        if interp.ipo_analysis_mode
+            return CC.WorldView(
+                CC.InternalCodeCache(Core.MethodSpecialization{AnalysisSpec}),
+                CC.WorldRange(CC.get_inference_world(interp)))
+        else
+            return interp.code_cache
+        end
+    end
+else
+    CC.cache_owner(interp::DAEInterpreter) = interp.code_cache
+    CC.method_table(interp::DAEInterpreter) = interp.method_table
+end
 
 # abstract interpretation
 # -----------------------
@@ -176,13 +243,14 @@ function Base.showerror(io::IO, e::IncompleteInferenceException)
     print(io, "Inference failed to discover a DAECompiler intrinsic during its initial scan.")
 end
 
-function structural_inc_ddt(var_to_diff::DiffGraph, inc::Union{Incidence, Const})
+function structural_inc_ddt(var_to_diff::DiffGraph, var_kind::Vector{VarEqKind}, inc::Union{Incidence, Const})
     isa(inc, Const) && return Const(zero(inc.val))
     r = _zero_row()
     function get_or_make_diff(v_offset::Int)
         v = v_offset - 1
         var_to_diff[v] !== nothing && return var_to_diff[v] + 1
         dv = add_vertex!(var_to_diff)
+        push!(var_kind, var_kind[v])
         add_edge!(var_to_diff, v, dv)
         return dv + 1
     end
@@ -211,7 +279,7 @@ widenincidence(@nospecialize(x)) = x
         if length(argtypes) == 2
             xarg = argtypes[2]
             if isa(xarg, Union{Incidence, Const})
-                return structural_inc_ddt(interp.var_to_diff, xarg)
+                return structural_inc_ddt(interp.var_to_diff, interp.var_kind, xarg)
             end
         end
     end
@@ -354,11 +422,20 @@ end
     return ret
 end
 
+if VERSION ≥ v"1.12.0-DEV.734"
+@override function CC.finishinfer!(state::InferenceState, interp::DAEInterpreter)
+    res = @invoke CC.finishinfer!(state::InferenceState, interp::AbstractInterpreter)
+    key = CC.is_constproped(state) ? state.result : state.linfo
+    interp.unopt[key] = Cthulhu.InferredSource(state)
+    return res
+end
+else
 @override function CC.finish(state::InferenceState, interp::DAEInterpreter)
     res = @invoke CC.finish(state::InferenceState, interp::AbstractInterpreter)
     key = CC.is_constproped(state) ? state.result : state.linfo
     interp.unopt[key] = Cthulhu.InferredSource(state)
     return res
+end
 end
 
 # TODO propagate debug configurations here
@@ -375,6 +452,24 @@ end
     return CC.finish(interp, opt, ir, caller)
 end
 
+if VERSION ≥ v"1.12.0-DEV.734"
+@override function CC.finish!(interp::DAEInterpreter, caller::InferenceState; can_discard_trees::Bool=CC.may_discard_trees(interp))
+    result = caller.result
+    opt = result.src
+    valid_worlds = result.valid_worlds
+    if opt isa OptimizationState # implies `may_optimize(interp) === true`
+        ir = opt.ir
+        if ir !== nothing
+            if isa(opt.src, CodeInfo)
+                opt.src.min_world = CC.first(valid_worlds)
+                opt.src.max_world = CC.last(valid_worlds)
+            end
+            result.src = DAECache(opt.src, copy(ir), interp.dae_cache[result])
+        end
+    end
+    return @invoke CC.finish!(interp::AbstractInterpreter, caller::InferenceState; can_discard_trees)
+end
+else
 @override function CC.finish!(interp::DAEInterpreter, caller::InferenceState)
     result = caller.result
     opt = result.src
@@ -387,17 +482,20 @@ end
     if opt isa OptimizationState # implies `may_optimize(interp) === true`
         ir = opt.ir
         if ir !== nothing
-            #= if isa(opt.src, CodeInfo)
+            #=
+            if isa(opt.src, CodeInfo)
                 opt.src.min_world = CC.first(valid_worlds)
                 opt.src.max_world = CC.last(valid_worlds)
-            end =#
+            end
+            =#
             result.src = DAECache(opt.src, copy(ir), interp.dae_cache[result])
         end
     end
     return nothing
 end
+end
 
-@override function CC.const_prop_entry_heuristic(interp::DAEInterpreter,
+@override function CC.const_prop_rettype_heuristic(interp::DAEInterpreter,
     result::MethodCallResult, si::StmtInfo, sv::InferenceState, force::Bool)
     edge = result.edge
     if edge !== nothing
@@ -410,7 +508,7 @@ end
             end
         end
     end
-    return @invoke CC.const_prop_entry_heuristic(interp::AbstractInterpreter,
+    return @invoke CC.const_prop_rettype_heuristic(interp::AbstractInterpreter,
         result::MethodCallResult, si::StmtInfo, sv::InferenceState, force::Bool)
 end
 
@@ -426,7 +524,9 @@ end
     method_info = CC.MethodInfo(inferred)
     ir = copy(ir)
     (; min_world, max_world) = inferred
-    if VERSION >= v"1.12.0-DEV.341"
+    if Base.__has_internal_change(v"1.12-alpha", :codeinfonargs)
+        argtypes = CC.va_process_argtypes(CC.optimizer_lattice(interp), argtypes, inferred.nargs, inferred.isva)
+    elseif VERSION >= v"1.12.0-DEV.341"
         argtypes = CC.va_process_argtypes(CC.optimizer_lattice(interp), argtypes, mi)
     end
     return IRInterpretationState(interp, method_info, ir, mi, argtypes,
@@ -579,6 +679,7 @@ function process_template!(𝕃, coeffs, eq_mapping, applied_scopes, argtypes, t
             @assert isa(arg, Eq)
             eq_mapping[idnum(template)] = idnum(arg)
         elseif CC.is_const_argtype(template)
+            #@Core.Compiler.show (arg, template)
             @assert CC.is_lattice_equal(DAE_LATTICE, arg, template)
         elseif isa(template, PartialScope)
             id = idnum(template)
@@ -621,7 +722,7 @@ function CalleeMapping(𝕃, argtypes::Vector{Any}, callee_result::DAEIPOResult)
     return CalleeMapping(coeffs, eq_mapping, applied_scopes)
 end
 
-function compute_missing_coeff!(coeffs, result, caller_var_to_diff, v)
+function compute_missing_coeff!(coeffs, result, caller_var_to_diff, caller_var_kind, v)
     # First find the rootvar, and if we already have a coeff for it
     # apply the derivatives.
     ndiffs = 0
@@ -636,21 +737,22 @@ function compute_missing_coeff!(coeffs, result, caller_var_to_diff, v)
         # Reached the root and it's an internal variable. We need to allocate
         # it in the caller now
         coeffs[v] = Incidence(add_vertex!(caller_var_to_diff))
+        push!(caller_var_kind, result.var_kind[v] == External ? Owned : CalleeInternal)
     end
     thisinc = coeffs[v]
 
     for _ = 1:ndiffs
         dv = result.var_to_diff[v]
-        coeffs[dv] = structural_inc_ddt(caller_var_to_diff, thisinc)
+        coeffs[dv] = structural_inc_ddt(caller_var_to_diff, caller_var_kind, thisinc)
         v = dv
     end
 
     return nothing
 end
 
-apply_linear_incidence(ret::Type, result::DAEIPOResult, caller_var_to_diff::DiffGraph, mapping::CalleeMapping) = ret
-apply_linear_incidence(ret::Const, result::DAEIPOResult, caller_var_to_diff::DiffGraph, mapping::CalleeMapping) = ret
-function apply_linear_incidence(ret::Incidence, result::DAEIPOResult, caller_var_to_diff::DiffGraph, mapping::CalleeMapping)
+apply_linear_incidence(ret::Type, result::DAEIPOResult, caller_var_to_diff::DiffGraph, caller_var_kind::Vector{VarEqKind}, caller_eq_kind::Vector{VarEqKind}, mapping::CalleeMapping) = ret
+apply_linear_incidence(ret::Const, result::DAEIPOResult, caller_var_to_diff::DiffGraph, caller_var_kind::Vector{VarEqKind}, caller_eq_kind::Vector{VarEqKind}, mapping::CalleeMapping) = ret
+function apply_linear_incidence(ret::Incidence, result::DAEIPOResult, caller_var_to_diff::DiffGraph, caller_var_kind::Vector{VarEqKind}, caller_eq_kind::Vector{VarEqKind}, mapping::CalleeMapping)
     coeffs = mapping.var_coeffs
 
     const_val = ret.typ
@@ -666,7 +768,7 @@ function apply_linear_incidence(ret::Incidence, result::DAEIPOResult, caller_var
         end
 
         if !isassigned(coeffs, v)
-            compute_missing_coeff!(coeffs, result, caller_var_to_diff, v)
+            compute_missing_coeff!(coeffs, result, caller_var_to_diff, caller_var_kind, v)
         end
 
         replacement = coeffs[v]
@@ -693,6 +795,19 @@ function apply_linear_incidence(ret::Incidence, result::DAEIPOResult, caller_var
     end
 
     return Incidence(const_val, new_row, BitSet())
+end
+
+function apply_linear_incidence(ret::Eq, result::DAEIPOResult, caller_var_to_diff::DiffGraph, caller_var_kind::Vector{VarEqKind}, caller_eq_kind::Vector{VarEqKind}, mapping::CalleeMapping)
+    eq_mapping = mapping.eqs[ret.id]
+    if eq_mapping == 0
+        push!(caller_eq_kind, Owned)
+        mapping.eqs[ret.id] = eq_mapping = length(caller_eq_kind)
+    end
+    return Eq(eq_mapping)
+end
+
+function apply_linear_incidence(ret::PartialStruct, result::DAEIPOResult, caller_var_to_diff::DiffGraph, caller_var_kind::Vector{VarEqKind}, caller_eq_kind::Vector{VarEqKind}, mapping::CalleeMapping)
+    return PartialStruct(ret.typ, Any[apply_linear_incidence(f, result, caller_var_to_diff, caller_var_kind, caller_eq_kind, mapping) for f in ret.fields])
 end
 
 if isdefined(CC, :abstract_eval_invoke_inst)
@@ -746,7 +861,7 @@ function _abstract_eval_invoke_inst(interp::DAEInterpreter, inst::Union{CC.Instr
         argtypes === nothing && return RT(Union{}, (false, true))
         # First arg is invoke mi
         if length(argtypes) == 3 && isa(argtypes[3], Union{Incidence, Const})
-            return RT(structural_inc_ddt(interp.var_to_diff, argtypes[3]), (false, true))
+            return RT(structural_inc_ddt(interp.var_to_diff, interp.var_kind, argtypes[3]), (false, true))
         end
         return RT(nothing, (false, true))
     end
@@ -804,12 +919,17 @@ function _abstract_eval_invoke_inst(interp::DAEInterpreter, inst::Union{CC.Instr
         argtypes = CC.collect_argtypes(interp, stmt.args, nothing, irsv)[2:end]
         callee_result = dae_result_for_inst(interp, inst)
         callee_result === nothing && return RT(nothing, (false, false))
-        if !isa(callee_result.extended_rt, Incidence)
+        if isa(callee_result.extended_rt, Const) || isa(callee_result.extended_rt, Type)
             return RT(nothing, (false, false))
         end
         mapping = CalleeMapping(CC.optimizer_lattice(interp), argtypes, callee_result)
-        new_rt = apply_linear_incidence(callee_result.extended_rt, callee_result, interp.var_to_diff, mapping)
+        new_rt = apply_linear_incidence(callee_result.extended_rt, callee_result, interp.var_to_diff, interp.var_kind, interp.eq_kind, mapping)
 
+        # If this callee has no internal equations and at most one non-linear return, then we are guaranteed
+        # never to need to fission this, so we can just treat it as a primitive.
+        if length(callee_result.total_incidence) == 0 && isa(callee_result.extended_rt, Incidence)
+
+        end
         # Remember this mapping, both for performance of not having to recompute it
         # and because we may have assigned caller variables to internal variables
         # that we now need to remember.
@@ -885,7 +1005,7 @@ end
     if !interp.ipo_analysis_mode
         return @invoke CC.compute_forwarded_argtypes(interp::AbstractInterpreter, arginfo::ArgInfo, sv::AbsIntState)
     end
-    @assert !interp.in_analysis
+    #@assert !interp.in_analysis
     𝕃ᵢ = typeinf_lattice(interp)
     argtypes = arginfo.argtypes
     new_argtypes = Vector{Any}(undef,length(arginfo.argtypes))
@@ -898,8 +1018,7 @@ end
             argt = Scope
         end
         if isa(argt, Incidence)
-            @show argtypes
-            error()
+            argt = argt.typ
         end
         new_argtypes[i] = argt
     end
@@ -919,8 +1038,9 @@ function typeinf_dae(@nospecialize(tt), world::UInt=get_world_counter();
         world=get_inference_world(interp),
         raise=false)
     match === nothing && single_match_error(tt)
-    frame = CC.typeinf_frame(interp, match.method, match.spec_types, match.sparams, #=run_optimizer=#true)
-    return interp, frame
+    mi = CC.specialize_method(match)
+    ci = CC.typeinf_ext(interp, mi, Core.Compiler.SOURCE_MODE_ABI)
+    return interp, ci
 end
 
 @noinline function single_match_error(@nospecialize tt)

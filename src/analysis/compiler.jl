@@ -36,7 +36,7 @@ function is_known_invoke(@nospecialize(x), @nospecialize(func), ir::Union{IRCode
     return singleton_type(ft) === func
 end
 
-using .Intrinsics: solved_variable
+using .Intrinsics: solved_variable, contribution
 is_solved_variable(stmt) = isexpr(stmt, :call) && stmt.args[1] == solved_variable ||
     isexpr(stmt, :invoke) && stmt.args[2] == solved_variable
 
@@ -329,15 +329,18 @@ function _make_argument_lattice_elem(which::Argument, @nospecialize(argt), add_v
         return argt
     elseif CC.isprimitivetype(argt)
         inc = Incidence(add_variable!(which))
-        return Incidence(argt, inc.row, inc.eps)
+        return argt === Float64 ? inc : Incidence(argt, inc.row, inc.eps)
     elseif isa(argt, PartialStruct)
         return PartialStruct(argt.typ, Any[make_argument_lattice_elem(which, f, add_variable!, add_equation!, add_scope!) for f in argt.fields])
-    elseif isabstracttype(argt) || ismutabletype(argt) || isa(argt, Union)
+    elseif isabstracttype(argt) || ismutabletype(argt) || !isa(argt, DataType)
         return nothing
     else
-        fields =  Any[]
+        fields = Any[]
         any = false
         # TODO: This doesn't handle recursion
+        if Base.datatype_fieldcount(argt) === nothing
+            return nothing
+        end
         for i = 1:length(fieldtypes(argt))
             # TODO: Can we make this lazy?
             ft = fieldtype(argt, i)
@@ -495,20 +498,25 @@ end
     singularity_root_ssas = SSAValue[]
     time_periodic_ssas = SSAValue[]
     var_to_diff = DiffGraph(0)
+    var_kind = VarEqKind[]
+    eq_kind = VarEqKind[]
     warnings = UnsupportedIRException[]
 
     names = OrderedDict{LevelKey, NameLevel}()
 
     nsysmscopes = 0
+    ncallees = 0
 
     function add_variable!(i::Union{SSAValue, Argument})
         v = add_vertex!(var_to_diff)
+        push!(var_kind, isa(i, Argument) ? External : Owned)
         push!(varssa, i)
         return v
     end
 
     function add_equation!(i::Union{SSAValue, Argument})
         push!(eqssas, i=>SSAValue[])
+        push!(eq_kind, isa(i, Argument) ? External : Owned)
         return length(eqssas)
     end
 
@@ -581,7 +589,7 @@ end
                 ir.stmts[i][:type] = Incidence(Const(0.0), _zero_row(), BitSet(ε))
                 CC.push!(externally_refined, i)
             elseif is_known_invoke(stmt, equation, ir)
-                @assert length(stmt.args) == 3
+                @assert length(stmt.args) >= 2
                 ir.stmts[i][:type] = Eq(add_equation!(SSAValue(i)))
                 CC.push!(externally_refined, i)
             elseif is_equation_call(stmt, ir, #=allow_call=#false)
@@ -691,6 +699,9 @@ end
             continue
         elseif isexpr(stmt, :splatnew)
             continue
+        elseif isexpr(stmt, :boundscheck)
+            ir.stmts[i][:type] = Incidence(Bool)
+            ir.stmts[i][:flag] |= CC.IR_FLAG_REFINED
         elseif isa(stmt, PhiNode)
             # Take into account control-dependent taint
             ir.stmts[i][:flag] |= CC.IR_FLAG_REFINED
@@ -712,7 +723,7 @@ end
     if caller !== nothing
         @assert interp.ipo_analysis_mode
     end
-    analysis_interp = DAEInterpreter(interp; var_to_diff, in_analysis=interp.ipo_analysis_mode)
+    analysis_interp = DAEInterpreter(interp; var_to_diff, var_kind, eq_kind, in_analysis=interp.ipo_analysis_mode)
     irsv = CC.IRInterpretationState(analysis_interp, method_info, ir, mi, argtypes,
                                     world, min_world, max_world)
     ultimate_rt, _ = CC._ir_abstract_constant_propagation(analysis_interp, irsv; externally_refined)
@@ -753,8 +764,12 @@ end
             type = ir[ssa][:type]
             if is_known_invoke(inst, variable, ir)
                 var_num = idnum(type)::Int
-                scope = argextype(inst.args[3], ir)
-                isa(scope, Incidence) && (scope = scope.typ)
+                if length(inst.args) == 2
+                    scope = Const(Scope())
+                else
+                    scope = argextype(inst.args[3], ir)
+                    isa(scope, Incidence) && (scope = scope.typ)
+                end
                 if (!isa(scope, Const) || !isa(scope.val, Intrinsics.AbstractScope)) && !is_valid_partial_scope(scope)
                     push!(warnings,
                         UnsupportedIRException(
@@ -769,7 +784,9 @@ end
                 # expect it to be constant anyway. However, if it's
                 # an SSAValue (with Const type), we don't want to worry
                 # about having to schedule it later.
-                inst.args[3] = nothing
+                if length(inst.args) == 3
+                    inst.args[3] = nothing
+                end
             elseif is_known_invoke_or_call(inst, state_ddt, ir)
                 vtyp = argextype(inst.args[3], ir)
                 if !isa(vtyp, Incidence)
@@ -865,13 +882,13 @@ end
         push!(inst.args, ic_nzc)
     end
 
-    neqs = length(eqssas)
+    neqs = length(eq_kind)
     graph = BipartiteGraph(neqs, length(var_to_diff))
     solvable_graph = BipartiteGraph(neqs, length(var_to_diff))
     eq_to_diff = DiffGraph(neqs)
     total_incidence = Vector{Any}(undef, neqs)
 
-    eq_callee_mapping = Vector{Union{Nothing, Pair{SSAValue, Int}}}(nothing, neqs)
+    eq_callee_mapping = Vector{Union{Nothing, Vector{Pair{SSAValue, Int}}}}(nothing, neqs)
 
     for (ieq, (ssa, _)) in enumerate(eqssas)
         isa(ssa, Argument) && continue
@@ -881,7 +898,7 @@ end
         end
         eqinst = eqinst::Expr
         @assert ieq == ir[ssa][:type].id
-        scope = argextype(eqinst.args[3], ir)
+        scope = length(eqinst.args) == 3 ? argextype(eqinst.args[3], ir) : Const(Scope())
         eqnum = idnum(ir[ssa][:type])::Int
 
         if !isa(scope, Const) && !is_valid_partial_scope(scope)
@@ -891,8 +908,10 @@ end
         else
             record_this_scope!(scope, varssa, eqnum, @o _.eq)
         end
-        # Delete scope (see above)
-        eqinst.args[3] = nothing
+        if length(eqinst.args) == 3
+            # Delete scope (see above)
+            eqinst.args[3] = nothing
+        end
     end
 
     for ssa in eqcallssas
@@ -911,15 +930,14 @@ end
         ieq = eqeq.id
 
         eqssaval = eqcall.args[3]
-        if !isa(eqssaval, SSAValue)
-            isa(eqssaval, Argument) && continue
+        if !isa(eqssaval, SSAValue) && !isa(eqssaval, Argument)
             if !iszero(eqssaval)
                 return UncompilableIPOResult(warnings, UnsupportedIRException(
                     "Equation call for $ieq at $ssa is set to $eqssaval. The system is unsolvable.", ir))
             end
             continue
         end
-        inc = ir[eqssaval][:type]
+        inc = argextype(eqssaval, ir)
         if !isa(inc, Incidence)
             if caller === nothing
                 record_ir!(debug_config, "compute_structure_error", ir)
@@ -955,12 +973,12 @@ end
     structure = SystemStructure(complete(var_to_diff), complete(eq_to_diff), graph, solvable_graph)
 
     if caller !== nothing
-        handler_at, handlers = CC.compute_trycatch(ir, Core.Compiler.BitSet())
+        handler_info = CC.compute_trycatch(ir)
         for i = 1:length(ir.stmts)
             inst = ir[SSAValue(i)]
             stmt = inst[:stmt]
             if isexpr(stmt, :invoke)
-                if is_known_invoke(stmt, observed!, ir)
+                if is_known_invoke(stmt, observed!, ir) || is_equation_call(stmt, ir)
                     continue
                 end
 
@@ -976,14 +994,14 @@ end
                     end
 
                     callee_argtypes = CC.va_process_argtypes(CC.optimizer_lattice(analysis_interp),
-                        CC.collect_argtypes(analysis_interp, stmt.args[2:end], nothing, irsv), stmt.args[1])
+                        CC.collect_argtypes(analysis_interp, stmt.args[2:end], nothing, irsv), UInt(length(result.argtypes)), stmt.args[1].def.isva)
                     mapping = CalleeMapping(CC.optimizer_lattice(analysis_interp), callee_argtypes, result)
                 end
                 append!(warnings, result.warnings)
 
                 for i in (result.nexternalvars+1):length(mapping.var_coeffs)
                     if !isassigned(mapping.var_coeffs, i)
-                        compute_missing_coeff!(mapping.var_coeffs, result, var_to_diff, i)
+                        compute_missing_coeff!(mapping.var_coeffs, result, var_to_diff, var_kind, i)
                     end
                 end
 
@@ -992,20 +1010,28 @@ end
                     continue
                 end
 
-
-                for i = 1:result.nexternaleqs
-                    mapped_eq = mapping.eqs[i]
+                for eq = 1:length(result.eq_kind)
+                    mapped_eq = mapping.eqs[eq]
+                    mapped_eq == 0 && continue
+                    mapped_inc = apply_linear_incidence(result.total_incidence[eq], result, var_to_diff, var_kind, eq_kind, mapping)
                     if isassigned(total_incidence, mapped_eq)
-                        total_incidence[mapped_eq] += result.total_incidence[i]
+                        total_incidence[mapped_eq] = tfunc(Val(Core.Intrinsics.add_float),
+                            total_incidence[mapped_eq],
+                            mapped_inc)
                     else
-                        total_incidence[mapped_eq] = result.total_incidence[i]
+                        total_incidence[mapped_eq] = mapped_inc
                     end
+                    if eq_callee_mapping[mapped_eq] === nothing
+                        eq_callee_mapping[mapped_eq] = []
+                    end
+                    push!(eq_callee_mapping[mapped_eq], SSAValue(i)=>eq)
                 end
 
                 for (ieq, inc) in enumerate(result.total_incidence[(result.nexternaleqs+1):end])
-                    push!(total_incidence, apply_linear_incidence(inc, result, var_to_diff, mapping))
-                    push!(eq_callee_mapping, SSAValue(i)=>ieq)
-                    @assert mapping.eqs[ieq] == 0
+                    mapping.eqs[ieq] == 0 || continue
+                    push!(total_incidence, apply_linear_incidence(inc, result, var_to_diff, var_kind, eq_kind, mapping))
+                    push!(eq_callee_mapping, [SSAValue(i)=>ieq])
+                    push!(eq_kind, CalleeInternal)
                     mapping.eqs[ieq] = length(total_incidence)
                 end
 
@@ -1015,6 +1041,12 @@ end
                         # Scope from ScopedValue
                         scope_idx = i
                         while true
+                            if handler_info === nothing
+                                # Inherits scope from outside
+                                newscope = key
+                                break
+                            end
+                            (;handler_at, handlers) = handler_info
                             handler_idx = handler_at[scope_idx][1]
                             if handler_idx == 0
                                 # Inherits scope from outside
@@ -1064,6 +1096,8 @@ end
                         end
                     end
                 end
+                inst[:info] = MappingInfo(inst[:info], result, mapping)
+                ncallees += 1
             end
         end
     end
@@ -1075,14 +1109,86 @@ end
         end
     end
 
+    nimplicitoutpairs = 0
+    if caller !== nothing
+        ultimate_rt, nimplicitoutpairs = process_ipo_return!(ultimate_rt, eq_kind, var_kind,
+            var_to_diff, total_incidence, eq_callee_mapping)
+    end
+
     return DAEIPOResult(ir, ultimate_rt, argtypes,
         nexternalvars,
         nsysmscopes,
         nexternaleqs,
+        ncallees,
+        nimplicitoutpairs,
         complete(var_to_diff),
-        total_incidence, eq_callee_mapping,
+        var_kind,
+        total_incidence, eq_kind, eq_callee_mapping,
         names, nobserved, length(epsssas), ic_nzc, vcc_nzc,
-        warnings)
+        warnings,
+        Dict{TornCacheKey, IRCode}(),
+        Dict{TornCacheKey, CodeInstance}(),
+        Dict{TornCacheKey, CodeInstance}())
+end
+
+function process_ipo_return!(ultimate_rt::Incidence, eq_kind, var_kind, var_to_diff, total_incidence, eq_callee_mapping)
+    nonlinrepl = nothing
+    nimplicitoutpairs = 0
+    function get_nonlinrepl()
+        if nonlinrepl === nothing
+            nonlinrepl = add_vertex!(var_to_diff)
+            push!(var_kind, External)
+            nimplicitoutpairs += 1
+        end
+        return nonlinrepl
+    end
+    new_row = _zero_row()
+    new_eq_row = _zero_row()
+    for (v_offset, coeff) in zip(rowvals(ultimate_rt.row), nonzeros(ultimate_rt.row))
+        v = v_offset - 1
+        if var_kind[v] != External && coeff == nonlinear
+            get_nonlinrepl()
+            new_eq_row[v_offset] = nonlinear
+        else
+            new_row[v_offset] = coeff
+            while true
+                var_kind[v] = External
+                v = invview(var_to_diff)[v]
+                v === nothing && break
+            end
+        end
+    end
+    #=
+    if ultimate_rt.typ === Float64
+        get_nonlinrepl()
+    end
+    =#
+    if nonlinrepl !== nothing
+        new_eq_row[get_nonlinrepl()+1] = -1.
+        new_row[get_nonlinrepl()+1] = 1.
+        ultimate_rt = Incidence(Const(0.0), new_row, ultimate_rt.eps)
+        push!(total_incidence, Incidence(ultimate_rt.typ, new_eq_row, BitSet()))
+        push!(eq_callee_mapping, nothing)
+        push!(eq_kind, Owned)
+    end
+
+    return ultimate_rt, nimplicitoutpairs
+end
+
+function process_ipo_return!(ultimate_rt::Eq, eq_kind, args...)
+    eq_kind[ultimate_rt.id] = External
+    return ultimate_rt, 0
+end
+process_ipo_return!(ultimate_rt::Union{Type, PartialScope, PartialKeyValue, Const}, args...) = ultimate_rt, 0
+function process_ipo_return!(ultimate_rt::PartialStruct, args...)
+    nimplicitoutpairs = 0
+    fields = Any[]
+    for f in ultimate_rt.fields
+        (rt, n) = process_ipo_return!(f, args...)
+        nimplicitoutpairs += n
+        push!(fields, rt)
+    end
+    return PartialStruct(ultimate_rt.typ, fields), nimplicitoutpairs
 end
 
 function get_variable_name(names::OrderedDict{LevelKey, NameLevel}, var_to_diff, var_idx)
@@ -1210,9 +1316,11 @@ function merge_scopes!(names::OrderedDict{LevelKey, NameLevel}, key::Union{Scope
 
     stack = sym_stack(key)
     if isempty(stack)
-        @assert val.var == val.obs == val.eps == val.eq == nothing
-        for (k, v) in pairs(val.children)
-            merge_scopes!(names, k, v, mapping, obsoffset, epsoffset)
+        # val.{var, obs, eps, eq} ignored here - indicates unnamed scope
+        if val.children !== nothing
+            for (k, v) in pairs(val.children)
+                merge_scopes!(names, k, v, mapping, obsoffset, epsoffset)
+            end
         end
         return
     end

@@ -9,6 +9,7 @@ CentralizedCaches = "d1073d05-2d26-4019-b855-dfa0385fef5e"
 ChainRules = "082447d4-558c-5d27-93f4-14fc19e9eca2"
 ChainRulesCore = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
 Cthulhu = "f68482b8-f384-11e8-15f7-abe071a5a75f"
+DiffEqBase = "2b5f629d-d688-5b77-993f-72d75c75574e"
 DiffEqCallbacks = "459566f4-90b8-5000-8ac3-15dfb0a30def"
 Diffractor = "9f5e2b26-1114-432f-b630-d3fe2085c51c"
 Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
@@ -33,12 +34,24 @@ SymbolicIndexingInterface = "2efcf032-c050-4f8e-a9bb-153293bab1f5"
 TimerOutputs = "a759f4b9-e2f1-59dc-863e-4aeb61b1ea8f"
 Tracy = "e689c965-62c8-4b79-b2c5-8359227902fd"
 
+[sources]
+ModelingToolkitStandardLibrary = {rev = "ox/dae_compatible5", url = "https://github.com/CedarEDA/ModelingToolkitStandardLibrary.jl"}
+SciMLBase = {rev = "os/dae-get-du2", url = "https://github.com/CedarEDA/SciMLBase.jl"}
+SciMLSensitivity = {rev = "kf/mindep2", url = "https://github.com/CedarEDA/SciMLSensitivity.jl"}
+
+[weakdeps]
+ModelingToolkit = "961ee093-0014-501f-94e3-6117800e7a78"
+
+[extensions]
+DAECompilerModelingToolkitExt = "ModelingToolkit"
+
 [compat]
 Accessors = "0.1.36"
 CentralizedCaches = "1.1.0"
 ChainRules = "1.50"
 ChainRulesCore = "1.20"
 Cthulhu = "2.10.1"
+DiffEqBase = "6.149.2"
 Diffractor = "0.2.7"
 ForwardDiff = "0.10.36"
 ModelingToolkitStandardLibrary = "2.6.0"
@@ -55,15 +68,6 @@ Sundials = "4.19"
 SymbolicIndexingInterface = "0.3"
 julia = "1.11"
 
-[sources]
-ModelingToolkitStandardLibrary = {url = "https://github.com/CedarEDA/ModelingToolkitStandardLibrary.jl", rev = "ox/dae_compatible5"}
-
-[weakdeps]
-ModelingToolkit = "961ee093-0014-501f-94e3-6117800e7a78"
-
-[extensions]
-DAECompilerModelingToolkitExt = "ModelingToolkit"
-
 [extras]
 ControlSystemsBase = "aaaaaaaa-a6ca-5380-bf3e-84a91bcd477e"
 DataInterpolations = "82cc6244-b520-54b8-b5a6-8a565e85f1d0"
@@ -71,6 +75,7 @@ FiniteDiff = "6a86dc24-6348-571c-b903-95158fe2bd41"
 FiniteDifferences = "26cc04aa-876d-5657-8c51-4c34ba976000"
 IfElse = "615f187c-cbe4-4ef1-ba3b-2fcf58d6d173"
 InteractiveUtils = "b77e0a4c-d291-57a0-90e8-8db25a27a240"
+ModelingToolkit = "961ee093-0014-501f-94e3-6117800e7a78"
 ModelingToolkitStandardLibrary = "16a59e39-deab-5bd0-87e4-056b12336739"
 OrdinaryDiffEq = "1dea7af3-3e70-54e6-95c3-0bf5283fa5ed"
 Roots = "f2b01f46-fcfa-551c-844a-d8ac1e96c665"

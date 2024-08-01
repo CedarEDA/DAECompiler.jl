@@ -32,8 +32,8 @@ function test_frule_inlineability(ir, f, args...; frule_exists=true)
 end
 
 let tt = Tuple{SimpleFRule}
-    interp, frame = DAECompiler.typeinf_dae(tt);
-    ir = frame.result.src.ir
+    interp, ci = DAECompiler.typeinf_dae(tt);
+    ir = ci.inferred.ir
     t = 1.0
     test_frule_inlineability(ir, sin, t; frule_exists=true)
     test_frule_inlineability(ir, abs, sin(t); frule_exists=true)

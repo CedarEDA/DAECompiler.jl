@@ -36,6 +36,33 @@ struct UnsupportedIRException <: Exception
     ir::IRCode
 end
 
+struct TornCacheKey
+    diff_states::BitSet
+    alg_states::BitSet
+    param_vars::BitSet
+    var_schedule::Vector{Pair{BitSet, BitSet}}
+end
+
+struct TornIR
+    # Ends with a return of a tuple that is assumed to be
+    # first element of the closure environment for all subsequent IRs
+    ir_sicm::Union{Nothing, IRCode}
+
+    ir_seq::Vector{IRCode}
+end
+
+@enum VarEqKind begin
+    Owned
+    External
+    CalleeInternal
+end
+
+@static if !Base.__has_internal_change(v"1.12-alpha", :methodspecialization)
+    const MethodSpecialization = Core.MethodInstance
+else
+    import Core: MethodSpecialization
+end
+
 struct DAEIPOResult
     ir::IRCode
     extended_rt::Any
@@ -43,9 +70,13 @@ struct DAEIPOResult
     nexternalvars::Int # total vars is length(var_to_diff)
     nsysmscopes::Int
     nexternaleqs::Int
+    ncallees::Int
+    nimplicitoutpairs::Int
     var_to_diff::DiffGraph
+    var_kind::Vector{VarEqKind}
     total_incidence::Vector{Any}
-    eq_callee_mapping::Vector{Union{Nothing, Pair{SSAValue, Int}}}
+    eq_kind::Vector{VarEqKind}
+    eq_callee_mapping::Vector{Union{Nothing, Vector{Pair{SSAValue, Int}}}}
     names::OrderedDict{LevelKey, NameLevel}
     nobserved::Int
     neps::Int
@@ -53,6 +84,13 @@ struct DAEIPOResult
     vcc_nzc::Int
     # TODO: Chain these rather than copying them
     warnings::Vector{UnsupportedIRException}
+
+    # TODO: Should this by a code instance
+    tearing_cache::Dict{TornCacheKey, TornIR}
+
+    # TODO: Should this be looked up via the regular code instance cache instead?
+    sicm_cache::Dict{TornCacheKey, MethodSpecialization}
+    dae_finish_cache::Dict{TornCacheKey, MethodSpecialization}
 end
 
 struct UncompilableIPOResult

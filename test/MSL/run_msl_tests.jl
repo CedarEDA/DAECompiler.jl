@@ -12,7 +12,7 @@ include(joinpath(Base.pkgdir(DAECompiler), "test", "MSL", "modeling_toolkit_help
 
 # Run the tests
 const msl_dir = Base.pkgdir(ModelingToolkitStandardLibrary)
-msl_test(name) = @show joinpath(msl_dir, "test", name)
+msl_test(name) = joinpath(msl_dir, "test", name)
 @testset "MSL" begin
     # Blocks
     @safetestset "Blocks: math" include($(@eval msl_test("Blocks/math.jl")))

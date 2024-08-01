@@ -157,10 +157,11 @@ struct IRODESystem
     function IRODESystem(tt::Type{<:Tuple{Any}};
                          fallback_interp::AbstractInterpreter = Core.Compiler.NativeInterpreter(),
                          debug_config = (;),
-                         ipo_analysis_mode = false)
+                         ipo_analysis_mode = false,
+                         world::UInt=get_world_counter())
         debug_config = DebugConfig(debug_config, tt)
-        @may_timeit debug_config "typeinf_dae" interp, frame = typeinf_dae(tt; ipo_analysis_mode)
-        mi = frame.linfo
+        @may_timeit debug_config "typeinf_dae" interp, ci = typeinf_dae(tt, world; ipo_analysis_mode)
+        mi = ci.def
         @may_timeit debug_config "compute_structure" result = compute_structure(interp, mi, debug_config)
         for warning in result.warnings
             @warn warning.msg ir = warning.ir
@@ -214,6 +215,7 @@ function add_equation_row!(graph, solvable_graph, ieq::Int, inc::Incidence)
         coeff !== nonlinear && add_edge!(solvable_graph, ieq, v-1)
     end
 end
+add_equation_row!(graph, solvable_graph, ieq::Int, c::Const) = nothing
 
 DebugConfig(obj) = DebugConfig(get_sys(obj))
 

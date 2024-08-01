@@ -57,7 +57,7 @@ const _fdm = FiniteDifferences.central_fdm(5, 1; max_range=1e-1)
     @test ntime >= 2
     @test size(u) == (3, ntime)
     @test size(dσ) == (3, ntime)
-    @test size(dρ) == (3, ntime) 
+    @test size(dρ) == (3, ntime)
     @test size(dβ) == (3, ntime)
     @test size(d_unused) == (3, ntime)
     @test all(!isnan, u)
@@ -68,7 +68,7 @@ const _fdm = FiniteDifferences.central_fdm(5, 1; max_range=1e-1)
 
     # Test DAECompiler.reconstruct_sensitivities
     (dσ_dsyms, dρ_dsyms, dβ_dsyms, d_unused_dsyms) = reconstruct_sensitivities(sol, [sys.y, sys.x, sys.one_x, sys.two_x, sys.ten_x, sys.ρ_x])
-    
+
     @test size(dσ_dsyms) == (6, length(sol.t))
     @test size(dρ_dsyms) == (6, length(sol.t))
     @test size(dβ_dsyms) == (6, length(sol.t))
@@ -117,7 +117,8 @@ const _fdm = FiniteDifferences.central_fdm(5, 1; max_range=1e-1)
         sol = solve(sprob, Rodas5P(autodiff=false); saveat, initializealg=CustomBrownFullBasicInit(), reltol=1e-10, abstol=1e-10)
         return DAECompiler.batch_reconstruct(sol, [sys.y, sys.x, sys.one_x, sys.two_x, sys.ten_x, sys.ρ_x])
     end
-    fdobs_dp = FiniteDifferences.jacobian(_fdm, wrapped_sol, foo)[1]
+    foo_vec, from_vec = FiniteDifferences.to_vec(foo)
+    fdobs_dp = FiniteDifferences.jacobian(_fdm, wrapped_sol ∘ from_vec, foo_vec)[1]
 
     @test ≈(dσ_dsyms, reshape(fdobs_dp[:,1], size(dσ_dsyms)); rtol=1e-3, atol=1e-6)
     @test ≈(dρ_dsyms, reshape(fdobs_dp[:,2], size(dρ_dsyms)); rtol=1e-3, atol=1e-6)

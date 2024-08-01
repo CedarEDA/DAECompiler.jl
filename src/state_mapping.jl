@@ -343,6 +343,26 @@ function (ro::ODEReconstructedObserved)(sym::ScopeRef, u, p, t)
     return batch_reconstruct(ro, [sym], [], [u], p, [t])[1]
 end
 
+function (ro::DAEReconstructedObserved)(sym::Vector{<:ScopeRef}, u, p, t)
+    # TODO: More upstream work is required before we can provide `du` everywhere,
+    #       so for now incorrectly provide zeros in some cases.
+    du = zero(u)
+    return vec(batch_reconstruct(ro, sym, [du], [u], p, [t]))
+end
+
+function (ro::DAEReconstructedObserved)(sym::Vector{<:ScopeRef}, du, u, p, t)
+    if du === nothing
+        # TODO: More upstream work is required before we can provide `du` everywhere,
+        #       so for now incorrectly provide zeros in some cases.
+        du = zero(u)
+    end
+    return vec(batch_reconstruct(ro, sym, [du], [u], p, [t]))
+end
+
+function (ro::ODEReconstructedObserved)(sym::Vector{<:ScopeRef}, u, p, t)
+    return vec(batch_reconstruct(ro, sym, [], [u], p, [t]))
+end
+
 """
     reconstruct_time_deriv(sol::SciMLBase.AbstractODESolution, syms, ts=sol.t)
 

@@ -90,7 +90,7 @@ function StateSelection.check_consistency(state::IRTransformationState, _)
         (eqs, vars) = find_eqs_vars(state)
 
         varwhitelist = var_to_diff .== nothing
-        var_eq_matching = maximal_matching(graph, eq -> true, v -> varwhitelist[v]) # not assigned
+        var_eq_matching = maximal_matching(graph, srcfilter=eq -> true, dstfilter=v -> varwhitelist[v]) # not assigned
         # Just use `error_reporting` to do conditional
         iseqs = n_highest_vars < neqs
         if iseqs
@@ -98,7 +98,7 @@ function StateSelection.check_consistency(state::IRTransformationState, _)
             bad_idxs = findall(isequal(unassigned), @view eq_var_matching[1:nsrcs(graph)])
             names = find_equation_names(bad_idxs)
         else
-            
+
             bad_idxs = findall(isequal(unassigned), var_eq_matching)
             names = Union{Nothing, Symbol}[
                 findfirst(x->x.var == idx,

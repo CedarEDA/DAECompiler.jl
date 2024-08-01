@@ -6,13 +6,13 @@ This constructs a function, which for the listed `vars` and `obs` returns their 
 @breadcrumb "ir_levels" function construct_reconstruction_time_derivative(
     tsys::TransformedIRODESystem, vars::AbstractVector{Int64}, obs::AbstractVector{Int64}, isdae::Bool;
 )
-    isdae && error("DAE not yet supported")    
+    isdae && error("DAE not yet supported")
     debug_config=DebugConfig(tsys)
     (; var_assignment, neqs) = assign_vars_and_eqs(tsys, isdae)
     check_variable_specification_preconditions(tsys, vars, obs)
 
     ir = copy(tsys.state.ir)  # TODO: maybe we use the IR that we get from prepare_ir_for_differentiation
-    
+
     # Set the argtypes to (du, u, p, t) we will refine this later
     empty!(ir.argtypes)
     push!(ir.argtypes, Tuple{})
@@ -25,7 +25,7 @@ This constructs a function, which for the listed `vars` and `obs` returns their 
     push!(ir.argtypes, Number)                   # t
 
     (dvar_out, dobs_out, du, u, p, t) = Argument.(2:7)
-    
+
 
     diff_ssas = filter_reconstruction_output_ssas(ir)
     # Perform AD transform
@@ -74,7 +74,7 @@ end
 function insert_selected_state_time_derivatives!(ir, var_assignment, vars, dvar_out, du)
     for (out_idx, var) in enumerate(vars)
         var_ii, in_du = var_assignment[var]
-        iszero(var_ii) && continue  # not selected   
+        iszero(var_ii) && continue  # not selected
         partial_ssa = insert_node!(ir, SSAValue(1), NewInstruction(Expr(:call, Base.getindex, du, var_ii)), false)
         insert_node!(ir, partial_ssa, NewInstruction(Expr(:call, Base.setindex!, dvar_out, partial_ssa, out_idx)), true)
     end

@@ -39,7 +39,7 @@ function check_tgrad_mostly_eliminated(f)
 
     @test src.stmts[end-1][:inst].args[1] == GlobalRef(Base, :memoryrefset!)
     @test src.stmts[end-1][:inst].args[2] == Core.SSAValue(length(src.stmts)-2)
-    @test src.stmts[end-2][:inst].args[1] == GlobalRef(Base, :memoryref)
+    @test src.stmts[end-2][:inst].args[1] == GlobalRef(Base, :memoryrefnew)
 end
 
 

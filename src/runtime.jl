@@ -135,42 +135,70 @@ module Intrinsics
         return nothing
     end
 
+    export StateKind, AssignedDiff, UnassignedDiff, AlgebraicDerivative, Algebraic
+    @enum StateKind begin
+        AssignedDiff=1
+        UnassignedDiff
+        AlgebraicDerivative
+        Algebraic
+    end
+    const LastStateKind = Algebraic
+    Base.to_index(kind::StateKind) = Int(kind)
+
+    @noinline function state(slot::Int, kind::StateKind)
+        Base.inferencebarrier(error)("Internal placeholder left in final code")
+        return nothing
+    end
+
+    export EquationKind, StateDiff, Explicit, LastEquationKind
+    @enum EquationKind begin
+        StateDiff=Int(LastStateKind)+1
+        Explicit
+    end
+    const LastEquationKind = Explicit
+    Base.to_index(kind::EquationKind) = Int(kind)
+
+    @noinline function contribution(slot::Int, kind::EquationKind, val)
+        Base.inferencebarrier(error)("Internal placeholder left in final code")
+        return nothing
+    end
+
     # These will get replaced in the optimization pass
-    @noinline Base.@assume_effects :nothrow :effect_free :terminates_globally function variable(name::Union{AbstractScope,Nothing})
-        check_bad_runtime_intrinsic()
+    @noinline Base.@assume_effects :nothrow :effect_free :terminates_globally function variable(name::AbstractScope)
+        Base.inferencebarrier(check_bad_runtime_intrinsic)()
         Base.inferencebarrier(14.0)::Float64
     end
     @inline variable() = variable(root_scope)
-    @noinline Base.@assume_effects :nothrow :effect_free :terminates_globally function epsilon(name::Union{AbstractScope,Nothing})
-        check_bad_runtime_intrinsic()
+    @noinline Base.@assume_effects :nothrow :effect_free :terminates_globally function epsilon(name::AbstractScope)
+        Base.inferencebarrier(check_bad_runtime_intrinsic)()
         Base.inferencebarrier(0.0)::Float64
     end
     @inline epsilon() = epsilon(root_scope)
-    @noinline Base.@assume_effects :nothrow :terminates_globally function observed!(val, name::Union{AbstractScope,Nothing})
-        check_bad_runtime_intrinsic()
+    @noinline Base.@assume_effects :nothrow :terminates_globally function observed!(val, name::AbstractScope)
+        Base.inferencebarrier(check_bad_runtime_intrinsic)()
         Base.donotdelete(val)
     end
     @inline observed!(val) = observed!(val, root_scope)
     @noinline Base.@assume_effects :nothrow :terminates_globally function singularity_root!(val)
-        check_bad_runtime_intrinsic()
+        Base.inferencebarrier(check_bad_runtime_intrinsic)()
         Base.donotdelete(val)
     end
     @noinline Base.@assume_effects :nothrow :terminates_globally function time_periodic_singularity!(offset, period, count)
-        check_bad_runtime_intrinsic()
+        Base.inferencebarrier(check_bad_runtime_intrinsic)()
         Base.donotdelete(offset)
         Base.donotdelete(period)
         Base.donotdelete(count)
     end
     @noinline Base.@assume_effects :nothrow :effect_free :terminates_globally function state_ddt(val::Number)
-        check_bad_runtime_intrinsic()
+        Base.inferencebarrier(check_bad_runtime_intrinsic)()
         Base.inferencebarrier(0.0)::Float64
     end
     @noinline Base.@assume_effects :nothrow :effect_free :terminates_globally function sim_time()
-        check_bad_runtime_intrinsic()
+        Base.inferencebarrier(check_bad_runtime_intrinsic)()
         Base.inferencebarrier(0.0)::Float64
     end
     @noinline Base.@assume_effects :nothrow :effect_free :terminates_globally function ddt(x::Number)
-        check_bad_runtime_intrinsic()
+        Base.inferencebarrier(check_bad_runtime_intrinsic)()
         return _UNKNOWN_ZERO
     end
 

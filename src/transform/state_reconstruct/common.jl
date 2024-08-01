@@ -3,7 +3,7 @@ function check_variable_specification_preconditions(tsys, vars, obs)
     # Only allow sorted variable specifications; this avoids us compiling different reconstruction
     # functions for simple permutations in the order in which we ask for variables.
     compact = IncrementalCompact(copy(tsys.state.ir))
-    (_, state_vars) = find_eqs_vars(tsys.state, compact)
+    (_, state_vars) = find_eqs_vars(tsys.state.structure.graph, compact)
     for (name, set, max) in (("variable", vars, length(state_vars)), ("observable", obs, tsys.state.nobserved))
         if !isempty(set)
             if !issorted(set) || length(unique(set)) != length(set)

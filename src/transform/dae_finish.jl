@@ -11,7 +11,7 @@ with singular mass-matrix support.
     (; graph, var_to_diff) = state.structure
     debug_config = DebugConfig(state)
     p_type = parameter_type(get_sys(state))
-    
+
     # Read in from the last level before any DAE or ODE-specific `ir_levels`
     # We assume this is named `tearing_schedule!`
     ir = compact!(copy(state.ir))
@@ -236,3 +236,401 @@ with singular mass-matrix support.
         return (; F!, neqs, var_assignment, eq_assignment, dummy_map, mass_matrix)
     end
 end
+
+function ir_to_cache(ir::IRCode)
+    isva = false
+    slotnames = nothing
+    ir = Core.Compiler.copy(ir)
+    # if the user didn't specify a definition MethodInstance or filename Symbol to use for the debuginfo, set a filename now
+    ir.debuginfo.def === nothing && (ir.debuginfo.def = :var"generated IR for OpaqueClosure")
+    nargtypes = length(ir.argtypes)
+    nargs = nargtypes-1
+    sig = Base.Experimental.compute_oc_signature(ir, nargs, isva)
+    rt = Base.Experimental.compute_ir_rettype(ir)
+    src = ccall(:jl_new_code_info_uninit, Ref{CodeInfo}, ())
+    if slotnames === nothing
+        src.slotnames = fill(:none, nargtypes)
+    else
+        length(slotnames) == nargtypes || error("mismatched `argtypes` and `slotnames`")
+        src.slotnames = slotnames
+    end
+    src.slotflags = fill(zero(UInt8), nargtypes)
+    src.slottypes = copy(ir.argtypes)
+    src = Core.Compiler.ir_to_codeinf!(src, ir)
+    return src
+end
+
+const VectorViewType = SubArray{Float64, 1, Vector{Float64}, Tuple{UnitRange{Int}}, true}
+
+function dae_finish_ipo!(
+        interp,
+        ci::CodeInstance,
+        key::TornCacheKey,
+        ordinal::Int,
+        indexT=Int)
+
+    result = CC.traverse_analysis_results(ci) do @nospecialize result
+        return result isa Union{DAEIPOResult, UncompilableIPOResult} ? result : nothing
+    end
+
+    if haskey(result.dae_finish_cache, key)
+        ms = result.dae_finish_cache[key]
+        while !isa(ms.data, RHSSpec) || ms.data.ordinal != ordinal
+            ms = ms.next
+        end
+        return ms
+    end
+
+    allow_unassigned = false
+
+    torn = result.tearing_cache[key]
+    rhs_ms = nothing
+    old_daef_mi = nothing
+    assigned_slots = falses(length(result.total_incidence))
+
+    for (ir_ordinal, ir) in enumerate(torn.ir_seq)
+        ir = torn.ir_seq[ir_ordinal]
+
+        # Read in from the last level before any DAE or ODE-specific `ir_levels`
+        # We assume this is named `tearing_schedule!`
+        ir = copy(ir)
+        empty!(ir.argtypes)
+        push!(ir.argtypes, Tuple)  # SICM State
+        push!(ir.argtypes, Tuple)  # in vars
+
+        arg_range = 3:8
+        out_du_mm, out_eq, in_u_mm, in_u_unassgn, in_du_unassgn, in_alg =
+            Argument.(arg_range)
+        for arg in arg_range
+            push!(ir.argtypes, VectorViewType)
+        end
+
+        t = Argument(last(arg_range)+1)
+        push!(ir.argtypes, Float64)  #  t
+
+
+        processed_variables = BitSet()
+        var_assignment = Vector{Union{Nothing, Int}}(nothing, length(result.var_to_diff))
+
+        diff_states_in_callee = BitSet()
+
+        for i = 1:length(ir.stmts)
+            inst = ir[SSAValue(i)]
+            stmt = inst[:stmt]
+            info = inst[:info]
+
+            if isa(info, CC.ConstCallInfo) && any(result->isa(result, CC.SemiConcreteResult), info.results)
+                # Drop any semi-concrete results from the DAE-interpreter. We will redo
+                # them with the native interpreter to avoid getting suboptimal codegen.
+                ir[SSAValue(i)][:info] = info.call
+                ir[SSAValue(i)][:flag] |= CC.IR_FLAG_REFINED
+            end
+
+            if isexpr(stmt, :invoke) && isa(stmt.args[1], Tuple)
+                info::MappingInfo
+                callee_mi = stmt.args[1][1]
+                closure_env = stmt.args[2]
+                in_vars = stmt.args[3]
+                callee_ci = CC.get(CC.code_cache(interp), callee_mi, nothing)
+
+                @assert callee_ci !== nothing
+
+                spec_data = stmt.args[1]
+                callee_key = stmt.args[1][2]
+                callee_ordinal = stmt.args[1][end]::Int
+                callee_daef_mi = dae_finish_ipo!(interp, callee_ci, callee_key, callee_ordinal)
+                # Allocate a continuous block of variables for all callee alg and diff states
+
+                empty!(stmt.args)
+                push!(stmt.args, callee_daef_mi)
+                push!(stmt.args, closure_env)
+                push!(stmt.args, in_vars)
+
+                # Ordering from tearing is (AssignedDiff, UnassignedDiff, Algebraic, Explicit)
+                for (arg, range_idx) in zip(arg_range, (1, 4, 1, 2, 2, 3))
+                    push!(stmt.args, insert_node!(ir, SSAValue(i),
+                        NewInstruction(inst;
+                        stmt=Expr(:call, view, Argument(arg), spec_data[2+range_idx]),
+                        type=VectorViewType)))
+                end
+
+                # TODO: Track whether the system is autonomous
+                push!(stmt.args, t)
+            end
+
+            if is_known_invoke(stmt, variable, ir) || is_known_invoke_or_call(stmt, state_ddt, ir) || is_equation_call(stmt, ir)
+                display(ir)
+                error()
+            elseif is_known_invoke_or_call(stmt, Intrinsics.state, ir)
+                kind = stmt.args[end]::StateKind
+                slot = stmt.args[end-1]
+                which = kind == AssignedDiff        ? in_u_mm :
+                        kind == UnassignedDiff      ? in_u_unassgn :
+                        kind == AlgebraicDerivative ? in_du_unassgn :
+                        kind == Algebraic           ? in_alg : error()
+                replace_call!(ir, SSAValue(i), Expr(:call, Base.getindex, which, slot))
+            elseif is_known_invoke_or_call(stmt, Intrinsics.contribution, ir)
+                slot = stmt.args[end-2]::Int
+                kind = stmt.args[end-1]::EquationKind
+                red = stmt.args[end]
+                which = kind == StateDiff ? out_du_mm :
+                        kind == Explicit  ? out_eq : error()
+                prev = insert_node!(ir, SSAValue(i), NewInstruction(inst; stmt=Expr(:call, Base.getindex, which, slot), type=Float64))
+                sum = insert_node!(ir, SSAValue(i), NewInstruction(inst; stmt=Expr(:call, +, prev, red), type=Float64))
+                replace_call!(ir, SSAValue(i), Expr(:call, Base.setindex!, which, sum, slot))
+            elseif is_known_invoke(stmt, equation, ir)
+                # Equation - used, but only as an arg to equation call, which will all get
+                # eliminated by the end of this loop, so we can delete this statement, as
+                # long as we don't touch the type yet.
+                ir[SSAValue(i)][:inst] = Intrinsics.placeholder_equation
+            elseif is_solved_variable(stmt)
+                # Not used in this lowering
+                ir[SSAValue(i)] = nothing
+           else
+                replace_if_intrinsic!(ir, SSAValue(i), nothing, nothing, Argument(1), t, var_assignment)
+            end
+        end
+
+        # Just before the end of the function
+        idx = length(ir.stmts)
+        function ir_add!(a, b)
+            ni = NewInstruction(Expr(:call, +, a, b), Any, ir[SSAValue(idx)][:line])
+            insert_node!(ir, idx, ni)
+        end
+        ir = compact!(ir)
+
+        widen_extra_info!(ir)
+        src = ir_to_src(ir)
+
+        daef_mi = MethodSpecialization{RHSSpec}(ci.def, Tuple{}, Tuple{Tuple, Tuple, (VectorViewType for _ in arg_range)..., Float64})
+        daef_mi.data = RHSSpec(key, ir_ordinal)
+
+        daef_ci = CodeInstance(daef_mi, Tuple, Union{}, nothing,
+            src, Int32(0), UInt(1)#=ci.min_world=#, ci.max_world, ci.ipo_purity_bits, ci.purity_bits,
+            nothing, 0x0, src.debuginfo)
+
+        @atomic :release daef_mi.cache = daef_ci
+        global nrhscompiles += 1
+
+        if old_daef_mi !== nothing
+            @atomic :release old_daef_mi.next = daef_mi
+        end
+        old_daef_mi = daef_mi
+
+        if rhs_ms === nothing
+            rhs_ms = daef_mi
+        end
+    end
+
+    result.dae_finish_cache[key] = rhs_ms
+
+    ms = rhs_ms
+    while !isa(ms.data, RHSSpec) || ms.data.ordinal != ordinal
+        ms = ms.next
+    end
+    return ms
+end
+
+function ir_to_src(ir::IRCode)
+    isva = false
+    slotnames = nothing
+    ir.debuginfo.def === nothing && (ir.debuginfo.def = :var"generated IR for OpaqueClosure")
+    nargtypes = length(ir.argtypes)
+    nargs = nargtypes-1
+    sig = Base.Experimental.compute_oc_signature(ir, nargs, isva)
+    rt = Base.Experimental.compute_ir_rettype(ir)
+    src = ccall(:jl_new_code_info_uninit, Ref{CodeInfo}, ())
+    if slotnames === nothing
+        src.slotnames = Symbol[Symbol("arg$i") for i = 1:nargtypes]
+    else
+        length(slotnames) == nargtypes || error("mismatched `argtypes` and `slotnames`")
+        src.slotnames = slotnames
+    end
+    src.nargs = length(ir.argtypes)
+    src.isva = false
+    src.slotflags = fill(zero(UInt8), nargtypes)
+    src.slottypes = copy(ir.argtypes)
+    src = Core.Compiler.ir_to_codeinf!(src, ir)
+    return src
+end
+
+function dae_factory_gen(world::UInt, source::LineNumberNode, _, @nospecialize(fT))
+    @Core.Compiler.show fT
+    @Core.Compiler.show world
+    sys_ipo = IRODESystem(Tuple{fT}; world, ipo_analysis_mode=true);
+
+    result = getfield(sys_ipo, :result)
+    interp = getfield(sys_ipo, :interp)
+    codeinst = Core.Compiler.get(Core.Compiler.code_cache(interp), getfield(sys_ipo, :mi), nothing)
+
+    # For the top-level problem, all external vars are state-invariant, and we do no other fissioning
+    param_vars = BitSet(1:result.nexternalvars)
+
+    structure = make_structure_from_ipo(result)
+    complete!(structure)
+
+    varwhitelist = StateSelection.computed_highest_diff_variables(structure)
+
+    for param in param_vars
+        varwhitelist[param] = false
+    end
+
+    # Max match is the (unique) tearing result given the choice of states
+    var_eq_matching = complete(maximal_matching(structure.graph, Union{Unassigned, SelectedState};
+        dstfilter = var->varwhitelist[var]))
+
+    var_eq_matching = partial_state_selection_graph!(structure, var_eq_matching)
+
+    diff_vars = BitSet()
+    alg_vars = BitSet()
+
+    for (v, match) in enumerate(var_eq_matching)
+        v in param_vars && continue
+        if match === SelectedState()
+            push!(diff_vars, v)
+        elseif match === unassigned
+            push!(alg_vars, v)
+        end
+    end
+
+    key = TornCacheKey(diff_vars, alg_vars, param_vars, Vector{Pair{BitSet, BitSet}}())
+
+    DAECompiler.tearing_schedule!(interp, codeinst, key)
+    ir_factory = dae_factory_gen(interp, codeinst, key)
+    src = ir_to_src(ir_factory)
+    src.ssavaluetypes = length(src.code)
+    src.min_world = @atomic codeinst.min_world
+    src.max_world = @atomic codeinst.max_world
+
+    return src
+end
+
+function dae_factory_gen(interp, ci::CodeInstance, key)
+    result = CC.traverse_analysis_results(ci) do @nospecialize result
+        return result isa Union{DAEIPOResult, UncompilableIPOResult} ? result : nothing
+    end
+
+    torn_ir = result.tearing_cache[key]
+
+    (;ir_sicm) = torn_ir
+
+    ir_factory = copy(result.ir)
+    pushfirst!(ir_factory.argtypes, Tuple{})
+    compact = IncrementalCompact(ir_factory)
+
+    local line
+    if ir_sicm !== nothing
+        line = result.ir[SSAValue(1)][:line]
+        sicm = insert_node_here!(compact,
+            NewInstruction(Expr(:invoke, result.sicm_cache[key], (Argument(i+1) for i = 1:length(result.ir.argtypes))...), Tuple, line))
+    else
+        sicm = ()
+    end
+
+    argt = Tuple{Vector{Float64}, Vector{Float64}, Vector{Float64}, SciMLBase.NullParameters, Float64}
+
+    daef_ci = dae_finish_ipo!(interp, ci, key, 1)
+
+    # Create a small opaque closure to adapt from SciML ABI to our own internal
+    # ABI
+
+    numstates = zeros(Int, Int(LastEquationKind))
+
+    all_states = Int[]
+    for var = 1:length(result.var_to_diff)
+        kind = classify_var(result.var_to_diff, key, var)
+        kind == nothing && continue
+        numstates[kind] += 1
+        (kind != AlgebraicDerivative) && push!(all_states, var)
+    end
+
+    ir_oc = copy(result.ir)
+    empty!(ir_oc.argtypes)
+    push!(ir_oc.argtypes, Tuple)
+    push!(ir_oc.argtypes, Vector{Float64})
+    push!(ir_oc.argtypes, Vector{Float64})
+    push!(ir_oc.argtypes, Vector{Float64})
+    push!(ir_oc.argtypes, SciMLBase.NullParameters)
+    push!(ir_oc.argtypes, Float64)
+
+    oc_compact = IncrementalCompact(ir_oc)
+
+    # Zero the output
+    line = ir_oc[SSAValue(1)][:line]
+    insert_node_here!(oc_compact,
+        NewInstruction(Expr(:call, zero!, Argument(2)), VectorViewType, line))
+
+    # out_du_mm, out_eq, in_u_mm, in_u_unassgn, in_du_unassgn, in_alg
+    nassgn = numstates[AssignedDiff]
+    ntotalstates = numstates[AssignedDiff] + numstates[UnassignedDiff] + numstates[Algebraic]
+    out_du_mm = insert_node_here!(oc_compact,
+        NewInstruction(Expr(:call, view, Argument(2), 1:nassgn), VectorViewType, line))
+    out_eq = insert_node_here!(oc_compact,
+        NewInstruction(Expr(:call, view, Argument(2), (nassgn+1):ntotalstates), VectorViewType, line))
+
+    in_du_unassgn = insert_node_here!(oc_compact,
+        NewInstruction(Expr(:call, view, Argument(3), (nassgn+1):(nassgn+numstates[UnassignedDiff])), VectorViewType, line))
+    du_assgn = insert_node_here!(oc_compact,
+        NewInstruction(Expr(:call, view, Argument(3), 1:nassgn), VectorViewType, line))
+
+    in_u_mm = insert_node_here!(oc_compact,
+        NewInstruction(Expr(:call, view, Argument(4), 1:nassgn), VectorViewType, line))
+    in_u_unassgn = insert_node_here!(oc_compact,
+        NewInstruction(Expr(:call, view, Argument(4), (nassgn+1):(nassgn+numstates[UnassignedDiff])), VectorViewType, line))
+    in_alg = insert_node_here!(oc_compact,
+        NewInstruction(Expr(:call, view, Argument(4), (nassgn+numstates[UnassignedDiff]+1):ntotalstates), VectorViewType, line))
+
+    # Call DAECompiler-generated RHS with internal ABI
+    oc_sicm = insert_node_here!(oc_compact,
+        NewInstruction(Expr(:call, getfield, Argument(1), 1), Tuple, line))
+    insert_node_here!(oc_compact,
+        NewInstruction(Expr(:invoke, daef_ci, oc_sicm, (), out_du_mm, out_eq, in_u_mm, in_u_unassgn, in_du_unassgn, in_alg, Argument(6)), Nothing, line))
+
+    # Manually apply mass matrix
+    bc = insert_node_here!(oc_compact,
+        NewInstruction(Expr(:call, Base.Broadcast.broadcasted, -, out_du_mm, du_assgn), Any, line))
+    insert_node_here!(oc_compact,
+        NewInstruction(Expr(:call, Base.Broadcast.materialize!, out_du_mm, bc), Nothing, line))
+
+    # Return
+    insert_node_here!(oc_compact, NewInstruction(ReturnNode(nothing), Union{}, line))
+
+    ir_oc = finish(oc_compact)
+    oc = Core.OpaqueClosure(ir_oc)
+
+    line = result.ir[SSAValue(1)][:line]
+
+    oc_source_method = oc.source
+    # Sketchy, but not clear that we have something better for the time being
+    oc_ci = oc_source_method.specializations.cache
+    @atomic oc_ci.max_world = @atomic ci.max_world
+    @atomic oc_ci.min_world = 1 # @atomic ci.min_world
+
+    new_oc = insert_node_here!(compact, NewInstruction(Expr(:new_opaque_closure,
+        argt, Union{}, Nothing, oc_source_method, sicm), Core.OpaqueClosure, line), true)
+
+    differential_states = Bool[v in key.diff_states for v in all_states]
+
+    daef = insert_node_here!(compact, NewInstruction(Expr(:call, DAEFunction, new_oc),
+    DAEFunction, line), true)
+
+    # TODO: Ideally, this'd be in DAEFunction
+    daef_and_diff = insert_node_here!(compact, NewInstruction(
+        Expr(:call, tuple, daef, differential_states),
+        Tuple, line), true)
+
+    insert_node_here!(compact, NewInstruction(ReturnNode(daef_and_diff), Core.OpaqueClosure, line), true)
+
+    ir_factory = finish(compact)
+    global nfactorycompiles += 1
+
+    return ir_factory
+end
+
+function refresh()
+    @eval function dae_factory(f)
+        $(Expr(:meta, :generated_only))
+        $(Expr(:meta, :generated, dae_factory_gen))
+    end
+end
+refresh()

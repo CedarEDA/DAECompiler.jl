@@ -23,6 +23,11 @@ const CC = Core.Compiler
 import .CC: get_inference_world
 using Base: get_world_counter
 
+# counters (for debugging and perf tracking)
+global nsicmcompiles::Int = 0
+global nrhscompiles::Int = 0
+global nfactorycompiles::Int = 0
+
 const INIT_HOOKS = Function[]
 push_inithook!(f) = push!(INIT_HOOKS, f)
 __init__() = foreach(@nospecialize(f)->f(), INIT_HOOKS)
@@ -38,11 +43,13 @@ include("analysis/lattice.jl")
 include("cache.jl")
 include("analysis/interpreter.jl")
 include("irodesystem.jl")
+include("problem_interface.jl")
 include("analysis/compiler.jl")
 
 include("transform/common.jl")
 include("transform/ad_common.jl")
 include("transform/mtk_passes.jl")
+include("transform/tearing_schedule_ipo.jl")
 include("transform/tearing_schedule.jl")
 include("transform/dae_transform.jl")
 include("transform/dae_finish.jl")
