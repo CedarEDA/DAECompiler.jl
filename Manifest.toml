@@ -2,7 +2,7 @@
 
 julia_version = "1.12.0-DEV"
 manifest_format = "2.0"
-project_hash = "b0d211958e5f76ceaf845844fba08b1a94e0586b"
+project_hash = "9d5249fe19b49a22ced02b22d1ae82c501e8dc6e"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "aa4d425271a914d8c4af6ad9fccb6eb3aec662c7"
@@ -279,7 +279,13 @@ version = "2.12.7"
 deps = ["Accessors", "CentralizedCaches", "ChainRules", "ChainRulesCore", "Cthulhu", "DiffEqBase", "DiffEqCallbacks", "Diffractor", "Distributions", "ExprTools", "ForwardDiff", "Graphs", "LinearAlgebra", "NonlinearSolve", "OrderedCollections", "OrdinaryDiffEq", "PrecompileTools", "Preferences", "REPL", "Random", "SciMLBase", "SciMLSensitivity", "SparseArrays", "StateSelection", "StaticArraysCore", "Sundials", "SymbolicIndexingInterface", "TimerOutputs", "Tracy"]
 path = "."
 uuid = "32805668-c3d0-42c2-aafd-0d0a9857a104"
-version = "1.19.1"
+version = "1.21.0"
+
+    [deps.DAECompiler.extensions]
+    DAECompilerModelingToolkitExt = "ModelingToolkit"
+
+    [deps.DAECompiler.weakdeps]
+    ModelingToolkit = "961ee093-0014-501f-94e3-6117800e7a78"
 
 [[deps.DataAPI]]
 git-tree-sha1 = "abe83f3a2f1b857aac70ef8b269080af17764bbe"
@@ -1370,11 +1376,11 @@ weakdeps = ["ChainRulesCore"]
 
 [[deps.StateSelection]]
 deps = ["DocStringExtensions", "FindFirstFunctions", "Graphs", "LinearAlgebra", "Setfield", "SparseArrays", "UnPack"]
-git-tree-sha1 = "a8b73350924ed9bafc4da7a64483536e8d322a23"
+git-tree-sha1 = "ffb79f5e42e197c045f19e0731757148421fe83f"
 repo-rev = "main"
-repo-url = "git@github.com:JuliaComputing/StateSelection.jl.git"
+repo-url = "https://github.com/JuliaComputing/StateSelection.jl"
 uuid = "64909d44-ed92-46a8-bbd9-f047dfbdc84b"
-version = "0.1.0"
+version = "0.2.0"
 
     [deps.StateSelection.extensions]
     StateSelectionDeepDiffsExt = "DeepDiffs"
@@ -1641,7 +1647,7 @@ version = "1.3.1+0"
 [[deps.libblastrampoline_jll]]
 deps = ["Artifacts", "Libdl"]
 uuid = "8e850b90-86db-534c-a0d3-1478176c7d93"
-version = "5.10.1+0"
+version = "5.11.0+0"
 
 [[deps.nghttp2_jll]]
 deps = ["Artifacts", "Libdl"]
