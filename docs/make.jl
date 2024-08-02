@@ -3,22 +3,7 @@ if !(dirname(@__DIR__) ∈ Base.LOAD_PATH)
     insert!(Base.LOAD_PATH, 2, dirname(@__DIR__))
 end
 
-using Documenter, Base64
-
-# Normalize the documenter key if it's not already base64-encoded
-documenter_key = get(ENV, "DOCUMENTER_KEY", "")
-try
-    base64decode(documenter_key)
-catch e
-    if isa(e, ArgumentError)
-        if !endswith(documenter_key, "\n")
-            global documenter_key = string(documenter_key, "\n")
-        end
-        ENV["DOCUMENTER_KEY"] = base64encode(documenter_key)
-    else
-        rethrow(e)
-    end
-end
+using Documenter
 
 @info("Running any `0_setup.jl` files in the `src/` tree...")
 # Ensure that we've run any `0_setup.jl` files.
@@ -48,7 +33,7 @@ makedocs(;
 )
 
 deploydocs(
-    repo = "github.com/JuliaComputing/DAECompiler.jl.git",
+    repo = "github.com/CedarEDA/DAECompiler.jl.git",
     branch = "docs",
     target = "build",
 )
