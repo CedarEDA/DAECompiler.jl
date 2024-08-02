@@ -1,0 +1,41 @@
+---
+name: Documentation
+
+# Cancel in-progress documentation builds as soon as new commits are pushed to
+# the same branch to prevent unnecessary builds from clogging up the GitHub
+# Actions runner queue.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+on:
+  push:
+    branches:
+      - 'main'
+      - 'release-*'
+    tags:
+      - 'v*'
+  pull_request:
+
+# needed to allow julia-actions/cache to delete old caches that it has created
+permissions:
+  actions: write
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: julia-actions/setup-julia@v1
+        with:
+          version: 'nightly'
+          arch: x64
+      - uses: julia-actions/cache@v1
+      - uses: julia-actions/julia-buildpkg@v1
+        with:
+          project: 'docs'
+      - name: Build and deploy
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: julia --project=docs/ docs/make.jl
