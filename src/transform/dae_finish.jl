@@ -627,6 +627,17 @@ function dae_factory_gen(interp, ci::CodeInstance, key)
     return ir_factory
 end
 
+"""
+    dae_factory(f)
+
+Given Julia function `f` compatible with DAECompiler's model representation, return a `DAEFunction`
+suitable for use with DAEProblem. The DAEFunction will be specific to the parameterization of `f`.
+To obtain a new parameterization, re-run this function. The runtime complexity of this function is
+at most equivalent to one ordinary evaluation of `f`, but this function may have significant
+compile-time cost (cached as usual for Julia code).
+"""
+function dae_factory end
+
 function refresh()
     @eval function dae_factory(f)
         $(Expr(:meta, :generated_only))

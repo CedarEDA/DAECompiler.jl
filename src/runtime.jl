@@ -4,10 +4,18 @@ module Intrinsics
         Scope, GenScope, ddt, epsilon
 
     """
-        variable([name])
+        variable([scope])
 
     This intrinsic introduces a variable into the system of equations.
-    It is an intrinsic so it gets replaced by DAECompiler in the optimization pass.
+    Optionally takes a `scope` that may be used to symbolically refer to this variable
+    in solution objects. The passed `scope` never affects the semantics of the system.
+    If two variables are given the same `scope`, they remain semantically separate
+    (but a warning is generated and they cannot be accessed symbolically in solution objects).
+
+    Variables are not guaranteed to become part "states", i.e. of the integrator state
+    given to the numerical integrator. DAECompiler will automatically generate appropriate
+    accessors to re-constitute eliminated variables from the integrator state using the
+    equations of the system.
     """
     function variable end
 
@@ -28,10 +36,15 @@ module Intrinsics
     function observed! end
 
     """
-        equation!(val, [name])
+        equation!(val, [scope])
 
-    This intrinsic marks an equation. Specifically, once the system is lowered to an SSA form,
-    equation! constrains the value of a given SSA variable to zero.
+    This intrinsic marks an equation. The system of equations is considered satisfied when all
+    `val`s passed to all `equation`s are equal to zero (up to tolerance).
+
+    Like all intrinsics, the `scope` argument is non-semantic and two `equation!` calls with
+    the same `scope` will introduce separate equations. To build up one equation from multiple
+    pieces, see the lower-level `equation` (no `!`) intrinsic. Note that `equation!(val, scope)`
+    is equivalent to and implemented as `equation(scope)(val)`. It is provided for convenience.
     """
     function equation! end
 
@@ -115,10 +128,12 @@ module Intrinsics
     end
 
     """
-        ddt
+        ddt(x)
 
-    Exposes DAECompiler's demand-driven AD capabilities to user code. The return
-    value of the function is `d/dt` of its argument.
+    This intrinsic takes the total derivative of its argument with respect to the systems
+    independent variable (i.e. `sim_time()`). There are no special semantic restrictions
+    on `x`, although any expression that contributes to it must be AD-able (e.g. have registered
+    ChainRules).
     """
     function ddt end
 
