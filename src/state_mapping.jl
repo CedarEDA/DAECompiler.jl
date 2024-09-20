@@ -1,8 +1,8 @@
 using SciMLBase, SymbolicIndexingInterface
 
-struct ScopeRef{T}
+struct ScopeRef{T, ST}
     sys::T
-    scope::Scope
+    scope::Scope{ST}
 end
 Base.Broadcast.broadcastable(ref::ScopeRef) = Ref(ref)  # broadcast as scalar
 
@@ -14,8 +14,9 @@ SymbolicIndexingInterface.symbolic_type(::Type{<:ScopeRef}) = ScalarSymbolic()
 SymbolicIndexingInterface.is_independent_variable(sys::TransformedIRODESystem, sym::ScopeRef) = false
 
 function SymbolicIndexingInterface.is_variable(sys::TransformedIRODESystem, sym::ScopeRef)
-    get_sys(sys) === IRODESystem(sym) || return false
-    _sym_to_index(sym) isa Dict && return false
+    ssys = get_sys(sys)
+    ssys === getfield(sym, :sys) || return false
+    _sym_to_index(ssys, sym) isa Dict && return false
     return !isnothing(SciMLBase.sym_to_index(sym, sys))
 end
 
@@ -24,7 +25,8 @@ SymbolicIndexingInterface.variable_index(sys::TransformedIRODESystem, sym::Scope
 SymbolicIndexingInterface.is_parameter(sys::TransformedIRODESystem, sym::ScopeRef) = false
 
 function SymbolicIndexingInterface.is_observed(sys::TransformedIRODESystem, sym::ScopeRef)
-    get_sys(sys) === IRODESystem(sym) && SciMLBase.sym_to_index(sym, sys) === nothing
+    ssys = get_sys(sys)
+    ssys === getfield(sym, :sys) && SciMLBase.sym_to_index(sym, sys) === nothing
 end
 SymbolicIndexingInterface.is_time_dependent(sys::TransformedIRODESystem) = true
 SymbolicIndexingInterface.constant_structure(sys::TransformedIRODESystem) = false
@@ -63,7 +65,7 @@ function SymbolicIndexingInterface.parameter_symbols(sys::TransformedIRODESystem
 end
 
 function sym_stack(scope::Union{Scope, GenScope})
-    stack = Union{Symbol, Gen}[]
+    stack = Any[]
     while !isa(scope, Scope) || isdefined(scope, :parent)
         if isa(scope, GenScope)
             push!(stack, Gen(scope.identity, scope.sc.name))
@@ -76,18 +78,19 @@ function sym_stack(scope::Union{Scope, GenScope})
     return stack
 end
 
-function _sym_to_index(sr::ScopeRef)
+_sym_to_index(sr::ScopeRef) = _sym_to_index(IRODESystem(sr), sr)
+function _sym_to_index(sys::IRODESystem, sr::ScopeRef)
     scope = getfield(sr, :scope)
     stack = sym_stack(scope)
-    strct = NameLevel(StructuralAnalysisResult(IRODESystem(sr)).names)
+    strct = NameLevel(StructuralAnalysisResult(sys).names)
     for s in reverse(stack)
         strct = strct.children[s]
     end
     return strct
 end
 
-function SciMLBase.sym_to_index(sr::ScopeRef{IRODESystem}, transformed_sys::TransformedIRODESystem)
-    unopt_idx = _sym_to_index(sr)
+function SciMLBase.sym_to_index(sr::ScopeRef, transformed_sys::TransformedIRODESystem)
+    unopt_idx = _sym_to_index(get_sys(transformed_sys), sr)
     if unopt_idx.var === nothing && unopt_idx.obs === nothing
         sname = String(getfield(sr, :scope).name)
         if unopt_idx.children !== nothing && !isempty(unopt_idx.children)
@@ -196,10 +199,10 @@ end
 
 # Split `syms` into `vars` and `obs` and sort them in preparation for
 # passing them off to `compile_batched_reconstruct_func()`
-function split_and_sort_syms(syms)
+function split_and_sort_syms(sys, syms)
     vars = Int64[]
     obs = Int64[]
-    for level in _sym_to_index.(syms)
+    for level in _sym_to_index.(Ref(sys), syms)
         if level.obs !== nothing
             @assert level.var === nothing
             push!(obs, level.obs)
@@ -212,8 +215,8 @@ end
 
 """
     join_syms(
-        syms, vars, obs,
-        (var_inds, obs_inds)=split_and_sort_syms(syms)
+        sys, syms, vars, obs,
+        (var_inds, obs_inds)=split_and_sort_syms(sys, syms)
     )
 
 The user just asked for syms, return the values regardless of whether
@@ -222,9 +225,9 @@ they were variables or observed, in order they were requested.
 `vars` and `obs` are the data to be joined and ordered per the ordering in `syms`.
 The must be currently order in first axis by `var_inds` and `obs_inds` resepectively.
 """
-function join_syms(
+function join_syms(sys,
     syms, vars::AbstractMatrix, obs::AbstractMatrix,
-    (var_inds, obs_inds)=split_and_sort_syms(syms)
+    (var_inds, obs_inds)=split_and_sort_syms(sys, syms)
 )
     length(var_inds) == size(vars, 1) || throw(DimensionMismatch("wrong number of vars"))
     length(obs_inds) == size(obs, 1) || throw(DimensionMismatch("wrong number of obs"))
@@ -236,7 +239,7 @@ function join_syms(
     vars_idx = 1
     obs_idx = 1
     for (out_idx, sym) in enumerate(syms)
-        level = DAECompiler._sym_to_index(sym)
+        level = DAECompiler._sym_to_index(sys, sym)
         if level.obs !== nothing
             @assert level.var === nothing
             loc=findfirst(==(level.obs), obs_inds)
@@ -260,7 +263,8 @@ for the particular `syms` being requested.  The return value is a
 `length(syms)` by `length(ts)` matrix.
 """
 function batch_reconstruct(ro, syms, dus, us, p, ts)
-    vars, obs = split_and_sort_syms(syms)
+    sys = get_sys(ro.tsys)
+    vars, obs = split_and_sort_syms(sys, syms)
     debug_config = DebugConfig(ro.tsys)
 
     # First, look up the appropriate reconstruction function from our cache:
@@ -293,7 +297,7 @@ function batch_reconstruct(ro, syms, dus, us, p, ts)
         out_vars[:, t_idx] .= vars_tmp
         out_obs[:, t_idx] .= obs_tmp
     end
-    return join_syms(syms, out_vars, out_obs, (vars, obs))
+    return join_syms(sys, syms, out_vars, out_obs, (vars, obs))
 end
 
 function batch_reconstruct(sol::SciMLBase.AbstractODESolution,
@@ -370,9 +374,10 @@ For each variable/observed in `syms` computes it's derivative with respect to ti
 """
 function reconstruct_time_deriv(sol::ODESolution, syms, ts=sol.t)
     # We only allow ODESolution not AbstractODESolution as we do not suport DAESolutions
-    var_inds, obs_inds = split_and_sort_syms(syms)
-
     transformed_sys = get_transformed_sys(sol)
+    sys = get_sys(transformed_sys)
+    var_inds, obs_inds = split_and_sort_syms(sys, syms)
+
     dreconstruct_dtime! = get!(sol.prob.f.observed.time_derivative_cache, (var_inds, obs_inds)) do
         construct_reconstruction_time_derivative(transformed_sys, var_inds, obs_inds, false;)
     end
@@ -395,5 +400,5 @@ function reconstruct_time_deriv(sol::ODESolution, syms, ts=sol.t)
         dvar_dt[:, i] .= dvar
         dobs_dt[:, i] .= dobs
     end
-    return join_syms(syms, dvar_dt, dobs_dt, (var_inds, obs_inds))
+    return join_syms(sys, syms, dvar_dt, dobs_dt, (var_inds, obs_inds))
 end

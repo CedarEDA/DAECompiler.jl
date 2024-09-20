@@ -362,7 +362,7 @@ function make_argument_lattice_elem(which::Argument, @nospecialize(argt), add_va
 end
 
 function resolve_genscopes(names)
-    new_names = OrderedDict{LevelKey, NameLevel}()
+    new_names = OrderedDict{Any, NameLevel}()
     for (key, val) in collect(names)
         if val.children !== nothing
             @reset val.children = resolve_genscopes(val.children)
@@ -423,7 +423,7 @@ Perform the structural analysis on optimized code of `mi` and return `structure:
     end
 end
 
-function refresh_identities(names::OrderedDict{LevelKey, NameLevel})
+function refresh_identities(names::OrderedDict{LevelKey, NameLevel}) where {LevelKey, NameLevel}
     new_names = OrderedDict{LevelKey, NameLevel}()
     for (key, val) in names
         if isa(key, Gen)
@@ -502,7 +502,7 @@ end
     eq_kind = VarEqKind[]
     warnings = UnsupportedIRException[]
 
-    names = OrderedDict{LevelKey, NameLevel}()
+    names = OrderedDict{Any, NameLevel}()
 
     nsysmscopes = 0
     ncallees = 0
@@ -1191,7 +1191,7 @@ function process_ipo_return!(ultimate_rt::PartialStruct, args...)
     return PartialStruct(ultimate_rt.typ, fields), nimplicitoutpairs
 end
 
-function get_variable_name(names::OrderedDict{LevelKey, NameLevel}, var_to_diff, var_idx)
+function get_variable_name(names::OrderedDict, var_to_diff, var_idx)
     var_names = build_var_names(names, var_to_diff)
     return var_names[var_idx]
 end
@@ -1221,7 +1221,7 @@ function get_inline_backtrace(ir::IRCode, v::SSAValue)
     return frames
 end
 
-function walk_dict(names::OrderedDict{LevelKey, NameLevel}, stack::Vector{<:LevelKey})
+function walk_dict(names::OrderedDict{LevelKey, NameLevel}, stack::Vector) where {LevelKey, NameLevel}
     for i = length(stack):-1:2
         s = stack[i]
         if !haskey(names, s)
@@ -1235,11 +1235,11 @@ end
 is_valid_partial_scope(_) = false
 is_valid_partial_scope(ps::PartialScope) = true
 function is_valid_partial_scope(ps::PartialStruct)
-    if ps.typ === Scope
+    if ps.typ <: Scope
         isa(ps.fields[2], Const) || return false
         isa(ps.fields[2].val, Symbol) || return false
         return is_valid_partial_scope(ps.fields[1])
-    elseif ps.typ === GenScope
+    elseif ps.typ <: GenScope
         isa(ps.fields[1], Const) || return false
         return is_valid_partial_scope(ps.fields[2])
     else
@@ -1248,11 +1248,11 @@ function is_valid_partial_scope(ps::PartialStruct)
 end
 
 function sym_stack(ps::PartialStruct)
-    if ps.typ === Scope
+    if ps.typ <: Scope
         sym = (ps.fields[2]::Const).val::Symbol
         return pushfirst!(sym_stack(ps.fields[1]), sym)
     else
-        @assert ps.typ === GenScope
+        @assert ps.typ <: GenScope
         stack = sym_stack(ps.fields[2])
         scope_identity = ((ps.fields[1]::Const).val)::Intrinsics.ScopeIdentity
         stack[1] = Gen(scope_identity, stack[1])
@@ -1261,7 +1261,7 @@ function sym_stack(ps::PartialStruct)
 end
 
 sym_stack(ps::PartialScope) = LevelKey[ps]
-function record_scope!(ir::IRCode, names::OrderedDict{LevelKey, NameLevel}, scope::Union{Scope, GenScope, PartialStruct, PartialScope},
+function record_scope!(ir::IRCode, names::OrderedDict, scope::Union{Scope, GenScope, PartialStruct, PartialScope},
                        varssa::Vector, idx::Int, lens)
 
     stack = sym_stack(scope)
@@ -1282,11 +1282,15 @@ function record_scope!(ir::IRCode, names::OrderedDict{LevelKey, NameLevel}, scop
 end
 
 function merge_scopes!(names::OrderedDict{LevelKey, NameLevel}, key::LevelKey, val::NameLevel,
-        mapping::CalleeMapping, obsoffset::Int, epsoffset::Int)
+        mapping::CalleeMapping, obsoffset::Int, epsoffset::Int) where {LevelKey, NameLevel}
 
     haskey(names, key) || (names[key] = NameLevel())
     existing = names[key]
-    for (offset, lens) in ((x->(only(findnz(mapping.var_coeffs[x].row)[1])), @o _.var),
+    function remap_var(x)
+        r = only(findnz(mapping.var_coeffs[x].row)[1]) - 1
+        return r
+    end
+    for (offset, lens) in ((remap_var, @o _.var),
                            (x->(x+obsoffset), @o _.obs),
                            (x->mapping.eqs[x], @o _.eq), (x->(x+epsoffset), @o _.eps))
         if lens(val) !== nothing
@@ -1312,7 +1316,7 @@ function merge_scopes!(names::OrderedDict{LevelKey, NameLevel}, key::LevelKey, v
 end
 
 function merge_scopes!(names::OrderedDict{LevelKey, NameLevel}, key::Union{Scope, PartialStruct}, val::NameLevel,
-    mapping::CalleeMapping, obsoffset::Int, epsoffset::Int)
+    mapping::CalleeMapping, obsoffset::Int, epsoffset::Int) where {LevelKey, NameLevel}
 
     stack = sym_stack(key)
     if isempty(stack)

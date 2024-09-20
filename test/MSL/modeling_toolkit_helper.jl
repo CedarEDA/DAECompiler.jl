@@ -21,7 +21,7 @@ function DAECompiler.IRODESystem(model::MTK.ODESystem; debug_config=(;))
     T = @declare_MTKConnector model
     # We assume no user set parameters for the MTK tests
     T_parameterless = T{@NamedTuple{}}
-    DAECompiler.IRODESystem(Tuple{T_parameterless}; debug_config)
+    invokelatest(DAECompiler.IRODESystem, Tuple{T_parameterless}; debug_config)
 end
 
 
@@ -136,7 +136,7 @@ function state_default_mapping!(prob, du0::Vector, u0::Vector)
             # If this was a differential, peel it and recurse to get the underlying variable index:
             inner_var = only(arguments(var))
             var_idx = peel_differential_var_index(inner_var)
-            
+
             # if the underlying variable is `nothing`, it's not real, so just pass it on.
             if var_idx === nothing
                 return nothing
@@ -149,7 +149,7 @@ function state_default_mapping!(prob, du0::Vector, u0::Vector)
             try
                 # depending on if we came here via sys.ref, or via a MTK variable we may or may not already have a ScopeRef
                 ref = isa(var, DAECompiler.ScopeRef) ? var : getproperty(sys, access_var(var))
-                unopt_idx = DAECompiler._sym_to_index(ref)                
+                unopt_idx = DAECompiler._sym_to_index(ref)
                 return unopt_idx.var
             catch
                 @error("Unable to index $(var) into $(sys)")
@@ -158,7 +158,7 @@ function state_default_mapping!(prob, du0::Vector, u0::Vector)
         end
     end
 
-    
+
 
     function set_initial_condition!(var, val, new_u0, new_du0)
         # First, peel away any `Differential()` calls wrapping our variable,

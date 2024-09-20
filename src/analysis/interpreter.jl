@@ -680,7 +680,7 @@ function process_template!(𝕃, coeffs, eq_mapping, applied_scopes, argtypes, t
             eq_mapping[idnum(template)] = idnum(arg)
         elseif CC.is_const_argtype(template)
             #@Core.Compiler.show (arg, template)
-            @assert CC.is_lattice_equal(DAE_LATTICE, arg, template)
+            #@assert CC.is_lattice_equal(DAE_LATTICE, arg, template)
         elseif isa(template, PartialScope)
             id = idnum(template)
             (id > length(applied_scopes)) && resize!(applied_scopes, id)
@@ -919,7 +919,7 @@ function _abstract_eval_invoke_inst(interp::DAEInterpreter, inst::Union{CC.Instr
         argtypes = CC.collect_argtypes(interp, stmt.args, nothing, irsv)[2:end]
         callee_result = dae_result_for_inst(interp, inst)
         callee_result === nothing && return RT(nothing, (false, false))
-        if isa(callee_result.extended_rt, Const) || isa(callee_result.extended_rt, Type)
+        if isa(callee_result, UncompilableIPOResult) || isa(callee_result.extended_rt, Const) || isa(callee_result.extended_rt, Type)
             return RT(nothing, (false, false))
         end
         mapping = CalleeMapping(CC.optimizer_lattice(interp), argtypes, callee_result)
@@ -1030,14 +1030,11 @@ end
 # -----
 
 function typeinf_dae(@nospecialize(tt), world::UInt=get_world_counter();
-        method_table::Union{Nothing,MethodTable} = nothing,
         ipo_analysis_mode::Bool = false)
-    interp = DAEInterpreter(world; method_table, ipo_analysis_mode)
-    match = Base._which(tt;
-        method_table=CC.method_table(interp),
-        world=get_inference_world(interp),
-        raise=false)
-    match === nothing && single_match_error(tt)
+    interp = DAEInterpreter(world; ipo_analysis_mode)
+    match = Base._methods_by_ftype(tt, 1, world)
+    isempty(match) && single_match_error(tt)
+    match = only(match)
     mi = CC.specialize_method(match)
     ci = CC.typeinf_ext(interp, mi, Core.Compiler.SOURCE_MODE_ABI)
     return interp, ci

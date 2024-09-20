@@ -24,11 +24,12 @@ struct NameLevel
     obs::Union{Nothing, Int}
     eq::Union{Nothing, Int}
     eps::Union{Nothing, Int}
-    children::Union{Nothing, OrderedDict{LevelKey, NameLevel}}
+    # TODO: This should be an OrderedIdDict
+    children::Union{Nothing, OrderedDict{Any, NameLevel}}
 end
 NameLevel() =
     NameLevel(nothing, nothing, nothing, nothing, nothing)
-NameLevel(children::OrderedDict{LevelKey, NameLevel}) =
+NameLevel(children::OrderedDict{Any, NameLevel}) =
     NameLevel(nothing, nothing, nothing, nothing, children)
 
 struct UnsupportedIRException <: Exception
@@ -77,7 +78,7 @@ struct DAEIPOResult
     total_incidence::Vector{Any}
     eq_kind::Vector{VarEqKind}
     eq_callee_mapping::Vector{Union{Nothing, Vector{Pair{SSAValue, Int}}}}
-    names::OrderedDict{LevelKey, NameLevel}
+    names::OrderedDict{Any, NameLevel} # TODO: OrderedIdDict
     nobserved::Int
     neps::Int
     ic_nzc::Int
