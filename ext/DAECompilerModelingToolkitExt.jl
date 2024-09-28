@@ -75,8 +75,8 @@ function declare_parameters(model, struct_name)
             backing::B
         end
     )
-    
-    
+
+
     constructor_expr =:(
         @generated function _check_parameter_names(::Type{$struct_name}, param_kwargs::NamedTuple)
             unexpected_parameters = setdiff(fieldnames(param_kwargs), $param_names_tuple_expr)
@@ -108,7 +108,7 @@ function declare_parameters(model, struct_name)
             if name === $param_name
                 return if hasfield(B, $param_name)
                     getfield(getfield(this, :backing), $param_name)
-                else 
+                else
                     $param_value
                 end
             end
@@ -118,7 +118,7 @@ function declare_parameters(model, struct_name)
         return getfield(getfield(this, :backing), name)
     ))
     getproperty_expr.args[end].args[end] = Expr(:block, getproperty_body...)
-    
+
     return Expr(:block, struct_expr, constructor_expr, propertynames_expr, getproperty_expr)
 end
 
@@ -206,7 +206,7 @@ end
 
 macro DAECompiler.declare_MTKConnector(mtk_component, ports...)
     # We do need to do run time eval, because we can't decide what to construct with just lexical information.
-    # we need the values of the 
+    # we need the values of the
     :(Base.eval(@__MODULE__, $MTKConnector_AST($(esc(mtk_component)), $(esc.(ports)...))))
 end
 
@@ -219,7 +219,7 @@ function MTKConnector_AST(model::MTK.ODESystem, ports...)
     end
 
     while !isnothing(MTK.get_parent(model))
-        # Undo any call to structural_simplify 
+        # Undo any call to structural_simplify
         # (Should we give a warning here? They did waste CPU cycles simplfying it in first place)
         model = MTK.get_parent(model)
     end
@@ -239,11 +239,11 @@ function MTKConnector_AST(model::MTK.ODESystem, ports...)
 
 
     struct_name = gensym(nameof(model))
-    
+
     return quote
         $(declare_parameters(model, struct_name))
 
-        function (this::$struct_name)($(port_names...); dscope=$(_c(Scope))())
+        function (this::$struct_name)($(map(port->:($(port)::Float64), port_names)...); dscope=$(_c(Scope))())
             $(declare_vars(model, :dscope))
             $(declare_derivatives(state))
             $(declare_equations(state, model, :dscope, ports))

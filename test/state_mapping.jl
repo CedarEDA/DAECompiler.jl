@@ -16,7 +16,7 @@ using SymbolicIndexingInterface
         idx::Int
         is_obs::Bool
     end
-    function DAECompiler._sym_to_index(ref::DummyRef)
+    function DAECompiler._sym_to_index(_, ref::DummyRef)
         ref.is_obs ? DAECompiler.NameLevel(nothing, ref.idx, nothing, nothing, nothing) :
             DAECompiler.NameLevel(ref.idx, nothing, nothing, nothing, nothing)
     end
@@ -25,7 +25,7 @@ using SymbolicIndexingInterface
     obs_mask = rand(Bool, 50)
     syms = DummyRef.(indexes, obs_mask)
 
-    (var_inds, obs_inds)=split_and_sort_syms(syms)
+    (var_inds, obs_inds)=split_and_sort_syms(nothing, syms)
 
     var_data = zeros(Int, length(var_inds), 3)
     var_data[:, 1] .= var_inds
@@ -34,11 +34,11 @@ using SymbolicIndexingInterface
     obs_data[:, 1] .= obs_inds
 
 
-    merged_data = join_syms(syms, var_data, obs_data)
+    merged_data = join_syms(nothing, syms, var_data, obs_data)
     @test merged_data[:, 1] == indexes
 
     # check passing in inds from earlier also works the same:
-    @test merged_data == join_syms(syms, var_data, obs_data, (var_inds, obs_inds))
+    @test merged_data == join_syms(nothing, syms, var_data, obs_data, (var_inds, obs_inds))
 end
 
 @testset "variable_symbols" begin

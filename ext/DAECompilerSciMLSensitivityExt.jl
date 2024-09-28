@@ -39,13 +39,14 @@ with one column per time step in `ts` and one one row per `variable`/`observed!`
 """
 function DAECompiler.reconstruct_sensitivities(sol::SciMLBase.AbstractODESolution, syms::Vector{<:DAECompiler.ScopeRef}, ts=sol.t)
     us, du_dparams = extract_local_sensitivities(sol, ts)
-    var_inds, obs_inds = DAECompiler.split_and_sort_syms(syms)
-    
     transformed_sys = DAECompiler.get_transformed_sys(sol)
+    sys = DAECompiler.get_sys(transformed_sys)
+    var_inds, obs_inds = DAECompiler.split_and_sort_syms(sys, syms)
+
     dreconstruct! = get!(sol.prob.f.observed.derivative_cache, (var_inds, obs_inds, false)) do
         DAECompiler.compile_batched_reconstruct_derivatives(transformed_sys, var_inds, obs_inds, false, false;)
     end
-    
+
     num_params = length(du_dparams)
     dout_vars_per_param = [similar(us, (length(var_inds), length(ts))) for _ in 1:num_params]
     dout_obs_per_param  = [similar(us, (length(obs_inds), length(ts))) for _ in 1:num_params]
@@ -67,7 +68,7 @@ function DAECompiler.reconstruct_sensitivities(sol::SciMLBase.AbstractODESolutio
     end
 
     return map(dout_vars_per_param, dout_obs_per_param) do dout_vars, dout_obs
-        DAECompiler.join_syms(syms, dout_vars, dout_obs, (var_inds, obs_inds))
+        DAECompiler.join_syms(sys, syms, dout_vars, dout_obs, (var_inds, obs_inds))
     end
 end
 

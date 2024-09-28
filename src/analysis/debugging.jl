@@ -1,12 +1,12 @@
 using StateSelection
 using StateSelection.BipartiteGraphs
 
-function build_var_names(names::OrderedDict{LevelKey, NameLevel}, var_to_diff)
+function build_var_names(names::OrderedDict, var_to_diff)
     var_names = OrderedDict{Int,String}()
     build_var_names!(var_names, names, var_to_diff)
     return var_names
 end
-function build_var_names!(var_names, names::OrderedDict{LevelKey, NameLevel}, var_to_diff, prefix=String[])
+function build_var_names!(var_names, names::OrderedDict, var_to_diff, prefix=String[])
     for name in keys(names)
         name_path = join(vcat(prefix..., name), ".")
         level = names[name]

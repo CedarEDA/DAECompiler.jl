@@ -158,7 +158,7 @@ struct IRODESystem
                          fallback_interp::AbstractInterpreter = Core.Compiler.NativeInterpreter(),
                          debug_config = (;),
                          ipo_analysis_mode = false,
-                         world::UInt=get_world_counter())
+                         world::UInt=Base.tls_world_age())
         debug_config = DebugConfig(debug_config, tt)
         @may_timeit debug_config "typeinf_dae" interp, ci = typeinf_dae(tt, world; ipo_analysis_mode)
         mi = ci.def
@@ -183,7 +183,7 @@ mutable struct IRTransformationState <: TransformationState{IRODESystem}
     ir::IRCode
     callback_func::Function
     structure::SystemStructure
-    const names::OrderedDict{LevelKey, NameLevel}
+    const names::OrderedDict{Any, NameLevel}
     const nobserved::Int
     const neps::Int
     const ic_nzc::Int

@@ -83,22 +83,22 @@ module Intrinsics
 
     abstract type AbstractScope; end
 
-    struct Scope <: AbstractScope
+    struct Scope{T} <: AbstractScope
         parent::AbstractScope
-        name::Symbol
-        Scope() = new()
-        Scope(s::AbstractScope, sym::Symbol) = new(s, sym)
+        name::T
+        Scope() = new{Union{}}()
+        Scope(s::AbstractScope, name::T) where {T} = new{T}(s, name)
     end
     (scope::Scope)(s::Symbol) = Scope(scope, s)
-    # Scope(), but will less function calls, so marginally easier on the compiler
+    # Scope(), but with less function calls, so marginally easier on the compiler
     const root_scope = Scope()
 
     mutable struct ScopeIdentity; end
 
-    struct GenScope <: AbstractScope
+    struct GenScope{T} <: AbstractScope
         identity::ScopeIdentity
-        sc::Scope
-        GenScope(sc::Scope) = new(ScopeIdentity(), sc)
+        sc::Scope{T}
+        GenScope(sc::Scope{T}) where {T} = new{T}(ScopeIdentity(), sc)
     end
     GenScope(parent::AbstractScope, name::Symbol) =
         GenScope(Scope(parent, name))

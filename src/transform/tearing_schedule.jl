@@ -153,6 +153,8 @@ end
             return Incidence(const_val, new_row, incT.eps)
         end
         remap_incidence(t::PartialStruct, var) = PartialStruct(t.typ, Any[remap_incidence(f, var) for f in t.fields])
+        remap_incidence(t::PartialKeyValue, var) = PartialKeyValue(remap_incidence(t.typ, var), remap_incidence(t.parent, var),
+            IdDict{Any, Any}(remap_incidence(k, var)=>remap_incidence(v, var) for (k, v) in pairs(t.vals)))
         remap_incidence(t::Union{Type, Const, Eq}, var) = t
 
         function remap_ir!(ir, var)
