@@ -153,10 +153,13 @@ end
 Diffractor.disable_forward(interp::DAEInterpreter) = CC.NativeInterpreter(interp.world)
 
 function CC.InferenceParams(::DAEInterpreter)
-    return CC.InferenceParams(;
-        unoptimize_throw_blocks=false,
-        assume_bindings_static=true,
-        ignore_recursion_hardlimit=true)
+    args = (;
+    assume_bindings_static=true,
+    ignore_recursion_hardlimit=true)
+    if VERSION < v"1.12.0-DEV.1017"
+        args = (; unoptimize_throw_blocks=false, args...)
+    end
+    return CC.InferenceParams(; args...)
 end
 function CC.OptimizationParams(::DAEInterpreter)
     opt_params = CC.OptimizationParams(;
