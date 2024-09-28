@@ -347,7 +347,7 @@ CC.widenconst(::PartialScope) = Scope
 CC.widenconst(pkv::PartialKeyValue) = widenconst(pkv.typ)
 CC.:⊑(inc::Incidence, inc2) = CC.:⊑(inc2, Float64) && !isa(inc2, Const)
 
-function CC._uniontypes(x::Incidence, ts)
+function CC._uniontypes(x::Incidence, ts::Vector{Any})
     u = x.typ
     if isa(u, Union)
         CC.push!(ts, is_non_incidence_type(u.a) ? u.a : Incidence(u.a, x.row, x.eps))
