@@ -3,6 +3,9 @@ using SciMLBase, SymbolicIndexingInterface
 struct ScopeRef{T, ST}
     sys::T
     scope::Scope{ST}
+
+    # (Optional) opaque data structure to facilitate faster `getproperty`.
+    cursor
 end
 Base.Broadcast.broadcastable(ref::ScopeRef) = Ref(ref)  # broadcast as scalar
 
@@ -135,33 +138,24 @@ function SciMLBase.sym_to_index(sr::ScopeRef, A::SciMLBase.DEIntegrator)
 end
 
 function Base.getproperty(sys::IRODESystem, name::Symbol)
-    haskey(StructuralAnalysisResult(sys).names, name) || throw(Base.UndefRefError())
-    return ScopeRef(sys, Scope(Scope(), name))
+    names = StructuralAnalysisResult(sys).names
+    cursor = get(names, name, nothing)
+    cursor === nothing && throw(Base.UndefRefError())
+    return ScopeRef(sys, Scope(Scope(), name), cursor)
 end
 
 function Base.propertynames(sr::ScopeRef)
-    scope = getfield(sr, :scope)
-    stack = sym_stack(scope)
-    strct = NameLevel(StructuralAnalysisResult(IRODESystem(sr)).names)
-    for s in reverse(stack)
-        strct = strct.children[s]
-        strct.children === nothing && return keys(Dict{Symbol, Any}())
-    end
-    return keys(strct.children)
+    cursor = getfield(sr, :cursor)
+    cursor.children === nothing && return keys(Dict{Symbol, Any}())
+    return keys(cursor.children)
 end
 
 function Base.getproperty(sr::ScopeRef{IRODESystem}, name::Symbol)
-    scope = getfield(sr, :scope)
-    stack = sym_stack(scope)
-    strct = NameLevel(StructuralAnalysisResult(IRODESystem(sr)).names)
-    for s in reverse(stack)
-        strct = strct.children[s]
-        strct.children === nothing && throw(Base.UndefRefError())
-    end
-    if !haskey(strct.children, name)
-        throw(Base.UndefRefError())
-    end
-    ScopeRef(IRODESystem(sr), Scope(getfield(sr, :scope), name))
+    cursor = getfield(sr, :cursor)
+    cursor.children === nothing && return throw(Base.UndefRefError())
+    new_cursor = get(cursor.children, name, nothing)
+    new_cursor === nothing && return throw(Base.UndefRefError())
+    return ScopeRef(IRODESystem(sr), Scope(getfield(sr, :scope), name), new_cursor)
 end
 
 function Base.show(io::IO, scope::Scope)

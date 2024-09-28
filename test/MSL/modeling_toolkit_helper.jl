@@ -261,10 +261,10 @@ function Base.getproperty(sys::IRODESystem, name::Symbol)
     namespaces = split_namespaces_var(name)
     if haskey(names, namespaces[1])
         # Normal DAECompiler way
-        return return get_scope_ref(sys, namespaces)
+        return return get_scope_ref(sys, namespaces, names[namespaces[1]])
     elseif length(namespaces) > 1 && haskey(names, namespaces[2])
         # Ignore first namespace it's cos we are not fully consistent with if we include the system name or not
-        return return get_scope_ref(sys, namespaces; start_idx=2)
+        return return get_scope_ref(sys, namespaces, names[namespaces[2]]; start_idx=2)
     else  # It could be from the mtksys
         mtksys = sys_map[sys_map_key(sys)]
         if hasproperty(mtksys, name)  # if it is actually from the MTK system (which allows unflattened names)
@@ -273,8 +273,8 @@ function Base.getproperty(sys::IRODESystem, name::Symbol)
     end
     throw(Base.KeyError(name))  # should be a UndefRef but key error useful for findout what broke it.
 end
-function get_scope_ref(sys, names; start_idx=1)
-    ref = DAECompiler.ScopeRef(sys, DAECompiler.Scope(DAECompiler.Scope(), names[start_idx]))
+function get_scope_ref(sys, names, cursor; start_idx=1)
+    ref = DAECompiler.ScopeRef(sys, DAECompiler.Scope(DAECompiler.Scope(), names[start_idx]), cursor)
     for name in @view names[(start_idx+1):end]
         ref = getproperty(ref, name)
     end

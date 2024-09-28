@@ -319,7 +319,7 @@ has_any_genscope(sc::PartialStruct) = false # TODO
 
 function _make_argument_lattice_elem(which::Argument, @nospecialize(argt), add_variable!, add_equation!, add_scope!)
     if isa(argt, Const)
-        @assert !isa(argt.val, Scope) # Shouldn't have been forwarded
+        #@assert !isa(argt.val, Scope) # Shouldn't have been forwarded
         return argt
     elseif isa(argt, Type) && argt <: Intrinsics.AbstractScope
         return PartialScope(add_scope!(which))

@@ -462,6 +462,9 @@ function CC._getfield_tfunc(🥬::DAELattice, @nospecialize(s00), @nospecialize(
             return Union{}
         end
         rt = CC._getfield_tfunc(CC.widenlattice(🥬), s00.typ, name, setfield)
+        if rt == Union{}
+            return Union{}
+        end
         if isempty(s00)
             return Incidence(rt)
         end
