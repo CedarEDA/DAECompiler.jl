@@ -726,7 +726,7 @@ end
     analysis_interp = DAEInterpreter(interp; var_to_diff, var_kind, eq_kind, in_analysis=interp.ipo_analysis_mode)
     irsv = CC.IRInterpretationState(analysis_interp, method_info, ir, mi, argtypes,
                                     world, min_world, max_world)
-    ultimate_rt, _ = CC._ir_abstract_constant_propagation(analysis_interp, irsv; externally_refined)
+    ultimate_rt, _ = CC.ir_abstract_constant_propagation(analysis_interp, irsv; externally_refined)
     record_ir!(debug_config, "incidence_propagation", ir)
 
     # Encountering a `ddt` during abstract interpretation can add variables,
@@ -745,7 +745,7 @@ end
     # recalculate domtree (inference could have changed the cfg)
     domtree = CC.construct_domtree(ir.cfg.blocks)
 
-    # We use the _ir_abstract_constant_propagation pass for three things:
+    # We use the ir_abstract_constant_propagation pass for three things:
     # 1. To establish incidence
     # 2. To constant propagate scope information that may not have been
     #    available at inference time
