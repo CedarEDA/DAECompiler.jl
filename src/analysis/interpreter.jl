@@ -7,7 +7,7 @@ using .CC: AbstractInterpreter, NativeInterpreter, InferenceParams, Optimization
     StmtInfo, MethodCallResult, ConstCallResults, ConstPropResult, MethodTableView,
     CachedMethodTable, InternalMethodTable, OverlayMethodTable, CallMeta, CallInfo,
     IRCode, LazyDomtree, IRInterpretationState, set_inlineable!, block_for_inst,
-    BitSetBoundedMinPrioritySet, AbsIntState
+    BitSetBoundedMinPrioritySet, AbsIntState, Future
 using Base: IdSet
 using StateSelection: DiffGraph
 
@@ -282,13 +282,13 @@ widenincidence(@nospecialize(x)) = x
         if length(argtypes) == 2
             xarg = argtypes[2]
             if isa(xarg, Union{Incidence, Const})
-                return structural_inc_ddt(interp.var_to_diff, interp.var_kind, xarg)
+                return Future{CallMeta}(structural_inc_ddt(interp.var_to_diff, interp.var_kind, xarg))
             end
         end
     end
     if interp.in_analysis && !isa(f, Core.Builtin) && !isa(f, Core.IntrinsicFunction)
         # We don't want to do new inference here
-        return CallMeta(Any, Any, CC.Effects(), CC.NoCallInfo())
+        return Future{CallMeta}(CallMeta(Any, Any, CC.Effects(), CC.NoCallInfo()))
     end
     ret = @invoke CC.abstract_call_known(interp::AbstractInterpreter, f::Any,
         arginfo::ArgInfo, si::StmtInfo, sv::AbsIntState, max_methods::Int)
@@ -306,26 +306,30 @@ widenincidence(@nospecialize(x)) = x
     end
     arginfo = ArgInfo(arginfo.fargs, map(widenincidence, arginfo.argtypes))
     r = Diffractor.fwd_abstract_call_gf_by_type(interp, f, arginfo, si, sv, ret)
-    r !== nothing && return r
-    return ret
+    return Future{CallMeta}(CC.isready(r) ? ret : r, interp, sv) do _, interp, sv
+        r[] !== nothing && return r[]
+        return ret[]
+    end
 end
 
 @override function CC.abstract_call_method(interp::DAEInterpreter,
     method::Method, @nospecialize(sig), sparams::SimpleVector, hardlimit::Bool, si::StmtInfo, sv::InferenceState)
-    ret = @invoke CC.abstract_call_method(interp::AbstractInterpreter,
+    mret = @invoke CC.abstract_call_method(interp::AbstractInterpreter,
         method::Method, sig::Any, sparams::SimpleVector, hardlimit::Bool, si::StmtInfo, sv::InferenceState)
-    edge = ret.edge
-    if edge !== nothing
-        cache = CC.get(CC.code_cache(interp), edge, nothing)
-        if cache !== nothing
-            src = @atomic :monotonic cache.inferred
-            if isa(src, DAECache)
-                info = src.info
-                merge_daeinfo!(interp, sv.result, info)
+    return Future{MethodCallResult}(mret, interp, sv) do ret, interp, sv
+        edge = ret.edge
+        if edge !== nothing
+            cache = CC.get(CC.code_cache(interp), edge, nothing)
+            if cache !== nothing
+                src = @atomic :monotonic cache.inferred
+                if isa(src, DAECache)
+                    info = src.info
+                    merge_daeinfo!(interp, sv.result, info)
+                end
             end
         end
+        return ret
     end
-    return ret
 end
 
 @override function CC.const_prop_call(interp::DAEInterpreter,
@@ -974,34 +978,36 @@ function _abstract_eval_invoke_inst(interp::DAEInterpreter, inst::Union{CC.Instr
 end
 
 @override function CC.abstract_eval_statement_expr(interp::DAEInterpreter, inst::Expr, vtypes::Nothing, irsv::IRInterpretationState)
-    (; rt, exct, effects) = @invoke CC.abstract_eval_statement_expr(interp::AbstractInterpreter, inst::Expr, vtypes::Nothing, irsv::IRInterpretationState)
-
-    if (!interp.ipo_analysis_mode || interp.in_analysis) && !isa(rt, Const) && !isa(rt, Incidence) && !CC.isType(rt) && !is_all_inc_or_const(Any[rt])
-        argtypes = CC.collect_argtypes(interp, inst.args, nothing, irsv)
-        if argtypes === nothing
-            return CC.RTEffects(rt, exct, effects)
-        end
-        if is_all_inc_or_const(argtypes)
-            if inst.head in (:call, :invoke) && CC.hasintersect(widenconst(argtypes[inst.head === :call ? 1 : 2]), Union{typeof(variable), typeof(sim_time), typeof(state_ddt)})
-                # The `variable` and `state_ddt` intrinsics can source Incidence. For all other
-                # calls, if there's no incidence in the arguments, there cannot be any incidence
-                # in the result.
+    ret = @invoke CC.abstract_eval_statement_expr(interp::AbstractInterpreter, inst::Expr, vtypes::Nothing, irsv::IRInterpretationState)
+    return Future{CC.RTEffects}(ret, interp, irsv) do ret, interp, irsv
+        (; rt, exct, effects) = ret
+        if (!interp.ipo_analysis_mode || interp.in_analysis) && !isa(rt, Const) && !isa(rt, Incidence) && !CC.isType(rt) && !is_all_inc_or_const(Any[rt])
+            argtypes = CC.collect_argtypes(interp, inst.args, nothing, irsv)
+            if argtypes === nothing
                 return CC.RTEffects(rt, exct, effects)
             end
-            fb_inci = _fallback_incidence(argtypes)
-            if fb_inci !== nothing
-                update_type(t::Type) = Incidence(t, fb_inci.row, fb_inci.eps)
-                update_type(t::Incidence) = t
-                update_type(t::Const) = t
-                update_type(t::CC.PartialTypeVar) = t
-                update_type(t::PartialStruct) = PartialStruct(t.typ, Any[Base.isvarargtype(f) ? f : update_type(f) for f in t.fields])
-                update_type(t::CC.Conditional) = CC.Conditional(t.slot, update_type(t.thentype), update_type(t.elsetype))
-                newrt = update_type(rt)
-                return CC.RTEffects(newrt, exct, effects)
+            if is_all_inc_or_const(argtypes)
+                if inst.head in (:call, :invoke) && CC.hasintersect(widenconst(argtypes[inst.head === :call ? 1 : 2]), Union{typeof(variable), typeof(sim_time), typeof(state_ddt)})
+                    # The `variable` and `state_ddt` intrinsics can source Incidence. For all other
+                    # calls, if there's no incidence in the arguments, there cannot be any incidence
+                    # in the result.
+                    return CC.RTEffects(rt, exct, effects)
+                end
+                fb_inci = _fallback_incidence(argtypes)
+                if fb_inci !== nothing
+                    update_type(t::Type) = Incidence(t, fb_inci.row, fb_inci.eps)
+                    update_type(t::Incidence) = t
+                    update_type(t::Const) = t
+                    update_type(t::CC.PartialTypeVar) = t
+                    update_type(t::PartialStruct) = PartialStruct(t.typ, Any[Base.isvarargtype(f) ? f : update_type(f) for f in t.fields])
+                    update_type(t::CC.Conditional) = CC.Conditional(t.slot, update_type(t.thentype), update_type(t.elsetype))
+                    newrt = update_type(rt)
+                    return CC.RTEffects(newrt, exct, effects)
+                end
             end
         end
+        return CC.RTEffects(rt, exct, effects)
     end
-    return CC.RTEffects(rt, exct, effects)
 end
 
 @override function CC.compute_forwarded_argtypes(interp::DAEInterpreter, arginfo::ArgInfo, sv::AbsIntState)
@@ -1222,7 +1228,7 @@ function infer_ir!(ir, interp::AbstractInterpreter, mi::MethodInstance)
     min_world = world = get_inference_world(interp)
     max_world = get_world_counter()
     irsv = IRInterpretationState(interp, method_info, ir, mi, ir.argtypes, world, min_world, max_world)
-    (rt, nothrow) = CC._ir_abstract_constant_propagation(interp, irsv)
+    (rt, nothrow) = CC.ir_abstract_constant_propagation(interp, irsv)
     return rt
 end
 
