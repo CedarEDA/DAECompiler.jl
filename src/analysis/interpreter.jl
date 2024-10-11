@@ -305,11 +305,7 @@ widenincidence(@nospecialize(x)) = x
         end
     end
     arginfo = ArgInfo(arginfo.fargs, map(widenincidence, arginfo.argtypes))
-    r = Diffractor.fwd_abstract_call_gf_by_type(interp, f, arginfo, si, sv, ret)
-    return Future{CallMeta}(CC.isready(r) ? ret : r, interp, sv) do _, interp, sv
-        r[] !== nothing && return r[]
-        return ret[]
-    end
+    return Diffractor.fwd_abstract_call_gf_by_type(interp, f, arginfo, si, sv, ret)
 end
 
 @override function CC.abstract_call_method(interp::DAEInterpreter,
@@ -447,9 +443,9 @@ end
 
 # TODO propagate debug configurations here
 @override function CC.optimize(interp::DAEInterpreter, opt::OptimizationState, caller::InferenceResult)
-    ir = CC.run_passes_ipo_safe(opt.src, opt, caller)
+    ir = CC.run_passes_ipo_safe(opt.src, opt)
     ir = run_dae_passes(interp, ir)
-    CC.ipo_dataflow_analysis!(interp, ir, caller)
+    CC.ipo_dataflow_analysis!(interp, opt, ir, caller)
     if interp.ipo_analysis_mode
         result = ipo_dae_analysis!(interp, ir, caller.linfo, caller)
         if result !== nothing
@@ -528,14 +524,10 @@ end
     src === nothing && return nothing
     (; inferred, ir) = src::DAECache
     (isa(inferred, CodeInfo) && isa(ir, IRCode)) || return nothing
-    method_info = CC.MethodInfo(inferred)
+    method_info = CC.SpecInfo(inferred)
     ir = copy(ir)
     (; min_world, max_world) = inferred
-    if Base.__has_internal_change(v"1.12-alpha", :codeinfonargs)
-        argtypes = CC.va_process_argtypes(CC.optimizer_lattice(interp), argtypes, inferred.nargs, inferred.isva)
-    elseif VERSION >= v"1.12.0-DEV.341"
-        argtypes = CC.va_process_argtypes(CC.optimizer_lattice(interp), argtypes, mi)
-    end
+    argtypes = CC.va_process_argtypes(CC.optimizer_lattice(interp), argtypes, inferred.nargs, inferred.isva)
     return IRInterpretationState(interp, method_info, ir, mi, argtypes,
                                  world, min_world, max_world)
 end
@@ -1224,7 +1216,8 @@ function infer_ir!(ir, interp::AbstractInterpreter, mi::MethodInstance)
         end
     end
 
-    method_info = CC.MethodInfo(#=propagate_inbounds=#true, nothing)
+    (nargs, isva) = isa(mi.def, Method) ? (mi.def.nargs, mi.def.isva) : (0, false)
+    method_info = CC.SpecInfo(nargs, isva, #=propagate_inbounds=#true, nothing)
     min_world = world = get_inference_world(interp)
     max_world = get_world_counter()
     irsv = IRInterpretationState(interp, method_info, ir, mi, ir.argtypes, world, min_world, max_world)

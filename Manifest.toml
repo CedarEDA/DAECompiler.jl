@@ -444,7 +444,7 @@ version = "1.15.1"
 
 [[deps.Diffractor]]
 deps = ["AbstractDifferentiation", "ChainRules", "ChainRulesCore", "Combinatorics", "Cthulhu", "InteractiveUtils", "OffsetArrays", "PrecompileTools", "StaticArrays", "StructArrays"]
-git-tree-sha1 = "d8c1250845869e3f5c997161fc32654ef10a3832"
+git-tree-sha1 = "2a9b827fce47e27ef32471df18a96dc4ff1123bd"
 repo-rev = "kf/compileradjust"
 repo-url = "https://github.com/JuliaDiff/Diffractor.jl.git"
 uuid = "9f5e2b26-1114-432f-b630-d3fe2085c51c"

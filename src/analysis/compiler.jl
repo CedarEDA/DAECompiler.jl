@@ -717,7 +717,8 @@ end
     record_ir!(debug_config, "pre_incidence_propagation", ir)
 
     # TODO better work here?
-    method_info = CC.MethodInfo(#=propagate_inbounds=#true, nothing)
+    (nargs, isva) = isa(mi.def, Method) ? (mi.def.nargs, mi.def.isva) : (0, false)
+    method_info = CC.SpecInfo(nargs, isva, #=propagate_inbounds=#true, nothing)
     min_world = world = get_inference_world(interp)
     max_world = get_world_counter()
     if caller !== nothing
