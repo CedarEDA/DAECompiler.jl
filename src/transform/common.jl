@@ -57,7 +57,7 @@ function remap_info(remap_ir!, info)
         if isa(result, CC.SemiConcreteResult)
             let ir = copy(result.ir)
                 remap_ir!(ir)
-                CC.SemiConcreteResult(result.mi, ir, result.effects)
+                CC.SemiConcreteResult(result.mi, ir, result.effects, result.spec_info)
             end
         elseif isa(result, CC.ConstPropResult)
             if isa(result.result.src, DAECache)
