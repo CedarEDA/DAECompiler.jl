@@ -109,10 +109,6 @@ The `vars` that are being reconstructed must appear in sorted order.
                 replace_call!(compact, SSAValue(idx), Expr(:call, Base.getindex, slot_arg(in_du), slot))
             end
 
-        # If this is an `observed!()` or `solved_variable()` call, store it out
-        elseif is_known_invoke(stmt, observed!, compact)
-            @assert length(stmt.args) >= 5
-            set_state!(SSAValue(idx), obs_out, obs, stmt.args[end-2], stmt.args[end])
         elseif is_solved_variable(stmt)
             set_state!(SSAValue(idx), u_out, vars, stmt.args[end], stmt.args[end-1])
 

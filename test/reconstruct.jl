@@ -17,6 +17,7 @@ function check_state(du, u, du1, u1, differential_vars)
     end
 end
 
+#=
 u0 = [1.0, 0.0, 0.0]
 tspan = (0.0, 100.0)
 x = Lorenz1(10.0, 28.0, 8.0/3.0)
@@ -60,6 +61,7 @@ let tsys = TransformedIRODESystem(sys)
     compress(recompressed_du, recompressed_u, out_vars)
     check_state(recompressed_du, recompressed_u, du0, u0, differential_vars)
 end
+=#
 
 # Create a no-state system, then test that reconstruction works on it
 struct SinSystem

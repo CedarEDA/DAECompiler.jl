@@ -1712,9 +1712,7 @@ weakdeps = ["ChainRulesCore"]
 
 [[deps.StateSelection]]
 deps = ["DocStringExtensions", "FindFirstFunctions", "Graphs", "LinearAlgebra", "Setfield", "SparseArrays", "UnPack"]
-git-tree-sha1 = "8f678b62e77e1bf1f74744cfc79bfafa81332942"
-repo-rev = "main"
-repo-url = "https://github.com/JuliaComputing/StateSelection.jl"
+path = "/home/keno/.julia/dev/StateSelection"
 uuid = "64909d44-ed92-46a8-bbd9-f047dfbdc84b"
 version = "0.2.1"
 
@@ -2051,7 +2049,7 @@ version = "1.3.1+0"
 [[deps.libblastrampoline_jll]]
 deps = ["Artifacts", "Libdl"]
 uuid = "8e850b90-86db-534c-a0d3-1478176c7d93"
-version = "5.11.0+0"
+version = "5.11.1+0"
 
 [[deps.nghttp2_jll]]
 deps = ["Artifacts", "Libdl"]

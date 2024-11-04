@@ -1,4 +1,4 @@
-using DAECompiler: equation, equation!, state_ddt, variables, singularity_root!, time_periodic_singularity!, sim_time, observed!
+using DAECompiler: equation, equation!, state_ddt, variables, singularity_root!, time_periodic_singularity!, sim_time, observed!, ddt
 
 struct Lorenz1{T}
     σ::T

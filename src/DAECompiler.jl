@@ -37,7 +37,7 @@ include("utils.jl")
 include("breadcrumbs.jl")
 include("JITOpaqueClosures.jl")
 include("runtime.jl")
-import .Intrinsics: state_ddt
+import .Intrinsics: state_ddt, EqKind
 include("analysis/compiler_reexports.jl")
 include("analysis/lattice.jl")
 include("cache.jl")

@@ -76,10 +76,9 @@ struct DAEIPOResult
     var_to_diff::DiffGraph
     var_kind::Vector{VarEqKind}
     total_incidence::Vector{Any}
-    eq_kind::Vector{VarEqKind}
+    eq_kind::Vector{Pair{VarEqKind, Intrinsics.EqKind}}
     eq_callee_mapping::Vector{Union{Nothing, Vector{Pair{SSAValue, Int}}}}
     names::OrderedDict{Any, NameLevel} # TODO: OrderedIdDict
-    nobserved::Int
     neps::Int
     ic_nzc::Int
     vcc_nzc::Int
@@ -108,7 +107,9 @@ function make_structure_from_ipo(ipo::DAEIPOResult)
     solvable_graph = BipartiteGraph(neqs, nvars)
 
     for (ieq, inc) in enumerate(ipo.total_incidence)
-        add_equation_row!(graph, solvable_graph, ieq, inc)
+        if ipo.eq_kind[ieq][2] == Intrinsics.DiffAlg
+            add_equation_row!(graph, solvable_graph, ieq, inc)
+        end
     end
 
     structure = SystemStructure(complete(var_to_diff), complete(eq_to_diff), graph, solvable_graph)

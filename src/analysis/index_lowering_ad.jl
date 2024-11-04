@@ -327,6 +327,7 @@ end
     # Update solvable graph
     for (eq, (_, eqssas)) in enumerate(eqs)
         haskey(linear_eqs, eq) && continue
+        isempty(𝑠neighbors(graph, eq)) && continue
         old_graph = empty_eq_list!(graph, eq)
         old_solvable_graph = empty_eq_list!(solvable_graph, eq)
         for eqssa in eqssas

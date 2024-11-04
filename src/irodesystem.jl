@@ -184,7 +184,6 @@ mutable struct IRTransformationState <: TransformationState{IRODESystem}
     callback_func::Function
     structure::SystemStructure
     const names::OrderedDict{Any, NameLevel}
-    const nobserved::Int
     const neps::Int
     const ic_nzc::Int
     const vcc_nzc::Int
@@ -197,7 +196,6 @@ mutable struct IRTransformationState <: TransformationState{IRODESystem}
             ()->CallbackSet(),
             make_structure_from_ipo(structure),
             copy(structure.names),
-            structure.nobserved,
             structure.neps,
             structure.ic_nzc,
             structure.vcc_nzc,
@@ -340,7 +338,9 @@ function StateSelection.linear_subsys_adjmat!(irs::IRTransformationState)
     eadj = Vector{Int}[]
     cadj = Vector{Int}[]
     linear_equations = Vector{Int}()
-    for (i, inc) in enumerate(getfield(irs.sys, :result).total_incidence)
+    result = getfield(irs.sys, :result)
+    for (i, inc) in enumerate(result.total_incidence)
+        result.eq_kind[i][2] == Intrinsics.DiffAlg || continue
         isa(inc, Const) && continue
         any(x->x === nonlinear || !isinteger(x), nonzeros(inc.row)) && continue
         (isa(inc.typ, Const) && iszero(inc.typ.val)) || continue

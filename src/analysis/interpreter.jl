@@ -97,7 +97,7 @@ struct DAEInterpreter <: AbstractInterpreter
 
     var_to_diff::DiffGraph
     var_kind::Vector{VarEqKind}
-    eq_kind::Vector{VarEqKind}
+    eq_kind::Vector{Pair{VarEqKind, EqKind}}
 
     # For debugging/Cthulhu integration only (TODO: Only collect this optionally)
     unopt::Dict{Union{MethodInstance,InferenceResult}, Cthulhu.InferredSource}
@@ -113,7 +113,7 @@ struct DAEInterpreter <: AbstractInterpreter
         dae_cache::IdDict{InferenceResult,DAEInfo} = IdDict{InferenceResult,DAEInfo}(), # we intentionally don't track this with `new_cache` as its not used again after inference is done and is kept only for debugging
         var_to_diff::DiffGraph = DiffGraph(0),
         var_kind::Vector{VarEqKind} = VarEqKind[],
-        eq_kind::Vector{VarEqKind} = VarEqKind[],
+        eq_kind::Vector{Pair{VarEqKind, EqKind}} = Pair{VarEqKind, EqKind}[],
         ipo_analysis_mode::Bool = false,
         in_analysis::Bool = false)
         if code_cache === nothing
@@ -138,7 +138,7 @@ struct DAEInterpreter <: AbstractInterpreter
         dae_cache::IdDict{InferenceResult,DAEInfo} = interp.dae_cache,
         var_to_diff::DiffGraph = DiffGraph(0),
         var_kind::Vector{VarEqKind} = VarEqKind[],
-        eq_kind::Vector{VarEqKind} = VarEqKind[],
+        eq_kind::Vector{Pair{VarEqKind, EqKind}} = Pair{VarEqKind, EqKind}[],
         ipo_analysis_mode = interp.ipo_analysis_mode,
         in_analysis = interp.in_analysis)
         return new(world, method_table, inf_cache, code_cache, dae_cache,
@@ -298,7 +298,7 @@ widenincidence(@nospecialize(x)) = x
             #return CallMeta(Incidence(0), ret.effects, ret.info)
         elseif f === variable || f === state_ddt
             merge_daeinfo!(interp, sv.result, DAEInfo(; has_dae_intrinsics=true))
-        elseif f === equation || f === observed! || f === singularity_root! || f === time_periodic_singularity!
+        elseif f === equation || f === singularity_root! || f === time_periodic_singularity!
             merge_daeinfo!(interp, sv.result, DAEInfo(; has_dae_intrinsics=true))
         elseif f === Core.current_scope
             merge_daeinfo!(interp, sv.result, DAEInfo(; has_scoperead=true))
@@ -652,8 +652,6 @@ const variable_method0 = only(methods(variable, ()))
 const variable_method1 = only(methods(variable, (Union{Nothing, Intrinsics.AbstractScope},)))
 const epsilon_method0 = only(methods(epsilon, ()))
 const epsilon_method1 = only(methods(epsilon, (Union{Nothing, Intrinsics.AbstractScope},)))
-const observed!_method1 = only(methods(observed!, (Float64,)))
-const observed!_method2 = only(methods(observed!, (Float64, Union{Nothing, Intrinsics.AbstractScope})))
 const singularity_root!_method = only(methods(singularity_root!))
 const time_periodic_singularity!_method = only(methods(time_periodic_singularity!))
 const state_ddt_method = only(methods(state_ddt))
@@ -749,9 +747,9 @@ function compute_missing_coeff!(coeffs, result, caller_var_to_diff, caller_var_k
     return nothing
 end
 
-apply_linear_incidence(ret::Type, result::DAEIPOResult, caller_var_to_diff::DiffGraph, caller_var_kind::Vector{VarEqKind}, caller_eq_kind::Vector{VarEqKind}, mapping::CalleeMapping) = ret
-apply_linear_incidence(ret::Const, result::DAEIPOResult, caller_var_to_diff::DiffGraph, caller_var_kind::Vector{VarEqKind}, caller_eq_kind::Vector{VarEqKind}, mapping::CalleeMapping) = ret
-function apply_linear_incidence(ret::Incidence, result::DAEIPOResult, caller_var_to_diff::DiffGraph, caller_var_kind::Vector{VarEqKind}, caller_eq_kind::Vector{VarEqKind}, mapping::CalleeMapping)
+apply_linear_incidence(ret::Type, result::DAEIPOResult, caller_var_to_diff::DiffGraph, caller_var_kind::Vector{VarEqKind}, caller_eq_kind::Vector{Pair{VarEqKind, EqKind}}, mapping::CalleeMapping) = ret
+apply_linear_incidence(ret::Const, result::DAEIPOResult, caller_var_to_diff::DiffGraph, caller_var_kind::Vector{VarEqKind}, caller_eq_kind::Vector{Pair{VarEqKind, EqKind}}, mapping::CalleeMapping) = ret
+function apply_linear_incidence(ret::Incidence, result::DAEIPOResult, caller_var_to_diff::DiffGraph, caller_var_kind::Vector{VarEqKind}, caller_eq_kind::Vector{Pair{VarEqKind, EqKind}}, mapping::CalleeMapping)
     coeffs = mapping.var_coeffs
 
     const_val = ret.typ
@@ -796,16 +794,16 @@ function apply_linear_incidence(ret::Incidence, result::DAEIPOResult, caller_var
     return Incidence(const_val, new_row, BitSet())
 end
 
-function apply_linear_incidence(ret::Eq, result::DAEIPOResult, caller_var_to_diff::DiffGraph, caller_var_kind::Vector{VarEqKind}, caller_eq_kind::Vector{VarEqKind}, mapping::CalleeMapping)
+function apply_linear_incidence(ret::Eq, result::DAEIPOResult, caller_var_to_diff::DiffGraph, caller_var_kind::Vector{VarEqKind}, caller_eq_kind::Vector{Pair{VarEqKind, EqKind}}, mapping::CalleeMapping)
     eq_mapping = mapping.eqs[ret.id]
     if eq_mapping == 0
-        push!(caller_eq_kind, Owned)
+        push!(caller_eq_kind, Owned=>result.eq_kind[ret.id][2])
         mapping.eqs[ret.id] = eq_mapping = length(caller_eq_kind)
     end
     return Eq(eq_mapping)
 end
 
-function apply_linear_incidence(ret::PartialStruct, result::DAEIPOResult, caller_var_to_diff::DiffGraph, caller_var_kind::Vector{VarEqKind}, caller_eq_kind::Vector{VarEqKind}, mapping::CalleeMapping)
+function apply_linear_incidence(ret::PartialStruct, result::DAEIPOResult, caller_var_to_diff::DiffGraph, caller_var_kind::Vector{VarEqKind}, caller_eq_kind::Vector{Pair{VarEqKind, EqKind}}, mapping::CalleeMapping)
     return PartialStruct(ret.typ, Any[apply_linear_incidence(f, result, caller_var_to_diff, caller_var_kind, caller_eq_kind, mapping) for f in ret.fields])
 end
 
@@ -840,9 +838,6 @@ function _abstract_eval_invoke_inst(interp::DAEInterpreter, inst::Union{CC.Instr
         return RT(nothing, good_effects)
     elseif m === equation_call_method
         @assert length(stmt.args) == 3
-        # Nothing to do - we'll read the incidence out of the ssavaluetypes
-        return RT(nothing, good_effects)
-    elseif m === observed!_method1 || m === observed!_method2
         # Nothing to do - we'll read the incidence out of the ssavaluetypes
         return RT(nothing, good_effects)
     elseif m === singularity_root!_method || m === time_periodic_singularity!_method

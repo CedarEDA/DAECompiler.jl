@@ -4,7 +4,7 @@ function check_variable_specification_preconditions(tsys, vars, obs)
     # functions for simple permutations in the order in which we ask for variables.
     compact = IncrementalCompact(copy(tsys.state.ir))
     (_, state_vars) = find_eqs_vars(tsys.state.structure.graph, compact)
-    for (name, set, max) in (("variable", vars, length(state_vars)), ("observable", obs, tsys.state.nobserved))
+    for (name, set, max) in (("variable", vars, length(state_vars)), )
         if !isempty(set)
             if !issorted(set) || length(unique(set)) != length(set)
                 throw(ArgumentError("$(name)s specification must be sorted and unique: $(set)"))
@@ -46,7 +46,7 @@ function filter_reconstruction_output_ssas(ir)
     ssas = SSAValue[]
     for ii in 1:length(ir.stmts)
         stmt = ir[SSAValue(ii)][:inst]
-        if is_known_invoke(stmt, observed!, ir) || is_solved_variable(stmt)
+        if is_solved_variable(stmt)
             push!(ssas, SSAValue(ii))
         end
     end

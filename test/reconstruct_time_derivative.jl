@@ -63,7 +63,6 @@ using DAECompiler: reconstruct_time_deriv
         foo()
 
         sys = IRODESystem(Tuple{typeof(foo)}; debug_config=(; store_ir_levels=true));
-        tsys = TransformedIRODESystem(sys)
         prob = ODEProblem(tsys, nothing, (0.0, 10.0), Float64[1.0]; jac=true);
         sol = solve(prob, Rodas5P())
 

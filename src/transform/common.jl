@@ -180,7 +180,6 @@ function replace_if_intrinsic!(compact, ssa, du, u, p, t, var_assignment)
     elseif is_known_invoke_or_call(stmt, equation, compact)
         inst[:inst] = Intrinsics.placeholder_equation
     elseif is_equation_call(stmt, compact) ||
-        is_known_invoke_or_call(stmt, observed!, compact) ||
         is_known_invoke_or_call(stmt, singularity_root!, compact) ||
         is_known_invoke_or_call(stmt, time_periodic_singularity!, compact) ||
         is_solved_variable(stmt)

@@ -324,7 +324,7 @@ function _make_argument_lattice_elem(which::Argument, @nospecialize(argt), add_v
     elseif isa(argt, Type) && argt <: Intrinsics.AbstractScope
         return PartialScope(add_scope!(which))
     elseif isa(argt, Type) && argt == equation
-        return Eq(add_equation!(which))
+        return Eq(add_equation!(which, Intrinsics.ExternalEq))
     elseif is_non_incidence_type(argt)
         return argt
     elseif CC.isprimitivetype(argt)
@@ -494,12 +494,11 @@ end
     eqssas = Pair{Union{SSAValue, Argument}, Vector{SSAValue}}[]
     epsssas = SSAValue[]
     varssa = Union{SSAValue, Argument}[]
-    obsssa = SSAValue[]
     singularity_root_ssas = SSAValue[]
     time_periodic_ssas = SSAValue[]
     var_to_diff = DiffGraph(0)
     var_kind = VarEqKind[]
-    eq_kind = VarEqKind[]
+    eq_kind = Pair{VarEqKind, Intrinsics.EqKind}[]
     warnings = UnsupportedIRException[]
 
     names = OrderedDict{Any, NameLevel}()
@@ -514,9 +513,9 @@ end
         return v
     end
 
-    function add_equation!(i::Union{SSAValue, Argument})
+    function add_equation!(i::Union{SSAValue, Argument}, kind::Intrinsics.EqKind)
         push!(eqssas, i=>SSAValue[])
-        push!(eq_kind, isa(i, Argument) ? External : Owned)
+        push!(eq_kind, (isa(i, Argument) ? External : Owned)=>kind)
         return length(eqssas)
     end
 
@@ -535,13 +534,6 @@ end
     else
         arg1type = isa(ir.argtypes[1], Const) ? ir.argtypes[1] : Incidence(ir.argtypes[1])
         argtypes = Any[arg1type]
-    end
-
-    nobserved = 0
-    function add_observed!(i::Int)
-        nobserved += 1
-        push!(obsssa, SSAValue(i))
-        return nobserved
     end
 
     function add_epsilon!(i::Int)
@@ -589,16 +581,12 @@ end
                 ir.stmts[i][:type] = Incidence(Const(0.0), _zero_row(), BitSet(ε))
                 CC.push!(externally_refined, i)
             elseif is_known_invoke(stmt, equation, ir)
-                @assert length(stmt.args) >= 2
-                ir.stmts[i][:type] = Eq(add_equation!(SSAValue(i)))
+                @assert length(stmt.args) >= 4
+                kind = (argextype(stmt.args[4], ir)::Const).val::Intrinsics.EqKind
+                ir.stmts[i][:type] = Eq(add_equation!(SSAValue(i), kind))
                 CC.push!(externally_refined, i)
             elseif is_equation_call(stmt, ir, #=allow_call=#false)
                 push!(eqcallssas, SSAValue(i))
-            elseif is_known_invoke(stmt, observed!, ir)
-                #if check_dynamic_state!(bb, i)
-                    obsnum = add_observed!(i)
-                    push!(stmt.args, obsnum)
-                #end
             elseif is_known_invoke(stmt, singularity_root!, ir)
                 if length(stmt.args) != 3
                     return UncompilableIPOResult(warnings, UnsupportedIRException("singularity_root!() requires a single argument!"))
@@ -812,27 +800,6 @@ end
         end
     end
 
-    for ssa in obsssa
-        inst = ir[ssa][:inst]
-        if inst !== nothing && length(inst.args) == 5
-            # If inst is nothing, there was an error path, allow this for now.
-            inst = inst::Expr
-            scope = argextype(inst.args[4], ir)
-            isa(scope, Incidence) && (scope = scope.typ)
-            if !isa(scope, Const) && !is_valid_partial_scope(scope)
-                record_ir!(debug_config, "compute_structure_error", ir)
-                return UncompilableIPOResult(warnings, UnsupportedIRException("Expected scope ($(scope), SSA %$(ssa.id)) to be a const", ir))
-            elseif isa(scope, Const) && scope.val === Scope()
-                # Explicitly unnamed
-            else
-                var_num = inst.args[end]::Int
-                record_this_scope!(scope, obsssa, var_num, @o _.obs)
-            end
-            # Delete the scope (see above)
-            inst.args[4] = nothing
-        end
-    end
-
     for ssa in epsssas
         inst = ir[ssa][:inst]
         if inst !== nothing
@@ -909,10 +876,10 @@ end
         else
             record_this_scope!(scope, varssa, eqnum, @o _.eq)
         end
-        if length(eqinst.args) == 3
-            # Delete scope (see above)
-            eqinst.args[3] = nothing
-        end
+        # Delete scope (see above)
+        eqinst.args[3] = nothing
+        # We could also delete the kind, but since it's supposed to be a constant
+        # anyway, just leave it - it'll probably make debugging marginally easier
     end
 
     for ssa in eqcallssas
@@ -931,16 +898,9 @@ end
         ieq = eqeq.id
 
         eqssaval = eqcall.args[3]
-        if !isa(eqssaval, SSAValue) && !isa(eqssaval, Argument)
-            if !iszero(eqssaval)
-                return UncompilableIPOResult(warnings, UnsupportedIRException(
-                    "Equation call for $ieq at $ssa is set to $eqssaval. The system is unsolvable.", ir))
-            end
-            continue
-        end
         inc = argextype(eqssaval, ir)
         if !isa(inc, Incidence)
-            if caller === nothing
+            if caller === nothing && eq_kind[ieq][2] == Intrinsics.DiffAlg
                 record_ir!(debug_config, "compute_structure_error", ir)
                 return UncompilableIPOResult(warnings, UnsupportedIRException("Expected incidence analysis to produce result for $eqssaval, got $inc", ir))
             else
@@ -979,7 +939,7 @@ end
             inst = ir[SSAValue(i)]
             stmt = inst[:stmt]
             if isexpr(stmt, :invoke)
-                if is_known_invoke(stmt, observed!, ir) || is_equation_call(stmt, ir)
+                if is_equation_call(stmt, ir)
                     continue
                 end
 
@@ -1032,7 +992,7 @@ end
                     mapping.eqs[ieq] == 0 || continue
                     push!(total_incidence, apply_linear_incidence(inc, result, var_to_diff, var_kind, eq_kind, mapping))
                     push!(eq_callee_mapping, [SSAValue(i)=>ieq])
-                    push!(eq_kind, CalleeInternal)
+                    push!(eq_kind, CalleeInternal=>result.eq_kind[ieq][2])
                     mapping.eqs[ieq] = length(total_incidence)
                 end
 
@@ -1125,7 +1085,7 @@ end
         complete(var_to_diff),
         var_kind,
         total_incidence, eq_kind, eq_callee_mapping,
-        names, nobserved, length(epsssas), ic_nzc, vcc_nzc,
+        names, length(epsssas), ic_nzc, vcc_nzc,
         warnings,
         Dict{TornCacheKey, IRCode}(),
         Dict{TornCacheKey, CodeInstance}(),
@@ -1170,14 +1130,14 @@ function process_ipo_return!(ultimate_rt::Incidence, eq_kind, var_kind, var_to_d
         ultimate_rt = Incidence(Const(0.0), new_row, ultimate_rt.eps)
         push!(total_incidence, Incidence(ultimate_rt.typ, new_eq_row, BitSet()))
         push!(eq_callee_mapping, nothing)
-        push!(eq_kind, Owned)
+        push!(eq_kind, Owned=>Intrinsics.DiffAlg)
     end
 
     return ultimate_rt, nimplicitoutpairs
 end
 
 function process_ipo_return!(ultimate_rt::Eq, eq_kind, args...)
-    eq_kind[ultimate_rt.id] = External
+    eq_kind[ultimate_rt.id] = External=>eq_kind[ultimate_rt.id][2]
     return ultimate_rt, 0
 end
 process_ipo_return!(ultimate_rt::Union{Type, PartialScope, PartialKeyValue, Const}, args...) = ultimate_rt, 0

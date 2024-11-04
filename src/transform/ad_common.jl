@@ -28,9 +28,6 @@ end
            is_known_invoke(stmt, time_periodic_singularity!, ir)
             inst[:inst] = nothing
 
-        elseif is_known_invoke(stmt, observed!, ir) && !keep_observerd
-            inst[:inst] = nothing
-
         elseif is_known_invoke(stmt, epsilon, ir) && !keep_epsilon
             inst[:inst] = 0.0
 

@@ -92,9 +92,6 @@ function reconstruction_time_derivative_visit_custom!(ir::IRCode, ssa::Union{SSA
     elseif is_known_invoke_or_call(stmt, solved_variable, ir)
         recurse(stmt.args[end])
         return true
-    elseif is_known_invoke_or_call(stmt, observed!, ir)
-        recurse(stmt.args[end-2])
-        return true
     elseif is_known_invoke(stmt, sim_time, ir)
         return true
     elseif is_equation_call(stmt, ir)
@@ -148,7 +145,7 @@ function define_transform_for_pushingforward_reconstruct_time_derivatives(var_as
             _taylor1(primal, partial) = Diffractor.TaylorBundle{1}(primal, (partial,))
             replace_call!(ir, ssa, Expr(:call, _taylor1, u_ii, du_ii))
             return nothing
-        elseif is_solved_variable(stmt) || is_known_invoke(stmt, observed!, ir)
+        elseif is_solved_variable(stmt)
             if is_solved_variable(stmt)
                 out = dvar_out
                 v = stmt.args[end-1]

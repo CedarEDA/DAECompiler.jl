@@ -28,14 +28,6 @@ module Intrinsics
     function epsilon end
 
     """
-        observed!(val::Number, [name])
-
-    This intrinsic creates an observable which is a quantity that isn't evolved with the system
-    but which the user just wants to be able to query from the states.
-    """
-    function observed! end
-
-    """
         equation!(val, [scope])
 
     This intrinsic marks an equation. The system of equations is considered satisfied when all
@@ -104,6 +96,12 @@ module Intrinsics
         GenScope(Scope(parent, name))
     (scope::GenScope)(s::Symbol) = Scope(scope, s)
 
+    @enum EqKind begin
+        DiffAlg
+        Obs
+        ExternalEq
+    end
+
     """
         equation
 
@@ -111,14 +109,14 @@ module Intrinsics
     additively adds the called term to the particular equation.
     """
     mutable struct equation
-        @noinline equation(::AbstractScope) = new()
+        @noinline equation(::AbstractScope, ::EqKind) = new()
     end
 
     """
     An invalid equation that is used as a placeholder in codegen to replace `equation()` calls,
     while retaining the type.
     """
-    const placeholder_equation = equation(root_scope)
+    const placeholder_equation = equation(root_scope, DiffAlg)
 
     @noinline function (eq::equation)(val)
         if eq === placeholder_equation
@@ -189,11 +187,7 @@ module Intrinsics
         Base.inferencebarrier(0.0)::Float64
     end
     @inline epsilon() = epsilon(root_scope)
-    @noinline Base.@assume_effects :nothrow :terminates_globally function observed!(val, name::AbstractScope)
-        Base.inferencebarrier(check_bad_runtime_intrinsic)()
-        Base.donotdelete(val)
-    end
-    @inline observed!(val) = observed!(val, root_scope)
+
     @noinline Base.@assume_effects :nothrow :terminates_globally function singularity_root!(val)
         Base.inferencebarrier(check_bad_runtime_intrinsic)()
         Base.donotdelete(val)
@@ -219,10 +213,22 @@ module Intrinsics
 
     # Helpers (not one of the intrinsics)
     equation() = equation(root_scope)
+    equation(scope::AbstractScope) = equation(scope, DiffAlg)
     equation!(val, scope::AbstractScope=root_scope) = equation(scope)(val)
     variable(name::Symbol) = variable(Scope(root_scope, name))
     epsilon(name::Symbol) = epsilon(Scope(root_scope, name))
     equation!(val::Number, name::Symbol) = equation!(val, Scope(root_scope, name))
+
+    observed() = observed(root_scope)
+    observed(scope::AbstractScope) = equation(scope, Obs)
+
+    """
+        observed!(val::Number, [name])
+
+    This intrinsic creates an observable which is a quantity that isn't evolved with the system
+    but which the user just wants to be able to query from the states.
+    """
+    observed!(val, scope::AbstractScope=root_scope) = observed(scope)(val)
     observed!(val::Number, name::Symbol) = observed!(val, Scope(root_scope, name))
 
     # These global variables are inserted for the compiler for variables which should be unused
