@@ -4,7 +4,7 @@
 using Core: CodeInfo, MethodInstance, CodeInstance, SimpleVector, MethodMatch, MethodTable
 using .CC: AbstractInterpreter, NativeInterpreter, InferenceParams, OptimizationParams,
     InferenceResult, InferenceState, OptimizationState, WorldRange, WorldView, ArgInfo,
-    StmtInfo, MethodCallResult, ConstCallResults, ConstPropResult, MethodTableView,
+    StmtInfo, MethodCallResult, ConstCallResult, ConstPropResult, MethodTableView,
     CachedMethodTable, InternalMethodTable, OverlayMethodTable, CallMeta, CallInfo,
     IRCode, LazyDomtree, IRInterpretationState, set_inlineable!, block_for_inst,
     BitSetBoundedMinPrioritySet, AbsIntState, Future
@@ -117,7 +117,7 @@ struct DAEInterpreter <: AbstractInterpreter
         ipo_analysis_mode::Bool = false,
         in_analysis::Bool = false)
         if code_cache === nothing
-            code_cache = get_code_cache(method_table, ipo_analysis_mode)
+            code_cache = get_code_cache(world, method_table, ipo_analysis_mode)
         end
         if method_table !== nothing
             method_table = CachedMethodTable(OverlayMethodTable(world, method_table))
@@ -315,13 +315,10 @@ end
     return Future{MethodCallResult}(mret, interp, sv) do ret, interp, sv
         edge = ret.edge
         if edge !== nothing
-            cache = CC.get(CC.code_cache(interp), edge, nothing)
-            if cache !== nothing
-                src = @atomic :monotonic cache.inferred
-                if isa(src, DAECache)
-                    info = src.info
-                    merge_daeinfo!(interp, sv.result, info)
-                end
+            src = @atomic :monotonic edge.inferred
+            if isa(src, DAECache)
+                info = src.info
+                merge_daeinfo!(interp, sv.result, info)
             end
         end
         return ret
@@ -330,11 +327,11 @@ end
 
 @override function CC.const_prop_call(interp::DAEInterpreter,
     mi::MethodInstance, result::MethodCallResult, arginfo::ArgInfo,
-    sv::InferenceState, concrete_eval_result::Union{Nothing,ConstCallResults})
+    sv::InferenceState, concrete_eval_result::Union{Nothing,ConstCallResult})
     ret = @invoke CC.const_prop_call(interp::AbstractInterpreter,
         mi::MethodInstance, result::MethodCallResult, arginfo::ArgInfo,
-        sv::InferenceState, concrete_eval_result::Union{Nothing,ConstCallResults})
-    if isa(ret, ConstCallResults)
+        sv::InferenceState, concrete_eval_result::Union{Nothing,ConstCallResult})
+    if isa(ret, ConstCallResult)
         const_result = ret.const_result::ConstPropResult
         info = interp.dae_cache[const_result.result]
         merge_daeinfo!(interp, sv.result, info)
@@ -353,18 +350,12 @@ struct DAECache
         new(inferred, ir, info)
 end
 
-@override CC.transform_result_for_cache(interp::DAEInterpreter,
-    mi::MethodInstance, valid_worlds::WorldRange, result::InferenceResult, cond::Bool) =
-        _transform_result_for_cache(interp, mi, valid_worlds, result, cond)
-
-function _transform_result_for_cache(interp::DAEInterpreter,
-    mi::MethodInstance, valid_worlds::WorldRange, result::InferenceResult, cond::Bool=false)
+function CC.transform_result_for_cache(interp::DAEInterpreter, result::InferenceResult)
     src = result.src
     if isa(src, DAECache)
         return src
     end
-    inferred = @invoke CC.transform_result_for_cache(interp::AbstractInterpreter,
-        mi::MethodInstance, valid_worlds::WorldRange, result::InferenceResult, cond::Bool)
+    inferred = @invoke CC.transform_result_for_cache(interp::AbstractInterpreter, result)
     return DAECache(inferred, nothing, interp.dae_cache[result])
 end
 
@@ -372,7 +363,7 @@ end
 # --------
 
 function dae_inlining_policy(@nospecialize(src), @nospecialize(info::CallInfo), raise::Bool=true)
-    if isa(info, Diffractor.FRuleCallInfo)
+    if isa(info, Diffractor.FRuleCallInfo) && info.frule_call.rt !== Const(nothing)
         return nothing
     end
     osrc = src
@@ -502,13 +493,10 @@ end
     result::MethodCallResult, si::StmtInfo, sv::InferenceState, force::Bool)
     edge = result.edge
     if edge !== nothing
-        cache = CC.get(CC.code_cache(interp), edge, nothing)
-        if cache !== nothing
-            src = @atomic :monotonic cache.inferred
-            if isa(src, DAECache)
-                src.info.has_dae_intrinsics && return true
-                src.info.has_scoperead && return true
-            end
+        src = @atomic :monotonic edge.inferred
+        if isa(src, DAECache)
+            src.info.has_dae_intrinsics && return true
+            src.info.has_scoperead && return true
         end
     end
     return @invoke CC.const_prop_rettype_heuristic(interp::AbstractInterpreter,
@@ -1052,7 +1040,7 @@ end
 using Cthulhu
 
 function Cthulhu.get_optimized_codeinst(interp::DAEInterpreter, curs::Cthulhu.CthulhuCursor)
-    interp.code_cache.cache[curs.mi]
+    CC.getindex(CC.code_cache(interp), curs.mi)
 end
 
 function Cthulhu.lookup(interp::DAEInterpreter, curs::Cthulhu.CthulhuCursor, optimize::Bool)
@@ -1109,7 +1097,7 @@ function lookup_optimized(interp::DAEInterpreter, mi::MethodInstance, allow_no_s
 end
 
 Cthulhu.can_descend(interp::DAEInterpreter, @nospecialize(key), optimize::Bool) =
-    haskey(optimize ? interp.code_cache.cache : interp.unopt, key)
+    optimize ? CC.haskey(CC.code_cache(interp), key) : haskey(interp.unopt, key)
 
 # TODO: Why does Cthulhu have this separately from the lookup logic, which already
 # returns effects

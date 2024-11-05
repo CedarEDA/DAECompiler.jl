@@ -442,6 +442,9 @@ function dae_result_for_inst(interp, inst::CC.Instruction)
     info = inst[:info]
     stmt = inst[:stmt]
     mi = stmt.args[1]
+    if isa(info, Diffractor.FRuleCallInfo) && info.frule_call.rt === Const(nothing)
+        info = info.info
+    end
     if isa(info, CC.ConstCallInfo)
         if length(info.results) != 1
             # TODO: When does this happen? Union split?

@@ -51,13 +51,16 @@ end
 function remap_info(remap_ir!, info)
     # TODO: This is pretty aweful, but it works for now.
     # It'll go away when we switch to IPO.
+    if isa(info, Diffractor.FRuleCallInfo) && info.frule_call.rt === Const(nothing)
+        info = info.info
+    end
     isa(info, CC.ConstCallInfo) || return info
     results = map(info.results) do result
         result === nothing && return result
         if isa(result, CC.SemiConcreteResult)
             let ir = copy(result.ir)
                 remap_ir!(ir)
-                CC.SemiConcreteResult(result.mi, ir, result.effects, result.spec_info)
+                CC.SemiConcreteResult(result.edge, ir, result.effects, result.spec_info)
             end
         elseif isa(result, CC.ConstPropResult)
             if isa(result.result.src, DAECache)
@@ -76,10 +79,9 @@ function widen_extra_info!(ir)
     for i = 1:length(ir.stmts)
         info = ir.stmts[i][:info]
         if isa(info, Diffractor.FRuleCallInfo)
-            ir.stmts[i][:info] = info.info
-        else
-            ir.stmts[i][:info] = remap_info(widen_extra_info!, info)
+            info = info.info
         end
+        ir.stmts[i][:info] = remap_info(widen_extra_info!, info)
         inst = ir.stmts[i][:inst]
         if isa(inst, PiNode)
             ir.stmts[i][:inst] = PiNode(inst.val, widenconst(inst.typ))
