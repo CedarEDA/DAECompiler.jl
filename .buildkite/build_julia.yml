@@ -20,8 +20,8 @@ steps:
                 - "/cache:/cache"
           - staticfloat/cryptic#v2:
               variables:
-                - AWS_ACCESS_KEY_ID="U2FsdGVkX19XrSV3TOHJKvdfoYyv8FiiTwqoGlfWkOKcPfOCBBtpxa+/KAqMlVWl"
-                - AWS_SECRET_ACCESS_KEY="U2FsdGVkX1/kFy045AVbmsHTWPKPPmz2BrHBG0wQ4LVmJrjDiAviwisQlr3mVVaA67kAcLJ0uxdcQ1TW0Wiqmg=="
+                - AWS_ACCESS_KEY_ID="U2FsdGVkX1/TVIor66StMqnNTUuinYpg4ZlOqZD0Ww0LG5jkBjq2aix7WMeWJv78"
+                - AWS_SECRET_ACCESS_KEY="U2FsdGVkX1+IebWDKiYOmkYU3wv7qGgbYDl6PIGzER9YfxHjc6qbAP830JsB5Hdkd9N3arOLwA7jAN8vRo2CcQ=="
         agents:
           os: "linux"
           arch: "x86_64"
@@ -40,8 +40,8 @@ steps:
               version: "1"
           - staticfloat/cryptic#v2:
               variables:
-                - AWS_ACCESS_KEY_ID="U2FsdGVkX19XrSV3TOHJKvdfoYyv8FiiTwqoGlfWkOKcPfOCBBtpxa+/KAqMlVWl"
-                - AWS_SECRET_ACCESS_KEY="U2FsdGVkX1/kFy045AVbmsHTWPKPPmz2BrHBG0wQ4LVmJrjDiAviwisQlr3mVVaA67kAcLJ0uxdcQ1TW0Wiqmg=="
+                - AWS_ACCESS_KEY_ID="U2FsdGVkX1/TVIor66StMqnNTUuinYpg4ZlOqZD0Ww0LG5jkBjq2aix7WMeWJv78"
+                - AWS_SECRET_ACCESS_KEY="U2FsdGVkX1+IebWDKiYOmkYU3wv7qGgbYDl6PIGzER9YfxHjc6qbAP830JsB5Hdkd9N3arOLwA7jAN8vRo2CcQ=="
         agents:
           os: "macos"
           arch: "aarch64"
