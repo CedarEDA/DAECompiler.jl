@@ -240,7 +240,7 @@ end
 function ir_to_cache(ir::IRCode)
     isva = false
     slotnames = nothing
-    ir = Core.Compiler.copy(ir)
+    ir = CC.copy(ir)
     # if the user didn't specify a definition MethodInstance or filename Symbol to use for the debuginfo, set a filename now
     ir.debuginfo.def === nothing && (ir.debuginfo.def = :var"generated IR for OpaqueClosure")
     nargtypes = length(ir.argtypes)
@@ -256,7 +256,7 @@ function ir_to_cache(ir::IRCode)
     end
     src.slotflags = fill(zero(UInt8), nargtypes)
     src.slottypes = copy(ir.argtypes)
-    src = Core.Compiler.ir_to_codeinf!(src, ir)
+    src = CC.ir_to_codeinf!(src, ir)
     return src
 end
 
@@ -450,18 +450,16 @@ function ir_to_src(ir::IRCode)
     src.isva = false
     src.slotflags = fill(zero(UInt8), nargtypes)
     src.slottypes = copy(ir.argtypes)
-    src = Core.Compiler.ir_to_codeinf!(src, ir)
+    src = CC.ir_to_codeinf!(src, ir)
     return src
 end
 
 function dae_factory_gen(world::UInt, source::LineNumberNode, _, @nospecialize(fT))
-    @Core.Compiler.show fT
-    @Core.Compiler.show world
     sys_ipo = IRODESystem(Tuple{fT}; world, ipo_analysis_mode=true);
 
     result = getfield(sys_ipo, :result)
     interp = getfield(sys_ipo, :interp)
-    codeinst = Core.Compiler.get(Core.Compiler.code_cache(interp), getfield(sys_ipo, :mi), nothing)
+    codeinst = CC.get(CC.code_cache(interp), getfield(sys_ipo, :mi), nothing)
 
     # For the top-level problem, all external vars are state-invariant, and we do no other fissioning
     param_vars = BitSet(1:result.nexternalvars)

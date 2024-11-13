@@ -2,7 +2,7 @@ using ForwardDiff
 using Base.Meta
 using Graphs
 using Core.IR
-using Core.Compiler: InferenceState, bbidxiter, dominates, tmerge, typeinf_lattice
+using .CC: InferenceState, bbidxiter, dominates, tmerge, typeinf_lattice
 
 @breadcrumb "ir_levels" function run_dae_passes(
     interp::DAEInterpreter, ir::IRCode, debug_config::DebugConfig = DebugConfig())
@@ -317,7 +317,7 @@ has_any_genscope(sc::Scope) = isdefined(sc, :parent) && has_any_genscope(sc.pare
 has_any_genscope(sc::PartialScope) = false
 has_any_genscope(sc::PartialStruct) = false # TODO
 
-function _make_argument_lattice_elem(which::Argument, @nospecialize(argt), add_variable!, add_equation!, add_scope!)
+function _make_argument_lattice_elem(𝕃, which::Argument, @nospecialize(argt), add_variable!, add_equation!, add_scope!)
     if isa(argt, Const)
         #@assert !isa(argt.val, Scope) # Shouldn't have been forwarded
         return argt
@@ -331,7 +331,7 @@ function _make_argument_lattice_elem(which::Argument, @nospecialize(argt), add_v
         inc = Incidence(add_variable!(which))
         return argt === Float64 ? inc : Incidence(argt, inc.row, inc.eps)
     elseif isa(argt, PartialStruct)
-        return PartialStruct(argt.typ, Any[make_argument_lattice_elem(which, f, add_variable!, add_equation!, add_scope!) for f in argt.fields])
+        return PartialStruct(𝕃, argt.typ, Any[make_argument_lattice_elem(𝕃, which, f, add_variable!, add_equation!, add_scope!) for f in argt.fields])
     elseif isabstracttype(argt) || ismutabletype(argt) || !isa(argt, DataType)
         return nothing
     else
@@ -344,7 +344,7 @@ function _make_argument_lattice_elem(which::Argument, @nospecialize(argt), add_v
         for i = 1:length(fieldtypes(argt))
             # TODO: Can we make this lazy?
             ft = fieldtype(argt, i)
-            mft = _make_argument_lattice_elem(which, ft, add_variable!, add_equation!, add_scope!)
+            mft = _make_argument_lattice_elem(𝕃, which, ft, add_variable!, add_equation!, add_scope!)
             if mft === nothing
                 push!(fields, Incidence(ft))
             else
@@ -352,12 +352,12 @@ function _make_argument_lattice_elem(which::Argument, @nospecialize(argt), add_v
                 push!(fields, mft)
             end
         end
-        return any ? PartialStruct(argt, fields) : nothing
+        return any ? PartialStruct(𝕃, argt, fields) : nothing
     end
 end
 
-function make_argument_lattice_elem(which::Argument, @nospecialize(argt), add_variable!, add_equation!, add_scope!)
-    mft = _make_argument_lattice_elem(which, argt, add_variable!, add_equation!, add_scope!)
+function make_argument_lattice_elem(𝕃, which::Argument, @nospecialize(argt), add_variable!, add_equation!, add_scope!)
+    mft = _make_argument_lattice_elem(𝕃, which, argt, add_variable!, add_equation!, add_scope!)
     mft === nothing ? Incidence(argt) : mft
 end
 
@@ -532,7 +532,7 @@ end
     nexternalvars = 0 # number of variables that we expect to come in
     nexternaleqs = 0 # number of equation references that we expect to come in
     if caller !== nothing
-        argtypes = Any[make_argument_lattice_elem(Argument(i), argt, add_variable!, add_equation!, add_scope!) for (i, argt) in enumerate(ir.argtypes)]
+        argtypes = Any[make_argument_lattice_elem(CC.typeinf_lattice(interp), Argument(i), argt, add_variable!, add_equation!, add_scope!) for (i, argt) in enumerate(ir.argtypes)]
         nexternalvars = length(var_to_diff)
         nexternaleqs = length(eqssas)
     else
@@ -571,7 +571,7 @@ end
         end
     end
 
-    cur_scope_lattice = PartialStruct(Base.ScopedValues.Scope,
+    cur_scope_lattice = PartialStruct(CC.typeinf_lattice(interp), Base.ScopedValues.Scope,
         Any[PartialKeyValue(Incidence(Base.PersistentDict{Base.ScopedValues.ScopedValue, Any}))])
 
     # Scan the IR, computing equations, variables, diffgraph, etc.
@@ -1017,7 +1017,7 @@ end
                 for eq = 1:length(result.eq_kind)
                     mapped_eq = mapping.eqs[eq]
                     mapped_eq == 0 && continue
-                    mapped_inc = apply_linear_incidence(result.total_incidence[eq], result, var_to_diff, var_kind, eq_kind, mapping)
+                    mapped_inc = apply_linear_incidence(CC.typeinf_lattice(interp), result.total_incidence[eq], result, var_to_diff, var_kind, eq_kind, mapping)
                     if isassigned(total_incidence, mapped_eq)
                         total_incidence[mapped_eq] = tfunc(Val(Core.Intrinsics.add_float),
                             total_incidence[mapped_eq],
@@ -1033,7 +1033,7 @@ end
 
                 for (ieq, inc) in enumerate(result.total_incidence[(result.nexternaleqs+1):end])
                     mapping.eqs[ieq] == 0 || continue
-                    push!(total_incidence, apply_linear_incidence(inc, result, var_to_diff, var_kind, eq_kind, mapping))
+                    push!(total_incidence, apply_linear_incidence(CC.typeinf_lattice(interp), inc, result, var_to_diff, var_kind, eq_kind, mapping))
                     push!(eq_callee_mapping, [SSAValue(i)=>ieq])
                     push!(eq_kind, CalleeInternal)
                     mapping.eqs[ieq] = length(total_incidence)
@@ -1115,7 +1115,7 @@ end
 
     nimplicitoutpairs = 0
     if caller !== nothing
-        ultimate_rt, nimplicitoutpairs = process_ipo_return!(ultimate_rt, eq_kind, var_kind,
+        ultimate_rt, nimplicitoutpairs = process_ipo_return!(CC.typeinf_lattice(interp), ultimate_rt, eq_kind, var_kind,
             var_to_diff, total_incidence, eq_callee_mapping)
     end
 
@@ -1135,7 +1135,7 @@ end
         Dict{TornCacheKey, CodeInstance}())
 end
 
-function process_ipo_return!(ultimate_rt::Incidence, eq_kind, var_kind, var_to_diff, total_incidence, eq_callee_mapping)
+function process_ipo_return!(𝕃, ultimate_rt::Incidence, eq_kind, var_kind, var_to_diff, total_incidence, eq_callee_mapping)
     nonlinrepl = nothing
     nimplicitoutpairs = 0
     function get_nonlinrepl()
@@ -1179,20 +1179,20 @@ function process_ipo_return!(ultimate_rt::Incidence, eq_kind, var_kind, var_to_d
     return ultimate_rt, nimplicitoutpairs
 end
 
-function process_ipo_return!(ultimate_rt::Eq, eq_kind, args...)
+function process_ipo_return!(𝕃, ultimate_rt::Eq, eq_kind, args...)
     eq_kind[ultimate_rt.id] = External
     return ultimate_rt, 0
 end
-process_ipo_return!(ultimate_rt::Union{Type, PartialScope, PartialKeyValue, Const}, args...) = ultimate_rt, 0
-function process_ipo_return!(ultimate_rt::PartialStruct, args...)
+process_ipo_return!(𝕃, ultimate_rt::Union{Type, PartialScope, PartialKeyValue, Const}, args...) = ultimate_rt, 0
+function process_ipo_return!(𝕃, ultimate_rt::PartialStruct, args...)
     nimplicitoutpairs = 0
     fields = Any[]
     for f in ultimate_rt.fields
-        (rt, n) = process_ipo_return!(f, args...)
+        (rt, n) = process_ipo_return!(𝕃, f, args...)
         nimplicitoutpairs += n
         push!(fields, rt)
     end
-    return PartialStruct(ultimate_rt.typ, fields), nimplicitoutpairs
+    return PartialStruct(𝕃, ultimate_rt.typ, fields), nimplicitoutpairs
 end
 
 function get_variable_name(names::OrderedDict, var_to_diff, var_idx)

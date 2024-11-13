@@ -1,5 +1,5 @@
 using Core: CodeInfo
-using Core.Compiler: IRCode, NewInstruction, InliningState,
+using .CC: IRCode, NewInstruction, InliningState,
     adce_pass!, compact!, insert_node!, quoted, sroa_pass!, ssa_inlining_pass!
 using StateSelection: MatchedSystemStructure
 using SparseArrays

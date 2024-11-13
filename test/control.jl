@@ -46,7 +46,7 @@ let sys = IRODESystem(Tuple{typeof(control_dependent_taint)})
     (; ir) = DAECompiler.StructuralAnalysisResult(sys)
     for i = 1:length(ir.stmts)
         inst = ir.stmts[i]
-        if isa(inst[:inst], Core.Compiler.PhiNode)
+        if isa(inst[:inst], Core.PhiNode)
             TT = inst[:type]
             @test isa(TT, DAECompiler.Incidence)
             @test !iszero(TT.row[2])
@@ -105,7 +105,7 @@ let sys = IRODESystem(Tuple{typeof(multi_control)})
     (; ir) = DAECompiler.StructuralAnalysisResult(sys)
     for i = 1:length(ir.stmts)
         inst = ir.stmts[i]
-        if isa(inst[:inst], Core.Compiler.PhiNode)
+        if isa(inst[:inst], Core.PhiNode)
             TT = inst[:type]
             @test isa(TT, DAECompiler.Incidence)
             @test !iszero(TT.row[3])

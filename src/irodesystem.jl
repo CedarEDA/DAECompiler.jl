@@ -3,7 +3,7 @@ using StateSelection: DiffGraph, BipartiteGraph
 using StateSelection: MatchedSystemStructure, TransformationState
 using StateSelection.BipartiteGraphs
 using StateSelection.CLIL
-using Core.Compiler: IRCode, SSAValue, NewSSAValue, MethodInstance
+using .CC: IRCode, SSAValue, NewSSAValue, MethodInstance
 using TimerOutputs: @timeit, TimerOutput
 using Tracy: @tracepoint
 using Preferences: @load_preference
@@ -155,7 +155,7 @@ struct IRODESystem
     debug_config::DebugConfig
 
     function IRODESystem(tt::Type{<:Tuple{Any}};
-                         fallback_interp::AbstractInterpreter = Core.Compiler.NativeInterpreter(),
+                         fallback_interp::AbstractInterpreter = CC.NativeInterpreter(),
                          debug_config = (;),
                          ipo_analysis_mode = false,
                          world::UInt=Base.tls_world_age())
@@ -255,7 +255,7 @@ IR, potentially throwing an exception if the verification fails.
 function record_ir!(debug_config::DebugConfig,
                     name::String,
                     ir::IRCode,
-                    verification_lattice::Core.Compiler.AbstractLattice =
+                    verification_lattice::CC.AbstractLattice =
                         CC.PartialsLattice(DAELattice()))
     # If the user provides `""` as the name, we just use the stack as the name.
     fulllevelname = get_record_ir_leaf_name(name)
@@ -285,7 +285,7 @@ function record_ir!(debug_config::DebugConfig,
     # `UnsupportedIRException` with `ir_levels` bundled in if this fails.
     if debug_config.verify_ir_levels
         try
-            Core.Compiler.verify_ir(ir, false, false, verification_lattice)
+            CC.verify_ir(ir, false, false, verification_lattice)
         catch e
             throw(UnsupportedIRException("IR verification failure", ir))
         end

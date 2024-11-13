@@ -4,6 +4,7 @@ using DAECompiler: IRODESystem, TransformedIRODESystem
 using DAECompiler.Intrinsics
 using DAECompiler.Intrinsics: state_ddt
 using Test
+import Compiler
 
 @testset "checked_intrinstics_removed + replace_if_intrinsic" begin
     function foo()
@@ -26,12 +27,12 @@ using Test
     p = nothing
     t = 0.5
     var_assignment = Dict(1=>(1,false), 2=>(2,false))
-    compact = Core.Compiler.IncrementalCompact(ir)
+    compact = Compiler.IncrementalCompact(ir)
     for ((_, idx), stmt) in compact
         ssa = Core.SSAValue(idx)
         DAECompiler.replace_if_intrinsic!(compact, ssa, du, u, p, t, var_assignment)
     end
-    ir = Core.Compiler.finish(compact)
+    ir = Compiler.finish(compact)
 
     # the following should not throw anymore
     @test DAECompiler.check_for_daecompiler_intrinstics(ir) isa Any

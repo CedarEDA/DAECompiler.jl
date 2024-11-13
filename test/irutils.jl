@@ -1,9 +1,10 @@
 using Core: CodeInfo, ReturnNode, MethodInstance
-using Core.Compiler: IRCode, IncrementalCompact, singleton_type, VarState
+import Compiler
+using Compiler: IRCode, IncrementalCompact, singleton_type, VarState
 using Base.Meta: isexpr
 using InteractiveUtils: gen_call_with_extracted_types_and_kwargs
 
-argextype(@nospecialize args...) = Core.Compiler.argextype(args...)
+argextype(@nospecialize args...) = Compiler.argextype(args...)
 argextype(@nospecialize(x), src::CodeInfo) = argextype(x, src, VarState[])
 code_typed1(args...; kwargs...) = first(only(code_typed(args...; kwargs...)))::CodeInfo
 macro code_typed1(ex0...)

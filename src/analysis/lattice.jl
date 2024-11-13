@@ -8,8 +8,8 @@ using SparseArrays
 
 This lattice implements the `AbstractLattice` interface. It adjoins `Incidence` and `Eq`.
 
-The DAELattice is one of the key places where DAECompiler extends
-Core.Compiler. In compiler parlance, the DAELattice type system can be
+The DAELattice is one of the key places where DAECompiler extends `Compiler`.
+In compiler parlance, the DAELattice type system can be
 thought of as a taint analysis sourced at `variable` (with sinks at `variable`,
 `equation`, etc.). In dynamical systems parlance, one might consider this
 analysis to compute a structural jacobian.
@@ -330,7 +330,7 @@ struct PartialKeyValue
 end
 PartialKeyValue(typ) = PartialKeyValue(typ, typ, IdDict{Any, Any}())
 
-function getkeyvalue_tfunc(𝕃::Core.Compiler.AbstractLattice,
+function getkeyvalue_tfunc(𝕃::CC.AbstractLattice,
         @nospecialize(collection), @nospecialize(key))
     isa(key, Const) || return Tuple{Any}
     if haskey(collection.vals, key.val)

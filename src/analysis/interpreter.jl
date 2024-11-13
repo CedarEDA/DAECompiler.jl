@@ -14,7 +14,7 @@ using StateSelection: DiffGraph
 using Cthulhu
 using ChainRulesCore
 
-# similer to `Core.Compiler.Effects` but for DAE-specific information
+# similer to `Compiler.Effects` but for DAE-specific information
 struct DAEInfo
     has_dae_intrinsics::Bool
     has_scoperead::Bool
@@ -45,19 +45,17 @@ struct DAEGlobalCache
 end
 DAEGlobalCache() = @new_cache DAEGlobalCache(IdDict{MethodInstance,CodeInstance}())
 Base.empty!(cache::DAEGlobalCache) = empty!(cache.cache)
-CC.get(wvc::CC.WorldView{DAEGlobalCache}, key, default) =
+Base.get(wvc::CC.WorldView{DAEGlobalCache}, key, default) =
     Base.get(wvc.cache.cache, key, default)
-CC.getindex(wvc::CC.WorldView{DAEGlobalCache}, key) =
+Base.getindex(wvc::CC.WorldView{DAEGlobalCache}, key) =
     Base.getindex(wvc.cache.cache, key)
-CC.get(cache::DAEGlobalCache, key, default) =
-    Base.get(cache.cache, key, default)
 Base.get(cache::DAEGlobalCache, key, default) =
     Base.get(cache.cache, key, default)
-CC.haskey(wvc::CC.WorldView{DAEGlobalCache}, key) =
+Base.haskey(wvc::CC.WorldView{DAEGlobalCache}, key) =
     Base.haskey(wvc.cache.cache, key)
-CC.setindex!(cache::DAEGlobalCache, val, key) =
+Base.setindex!(cache::DAEGlobalCache, val, key) =
     Base.setindex!(cache.cache, val, key)
-CC.getindex(cache::DAEGlobalCache, key) =
+Base.getindex(cache::DAEGlobalCache, key) =
     Base.getindex(cache.cache, key)
 
 const GLOBAL_CODE_CACHE = @new_cache Dict{UInt, DAEGlobalCache}()
@@ -270,9 +268,9 @@ function structural_inc_ddt(var_to_diff::DiffGraph, var_kind::Vector{VarEqKind},
     return Incidence(isa(inc.typ, Const) ? Const(zero(inc.typ.val)) : inc.typ, r, inc.eps)
 end
 
-widenincidence(inc::Incidence) = inc.typ
-widenincidence(p::PartialStruct) = PartialStruct(p.typ, Any[widenincidence(f) for f in  p.fields])
-widenincidence(@nospecialize(x)) = x
+widenincidence(@nospecialize(_), inc::Incidence) = inc.typ
+widenincidence(𝕃, p::PartialStruct) = PartialStruct(𝕃, p.typ, Any[widenincidence(𝕃, f) for f in  p.fields])
+widenincidence(@nospecialize(_), @nospecialize(x)) = x
 
 @override function CC.abstract_call_known(interp::DAEInterpreter, @nospecialize(f),
     arginfo::ArgInfo, si::StmtInfo, sv::AbsIntState, max_methods::Int)
@@ -304,7 +302,7 @@ widenincidence(@nospecialize(x)) = x
             merge_daeinfo!(interp, sv.result, DAEInfo(; has_scoperead=true))
         end
     end
-    arginfo = ArgInfo(arginfo.fargs, map(widenincidence, arginfo.argtypes))
+    arginfo = ArgInfo(arginfo.fargs, map(x->widenincidence(CC.typeinf_lattice(interp), x), arginfo.argtypes))
     return Diffractor.fwd_abstract_call_gf_by_type(interp, f, arginfo, si, sv, ret)
 end
 
@@ -628,7 +626,7 @@ end
     end
     update_incidence(@nospecialize(a)) = a
     function update_incidence(i::PartialStruct)
-        return PartialStruct(i.typ, Any[update_incidence(f) for f in i.fields])
+        return PartialStruct(CC.typeinf_lattice(interp), i.typ, Any[update_incidence(f) for f in i.fields])
     end
 
     return update_incidence(valr)
@@ -666,7 +664,7 @@ function process_template!(𝕃, coeffs, eq_mapping, applied_scopes, argtypes, t
             @assert isa(arg, Eq)
             eq_mapping[idnum(template)] = idnum(arg)
         elseif CC.is_const_argtype(template)
-            #@Core.Compiler.show (arg, template)
+            #@CC.show (arg, template)
             #@assert CC.is_lattice_equal(DAE_LATTICE, arg, template)
         elseif isa(template, PartialScope)
             id = idnum(template)
@@ -737,9 +735,9 @@ function compute_missing_coeff!(coeffs, result, caller_var_to_diff, caller_var_k
     return nothing
 end
 
-apply_linear_incidence(ret::Type, result::DAEIPOResult, caller_var_to_diff::DiffGraph, caller_var_kind::Vector{VarEqKind}, caller_eq_kind::Vector{VarEqKind}, mapping::CalleeMapping) = ret
-apply_linear_incidence(ret::Const, result::DAEIPOResult, caller_var_to_diff::DiffGraph, caller_var_kind::Vector{VarEqKind}, caller_eq_kind::Vector{VarEqKind}, mapping::CalleeMapping) = ret
-function apply_linear_incidence(ret::Incidence, result::DAEIPOResult, caller_var_to_diff::DiffGraph, caller_var_kind::Vector{VarEqKind}, caller_eq_kind::Vector{VarEqKind}, mapping::CalleeMapping)
+apply_linear_incidence(𝕃, ret::Type, result::DAEIPOResult, caller_var_to_diff::DiffGraph, caller_var_kind::Vector{VarEqKind}, caller_eq_kind::Vector{VarEqKind}, mapping::CalleeMapping) = ret
+apply_linear_incidence(𝕃, ret::Const, result::DAEIPOResult, caller_var_to_diff::DiffGraph, caller_var_kind::Vector{VarEqKind}, caller_eq_kind::Vector{VarEqKind}, mapping::CalleeMapping) = ret
+function apply_linear_incidence(𝕃, ret::Incidence, result::DAEIPOResult, caller_var_to_diff::DiffGraph, caller_var_kind::Vector{VarEqKind}, caller_eq_kind::Vector{VarEqKind}, mapping::CalleeMapping)
     coeffs = mapping.var_coeffs
 
     const_val = ret.typ
@@ -784,7 +782,7 @@ function apply_linear_incidence(ret::Incidence, result::DAEIPOResult, caller_var
     return Incidence(const_val, new_row, BitSet())
 end
 
-function apply_linear_incidence(ret::Eq, result::DAEIPOResult, caller_var_to_diff::DiffGraph, caller_var_kind::Vector{VarEqKind}, caller_eq_kind::Vector{VarEqKind}, mapping::CalleeMapping)
+function apply_linear_incidence(𝕃, ret::Eq, result::DAEIPOResult, caller_var_to_diff::DiffGraph, caller_var_kind::Vector{VarEqKind}, caller_eq_kind::Vector{VarEqKind}, mapping::CalleeMapping)
     eq_mapping = mapping.eqs[ret.id]
     if eq_mapping == 0
         push!(caller_eq_kind, Owned)
@@ -793,8 +791,8 @@ function apply_linear_incidence(ret::Eq, result::DAEIPOResult, caller_var_to_dif
     return Eq(eq_mapping)
 end
 
-function apply_linear_incidence(ret::PartialStruct, result::DAEIPOResult, caller_var_to_diff::DiffGraph, caller_var_kind::Vector{VarEqKind}, caller_eq_kind::Vector{VarEqKind}, mapping::CalleeMapping)
-    return PartialStruct(ret.typ, Any[apply_linear_incidence(f, result, caller_var_to_diff, caller_var_kind, caller_eq_kind, mapping) for f in ret.fields])
+function apply_linear_incidence(𝕃, ret::PartialStruct, result::DAEIPOResult, caller_var_to_diff::DiffGraph, caller_var_kind::Vector{VarEqKind}, caller_eq_kind::Vector{VarEqKind}, mapping::CalleeMapping)
+    return PartialStruct(𝕃, ret.typ, Any[apply_linear_incidence(𝕃, f, result, caller_var_to_diff, caller_var_kind, caller_eq_kind, mapping) for f in ret.fields])
 end
 
 if isdefined(CC, :abstract_eval_invoke_inst)
@@ -878,7 +876,7 @@ function _abstract_eval_invoke_inst(interp::DAEInterpreter, inst::Union{CC.Instr
                                 # provide a special placeholder PartialScope.
                                 # HACK: This currently assumes there's only one scope
                                 # being passed through ScopedValue
-                                return RT(PartialStruct(Tuple{Intrinsics.AbstractScope}, Any[PartialScope(index)]), good_effects)
+                                return RT(PartialStruct(CC.typeinf_lattice(interp), Tuple{Intrinsics.AbstractScope}, Any[PartialScope(index)]), good_effects)
                             end
                         end
                         return RT(Union{Nothing, widenconst(CC.tuple_tfunc(CC.optimizer_lattice(interp), Any[sct]))}, good_effects)
@@ -910,7 +908,7 @@ function _abstract_eval_invoke_inst(interp::DAEInterpreter, inst::Union{CC.Instr
             return RT(nothing, (false, false))
         end
         mapping = CalleeMapping(CC.optimizer_lattice(interp), argtypes, callee_result)
-        new_rt = apply_linear_incidence(callee_result.extended_rt, callee_result, interp.var_to_diff, interp.var_kind, interp.eq_kind, mapping)
+        new_rt = apply_linear_incidence(CC.optimizer_lattice(interp), callee_result.extended_rt, callee_result, interp.var_to_diff, interp.var_kind, interp.eq_kind, mapping)
 
         # If this callee has no internal equations and at most one non-linear return, then we are guaranteed
         # never to need to fission this, so we can just treat it as a primitive.
@@ -979,7 +977,7 @@ end
                     update_type(t::Incidence) = t
                     update_type(t::Const) = t
                     update_type(t::CC.PartialTypeVar) = t
-                    update_type(t::PartialStruct) = PartialStruct(t.typ, Any[Base.isvarargtype(f) ? f : update_type(f) for f in t.fields])
+                    update_type(t::PartialStruct) = PartialStruct(CC.typeinf_lattice(interp), t.typ, Any[Base.isvarargtype(f) ? f : update_type(f) for f in t.fields])
                     update_type(t::CC.Conditional) = CC.Conditional(t.slot, update_type(t.thentype), update_type(t.elsetype))
                     newrt = update_type(rt)
                     return CC.RTEffects(newrt, exct, effects)
@@ -1025,7 +1023,7 @@ function typeinf_dae(@nospecialize(tt), world::UInt=get_world_counter();
     isempty(match) && single_match_error(tt)
     match = only(match)
     mi = CC.specialize_method(match)
-    ci = CC.typeinf_ext(interp, mi, Core.Compiler.SOURCE_MODE_ABI)
+    ci = CC.typeinf_ext(interp, mi, CC.SOURCE_MODE_ABI)
     return interp, ci
 end
 
