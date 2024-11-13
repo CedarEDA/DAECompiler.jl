@@ -269,7 +269,7 @@ module Intrinsics
     mutable struct variables{VT}
         const scope::Scope
         nt::NamedTuple{names, T} where {N, names, T<:NTuple{N, VT}}
-        variables(s::Scope) = new{Core.Compiler._return_type(variable, Tuple{})}(s, (;))
+        variables(s::Scope) = new{Base._return_type(variable, Tuple{})}(s, (;))
     end
     variables() = variables(root_scope)
     variables(s::Symbol) = variables(Scope(root_scope, s))

@@ -1,5 +1,5 @@
 using StateSelection.BipartiteGraphs: DiCMOBiGraph, topological_sort_by_dfs
-using Core.Compiler: NewSSAValue, OldSSAValue, Instruction, insert_node_here!, construct_domtree
+using .CC: NewSSAValue, OldSSAValue, Instruction, insert_node_here!, construct_domtree
 
 function type_contains_taint(@nospecialize(incT), var, available)
     if isa(incT, Incidence)
@@ -62,9 +62,10 @@ end
 
     compact = IncrementalCompact(ir)
     (eqs, vars) = find_eqs_vars(state.structure.graph, compact)
-    ir = Core.Compiler.finish(compact)
+    ir = CC.finish(compact)
 
     ipo_result = getfield(state.sys, :result)
+    𝕃 = CC.typeinf_lattice(getfield(state.sys, :interp))
 
     @may_timeit debug_config "tearing" begin
         domtree = construct_domtree(ir.cfg.blocks)
@@ -152,7 +153,7 @@ end
             end
             return Incidence(const_val, new_row, incT.eps)
         end
-        remap_incidence(t::PartialStruct, var) = PartialStruct(t.typ, Any[remap_incidence(f, var) for f in t.fields])
+        remap_incidence(t::PartialStruct, var) = PartialStruct(𝕃, t.typ, Any[remap_incidence(f, var) for f in t.fields])
         remap_incidence(t::PartialKeyValue, var) = PartialKeyValue(remap_incidence(t.typ, var), remap_incidence(t.parent, var),
             IdDict{Any, Any}(remap_incidence(k, var)=>remap_incidence(v, var) for (k, v) in pairs(t.vals)))
         remap_incidence(t::Union{Type, Const, Eq}, var) = t
@@ -647,7 +648,7 @@ end
             inst[:info] = remap_info(ir2->remap_ir!(ir2, 0), inst[:info])
         end
 
-        ir = Core.Compiler.finish(compact)
+        ir = CC.finish(compact)
     end
 
     record_ir!(state, "", ir)

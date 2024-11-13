@@ -6,7 +6,8 @@ using DAECompiler.Intrinsics
 using SciMLBase
 using OrdinaryDiffEq, Sundials
 using ForwardDiff
-const CC = Core.Compiler
+import Compiler
+const CC = Compiler
 
 include(joinpath(Base.pkgdir(DAECompiler), "test/testutils.jl"))
 
@@ -44,16 +45,16 @@ let sys = IRODESystem(Tuple{typeof(regression_setproperty)});
     # tmerge that results in a union
     let T = CC.tmerge(⼕🥬,
             CC.Const(0.0),
-            CC.PartialStruct(Tuple{Float64, Float64}, Any[DAECompiler.Incidence(1), DAECompiler.Incidence(1)]))
+            CC.PartialStruct(⼕🥬, Tuple{Float64, Float64}, Any[DAECompiler.Incidence(1), DAECompiler.Incidence(1)]))
         @test isa(T, DAECompiler.Incidence)
         @test T.typ == Union{Float64, Tuple{Float64, Float64}}
     end
 
     # tmerge nested struct that results in union
     let T = CC.tmerge(⼕🥬,
-                CC.PartialStruct(Tuple{Float64, Tuple{Float64}},
+                CC.PartialStruct(⼕🥬, Tuple{Float64, Tuple{Float64}},
                     Any[DAECompiler.Incidence(1),
-                        CC.PartialStruct(Tuple{Float64}, Any[DAECompiler.Incidence(2)])]),
+                        CC.PartialStruct(⼕🥬, Tuple{Float64}, Any[DAECompiler.Incidence(2)])]),
                 Core.Const(1.0))
         @test isa(T, DAECompiler.Incidence)
         @test T.typ == Union{Float64, Tuple{Float64, Tuple{Float64}}}
@@ -62,8 +63,8 @@ let sys = IRODESystem(Tuple{typeof(regression_setproperty)});
 
     # tmerge for partial structs
     let T = CC.tmerge(⼕🥬,
-            CC.PartialStruct(NTuple{3, Float64}, Any[DAECompiler.Incidence(1), DAECompiler.Incidence(2), Core.Const(0.0)]),
-            CC.PartialStruct(NTuple{3, Float64}, Any[DAECompiler.Incidence(2), DAECompiler.Incidence(1), Core.Const(0.0)]))
+            CC.PartialStruct(⼕🥬, NTuple{3, Float64}, Any[DAECompiler.Incidence(1), DAECompiler.Incidence(2), Core.Const(0.0)]),
+            CC.PartialStruct(⼕🥬, NTuple{3, Float64}, Any[DAECompiler.Incidence(2), DAECompiler.Incidence(1), Core.Const(0.0)]))
         @test isa(T, CC.PartialStruct) && isa(T.fields[1], DAECompiler.Incidence)
     end
 
@@ -86,7 +87,7 @@ let sys = IRODESystem(Tuple{typeof(regression_setproperty)});
     end
 
     # tmerge should lose PartialStruct
-    PT = Core.PartialStruct(Tuple{Float64, Float64}, Any[Core.Const(1.0), Float64])
+    PT = Core.PartialStruct(⼕🥬, Tuple{Float64, Float64}, Any[Core.Const(1.0), Float64])
     let T = CC.tmerge(⼕🥬, Union{}, PT)
         @test T === PT
     end

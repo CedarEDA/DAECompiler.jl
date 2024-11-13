@@ -2,7 +2,7 @@
 
 julia_version = "1.12.0-DEV"
 manifest_format = "2.0"
-project_hash = "6f020e73f91c8d84d5a5677636dbdbaecdf0c01c"
+project_hash = "358357b3116f929c974a76c332ca0867fdfaaa2d"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "5a5eafb8344b81b8c2237f8a6f6b3602b3f6180e"
@@ -256,6 +256,14 @@ weakdeps = ["Dates", "LinearAlgebra"]
     [deps.Compat.extensions]
     CompatLinearAlgebraExt = "LinearAlgebra"
 
+[[deps.Compiler]]
+git-tree-sha1 = "870045695768dbf84ebc7c8a1ec4a8ad30c6b489"
+repo-rev = "master"
+repo-subdir = "Compiler"
+repo-url = "https://github.com/JuliaLang/julia.git"
+uuid = "807dbc54-b67e-4c79-8afb-eafe4df6f2e1"
+version = "0.0.1"
+
 [[deps.CompilerSupportLibraries_jll]]
 deps = ["Artifacts", "Libdl"]
 uuid = "e66e0078-7015-5450-92f7-15fbd957f2ae"
@@ -322,7 +330,7 @@ uuid = "f68482b8-f384-11e8-15f7-abe071a5a75f"
 version = "2.15.3"
 
 [[deps.DAECompiler]]
-deps = ["Accessors", "CentralizedCaches", "ChainRules", "ChainRulesCore", "Cthulhu", "DiffEqBase", "DiffEqCallbacks", "Diffractor", "Distributions", "ExprTools", "ForwardDiff", "Graphs", "LinearAlgebra", "NonlinearSolve", "OrderedCollections", "OrdinaryDiffEq", "PrecompileTools", "Preferences", "REPL", "Random", "SciMLBase", "SciMLSensitivity", "SparseArrays", "StateSelection", "StaticArraysCore", "Sundials", "SymbolicIndexingInterface", "TimerOutputs", "Tracy"]
+deps = ["Accessors", "CentralizedCaches", "ChainRules", "ChainRulesCore", "Compiler", "Cthulhu", "DiffEqBase", "DiffEqCallbacks", "Diffractor", "Distributions", "ExprTools", "ForwardDiff", "Graphs", "LinearAlgebra", "NonlinearSolve", "OrderedCollections", "OrdinaryDiffEq", "PrecompileTools", "Preferences", "REPL", "Random", "SciMLBase", "SciMLSensitivity", "SparseArrays", "StateSelection", "StaticArraysCore", "Sundials", "SymbolicIndexingInterface", "TimerOutputs", "Tracy"]
 path = "."
 uuid = "32805668-c3d0-42c2-aafd-0d0a9857a104"
 version = "1.21.0"
@@ -443,9 +451,9 @@ uuid = "b552c78f-8df3-52c6-915a-8e097449b14b"
 version = "1.15.1"
 
 [[deps.Diffractor]]
-deps = ["AbstractDifferentiation", "ChainRules", "ChainRulesCore", "Combinatorics", "Cthulhu", "InteractiveUtils", "OffsetArrays", "PrecompileTools", "StaticArrays", "StructArrays"]
-git-tree-sha1 = "a9a4b544e40f91c770760b4624284188be1fe9bd"
-repo-rev = "kf/edgesadjust"
+deps = ["AbstractDifferentiation", "ChainRules", "ChainRulesCore", "Combinatorics", "Compiler", "Cthulhu", "InteractiveUtils", "OffsetArrays", "PrecompileTools", "StaticArrays", "StructArrays"]
+git-tree-sha1 = "64928a710dfaeda964f447f5e1fc9a5f758d25bb"
+repo-rev = "main"
 repo-url = "https://github.com/JuliaDiff/Diffractor.jl.git"
 uuid = "9f5e2b26-1114-432f-b630-d3fe2085c51c"
 version = "0.2.10"

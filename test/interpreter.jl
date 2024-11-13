@@ -3,16 +3,18 @@ module interpreter
 using Test
 using DAECompiler
 using DAECompiler: Incidence, DAEInterpreter, get_toplevel_mi_from_ir
-using Core.Compiler: IRCode, IncrementalCompact, NewInstruction, Argument, insert_node_here!
+import Compiler
+const CC = Compiler
+using .CC: IRCode, IncrementalCompact, NewInstruction, Argument, insert_node_here!
 include(joinpath(Base.pkgdir(DAECompiler), "test", "lorenz.jl"))
 
 function has_dae_intrinsics(interp::DAEInterpreter, @nospecialize(tt))
     match = Base._which(tt)
-    mi = Core.Compiler.specialize_method(match)
+    mi = CC.specialize_method(match)
     return has_dae_intrinsics(interp, mi)
 end
 function has_dae_intrinsics(interp::DAEInterpreter, mi::Core.MethodInstance)
-    codeinst = Core.Compiler.getindex(Core.Compiler.code_cache(interp), mi)
+    codeinst = CC.getindex(CC.code_cache(interp), mi)
     inferred = (@atomic :monotonic codeinst.inferred)::DAECompiler.DAECache
     return inferred.info.has_dae_intrinsics
 end
@@ -26,8 +28,6 @@ let x = Lorenz1(10.0, 28.0, 8.0/3.0)
 end
 
 # tfunc tests
-
-const CC = Core.Compiler
 
 """
 Returns a MethodInstance and IR corresponding to an abstract call to

@@ -4,6 +4,7 @@ using Test
 
 using DAECompiler, StateSelection, SciMLBase, OrdinaryDiffEq, Sundials
 using DAECompiler: equation!, state_ddt, variables
+import Compiler
 
 const results1 = Number[]
 const results2 = Number[]
@@ -57,15 +58,15 @@ function isfunc(name::Symbol)
 end
 
 # check if there are cached analysis results
-let cache = Core.Compiler.code_cache(interp)
-    mi1 = Core.Compiler.specialize_method(
+let cache = Compiler.code_cache(interp)
+    mi1 = Base.specialize_method(
         only(methods(⊖)), Tuple{typeof(⊖),Float64,Float64}, Core.svec())
-    @test Core.Compiler.haskey(cache, mi1)
-    @test Core.Compiler.getindex(cache, mi1).max_world == typemax(UInt)
-    mi2 = Core.Compiler.specialize_method(
+    @test Compiler.haskey(cache, mi1)
+    @test Compiler.getindex(cache, mi1).max_world == typemax(UInt)
+    mi2 = Base.specialize_method(
         only(methods(⊟)), Tuple{typeof(⊟),Float64,Float64}, Core.svec())
-    @test Core.Compiler.haskey(cache, mi2)
-    @test Core.Compiler.getindex(cache, mi2).max_world == typemax(UInt)
+    @test Compiler.haskey(cache, mi2)
+    @test Compiler.getindex(cache, mi2).max_world == typemax(UInt)
 end
 
 x::Number ⊟ y::Number = begin # now redefine it
@@ -75,14 +76,14 @@ x::Number ⊟ y::Number = begin # now redefine it
 end
 
 # check if the cached analysis results are invalidated
-let cache = Core.Compiler.code_cache(interp)
-    mi1 = Core.Compiler.specialize_method(
+let cache = Compiler.code_cache(interp)
+    mi1 = Compiler.specialize_method(
         only(methods(⊖)), Tuple{typeof(⊖),Float64,Float64}, Core.svec())
-    @test Core.Compiler.haskey(cache, mi1)
-    @test Core.Compiler.getindex(cache, mi1).max_world != typemax(UInt)
-    mi2 = Core.Compiler.specialize_method(
+    @test Compiler.haskey(cache, mi1)
+    @test Compiler.getindex(cache, mi1).max_world != typemax(UInt)
+    mi2 = Compiler.specialize_method(
         last(sort(methods(⊟); by=x->x.primary_world)), Tuple{typeof(⊟),Float64,Float64}, Core.svec())
-    @test !Core.Compiler.haskey(cache, mi2)
+    @test !Compiler.haskey(cache, mi2)
 end
 
 empty!(results1); empty!(results2);

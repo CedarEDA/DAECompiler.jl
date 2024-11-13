@@ -19,7 +19,7 @@ function ir_mul_const!(compact, line, coeff::Float64, _a)
     return z
 end
 
-Base.IteratorSize(::Type{Core.Compiler.UseRefIterator}) = Base.SizeUnknown()
+Base.IteratorSize(::Type{CC.UseRefIterator}) = Base.SizeUnknown()
 
 struct StateInvariant; end
 StateSelection.BipartiteGraphs.overview_label(::Type{StateInvariant}) = ('P', "State Invariant / Parameter", :red)
@@ -618,7 +618,7 @@ function tearing_schedule!(interp, ci::CodeInstance, key::TornCacheKey)
                     end
                 end
 
-                callee_codeinst = Core.Compiler.get(Core.Compiler.code_cache(interp), stmt.args[1], nothing)
+                callee_codeinst = CC.get(CC.code_cache(interp), stmt.args[1], nothing)
                 callee_sicm_mi = tearing_schedule!(interp, callee_codeinst, callee_key)
 
                 inst[:type] = Any

@@ -19,7 +19,8 @@ function reconstruct_sensitivities(args...)
     error("This method requires SciMLSensitivity")
 end
 
-const CC = Core.Compiler
+import Compiler
+const CC = Compiler
 import .CC: get_inference_world
 using Base: get_world_counter
 
