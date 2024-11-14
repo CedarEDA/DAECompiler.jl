@@ -8,6 +8,7 @@ projects = ["test"]
 
 [deps]
 Accessors = "7d9f7c33-5ae7-4f3b-8dc6-eff91059b697"
+AutoHashEquals = "15f4f7f2-30c1-5605-9d31-71845cf9641f"
 CentralizedCaches = "d1073d05-2d26-4019-b855-dfa0385fef5e"
 ChainRules = "082447d4-558c-5d27-93f4-14fc19e9eca2"
 ChainRulesCore = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
@@ -50,10 +51,11 @@ DAECompilerModelingToolkitExt = "ModelingToolkit"
 
 [compat]
 Accessors = "0.1.36"
+AutoHashEquals = "2.2.0"
 CentralizedCaches = "1.1.0"
 ChainRules = "1.50"
 ChainRulesCore = "1.20"
-Compiler = "0.0.1"
+Compiler = ">= 0.0.1"
 Cthulhu = "2.10.1"
 DiffEqBase = "6.149.2"
 Diffractor = "0.2.7"

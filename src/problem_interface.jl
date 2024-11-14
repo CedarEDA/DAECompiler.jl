@@ -24,9 +24,7 @@ function DAECProblem(f, init, tspan = (0., 1.); guesses = nothing, kwargs...)
 end
 
 function DiffEqBase.get_concrete_problem(prob::DAECProblem, isadaptive; kwargs...)
-    # TODO: Refactor all this to use (generated functions?) instead
-
-    (daef, differential_vars) = dae_factory(prob.f)
+    (daef, differential_vars) = factory(Val(Settings(dae=true)), prob.f)
 
     u0 = zeros(length(differential_vars))
     du0 = zeros(length(differential_vars))

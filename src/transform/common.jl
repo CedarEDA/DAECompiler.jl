@@ -1,69 +1,19 @@
-@breadcrumb "ir_levels" function run_dae_passes_again(interp::AbstractInterpreter, ir::IRCode,
-                                                      state::IRTransformationState)
-    inline_state = CC.InliningState(interp)
-    ir = ssa_inlining_pass!(ir, inline_state, #=propagate_inbounds=#true)
-    record_ir!(state, "ssa_inlining_pass!", ir)
-
-    if !isa(interp, DAEInterpreter)
-        # This is needed because of the TODO noted at the callsite where we inline
-        # SemiConcrete-eval results from the wrong interpreter.
-        for i = 1:length(ir.stmts)
-            ir.stmts[i][:type] = widenconst(ir.stmts[i][:type])
-        end
-    end
-
-    ir = compact!(ir)
-    record_ir!(state, "compact!.2", ir)
-
-    ir = sroa_pass!(ir, inline_state)
-    record_ir!(state, "sroa_pass!", ir)
-
-    ir, #=made_changes=#_ = adce_pass!(ir, inline_state)
-    record_ir!(state, "adce_pass!", ir)
-
-    ir = compact_cfg(ir)
-    record_ir!(state, "compact_cfg", ir)
-
-    # ir = peephole_pass!(ir)
-    # record_ir!(state, "peephole_pass!.1", ir)
-
-    # ir = peephole_pass!(ir)
-    # record_ir!(state, "peephole_pass!.2", ir)
-
-    # Record it again for the "final output"
-    record_ir!(state, "", ir)
-    return ir
-end
-
-function compile_invokes!(ir, interp)
-    for i = 1:length(ir.stmts)
-        inst = ir.stmts[i]
-        e = inst[:inst]
-        if isexpr(e, :invoke)
-            mi = e.args[1]::MethodInstance
-            if !CC.haskey(CC.code_cache(interp), mi)
-                CC.typeinf_ext_toplevel(interp, mi, CC.SOURCE_MODE_ABI)
-            end
-        end
-    end
-end
-
 function remap_info(remap_ir!, info)
     # TODO: This is pretty aweful, but it works for now.
     # It'll go away when we switch to IPO.
     if isa(info, Diffractor.FRuleCallInfo) && info.frule_call.rt === Const(nothing)
         info = info.info
     end
-    isa(info, CC.ConstCallInfo) || return info
+    isa(info, Compiler.ConstCallInfo) || return info
     results = map(info.results) do result
         result === nothing && return result
-        if isa(result, CC.SemiConcreteResult)
+        if isa(result, Compiler.SemiConcreteResult)
             let ir = copy(result.ir)
                 remap_ir!(ir)
-                CC.SemiConcreteResult(result.edge, ir, result.effects, result.spec_info)
+                Compiler.SemiConcreteResult(result.edge, ir, result.effects, result.spec_info)
             end
-        elseif isa(result, CC.ConstPropResult)
-            if isa(result.result.src, DAECache)
+        elseif isa(result, Compiler.ConstPropResult)
+            if isa(result.result.src, AnalyzedSource)
                 # Result could have been discarded (e.g. by limited_src)
                 remap_ir!(result.result.src.ir)
             end
@@ -72,7 +22,7 @@ function remap_info(remap_ir!, info)
             return result
         end
     end
-    return CC.ConstCallInfo(info.call, results)
+    return Compiler.ConstCallInfo(info.call, results)
 end
 
 function widen_extra_info!(ir)
@@ -90,42 +40,48 @@ function widen_extra_info!(ir)
     end
 end
 
+function ir_to_src(ir::IRCode)
+    isva = false
+    slotnames = nothing
+    ir.debuginfo.def === nothing && (ir.debuginfo.def = :var"generated IR for OpaqueClosure")
+    nargtypes = length(ir.argtypes)
+    nargs = nargtypes-1
+    sig = Compiler.compute_oc_signature(ir, nargs, isva)
+    rt = Compiler.compute_ir_rettype(ir)
+    src = ccall(:jl_new_code_info_uninit, Ref{CodeInfo}, ())
+    if slotnames === nothing
+        src.slotnames = Symbol[Symbol("arg$i") for i = 1:nargtypes]
+    else
+        length(slotnames) == nargtypes || error("mismatched `argtypes` and `slotnames`")
+        src.slotnames = slotnames
+    end
+    src.nargs = length(ir.argtypes)
+    src.isva = false
+    src.slotflags = fill(zero(UInt8), nargtypes)
+    src.slottypes = copy(ir.argtypes)
+    src = Compiler.ir_to_codeinf!(src, ir)
+    return src
+end
+
+function cache_dae_ci!(old_ci, src, debuginfo, abi, owner)
+    daef_ci = CodeInstance(abi === nothing ? old_ci.def : Core.ABIOverride(abi, old_ci.def), owner, Tuple, Union{}, nothing, src, Int32(0),
+        UInt(1)#=ci.min_world=#, old_ci.max_world, old_ci.ipo_purity_bits,
+        nothing, debuginfo, Compiler.empty_edges)
+    ccall(:jl_mi_cache_insert, Cvoid, (Any, Any), old_ci.def, daef_ci)
+    return daef_ci
+end
+
 function replace_call!(ir::Union{IRCode,IncrementalCompact}, idx::SSAValue, new_call::Expr)
     @assert !isa(ir[idx][:inst], PhiNode)
     ir[idx][:inst] = new_call
     ir[idx][:type] = Any
-    ir[idx][:info] = CC.NoCallInfo()
-    ir[idx][:flag] |= CC.IR_FLAG_REFINED
+    ir[idx][:info] = Compiler.NoCallInfo()
+    ir[idx][:flag] |= Compiler.IR_FLAG_REFINED
 end
 
-function compile_overload(ir, state, arg_types;
-                          opt_params::OptimizationParams=OptimizationParams())
-    # NB: we run inlining with the fallback interpreter. The versions we have cached
-    # are not suitable for inlining, because the code we generated for these
-    # themselves may have uninlined calls in them from FRuleCallInfo.
-    # TODO: Potentially we should be owning more of the compilation pipeline here?
+is_solved_variable(stmt) = isexpr(stmt, :call) && stmt.args[1] == solved_variable ||
+    isexpr(stmt, :invoke) && stmt.args[2] == solved_variable
 
-    fallback_interp = getfield(get_sys(state), :fallback_interp)
-
-    subtype_ir = copy(ir)
-    empty!(subtype_ir.argtypes)
-    push!(subtype_ir.argtypes, Tuple{})  # function object
-    append!(subtype_ir.argtypes, arg_types)
-    subtype_mi = get_toplevel_mi_from_ir(subtype_ir, get_sys(state))
-    infer_ir!(subtype_ir, fallback_interp, subtype_mi)
-    record_ir!(state, "inferred", subtype_ir)
-
-    NewInterp = typeof(fallback_interp)
-    newinterp = NewInterp(fallback_interp; opt_params)
-    subtype_ir = run_dae_passes_again(newinterp, subtype_ir, state)
-    opt_params.compilesig_invokes || compile_invokes!(subtype_ir, fallback_interp)  # if they were not compiled we must do it
-
-    record_ir!(state, "", subtype_ir)
-
-    DebugConfig(state).verify_ir_levels && check_for_daecompiler_intrinstics(subtype_ir)
-    subtype_f = Core.OpaqueClosure(subtype_ir)
-    return subtype_f
-end
 
 """
     replace_if_intrinsic!(compact, ssa, du, u, p, t, var_assignment)
@@ -160,7 +116,7 @@ function replace_if_intrinsic!(compact, ssa, du, u, p, t, var_assignment)
     end
 
     # Transform calls from `variable()` or `state_ddt()` into `u[var_idx]`
-    if is_known_invoke_or_call(stmt, variable, compact) || is_known_invoke_or_call(stmt, state_ddt, compact)
+    if is_known_invoke_or_call(stmt, variable, compact)
         var = idnum(inst[:type])
         if var_assignment === nothing
             var_idx = 0
@@ -182,9 +138,6 @@ function replace_if_intrinsic!(compact, ssa, du, u, p, t, var_assignment)
     elseif is_known_invoke_or_call(stmt, equation, compact)
         inst[:inst] = Intrinsics.placeholder_equation
     elseif is_equation_call(stmt, compact) ||
-        is_known_invoke_or_call(stmt, observed!, compact) ||
-        is_known_invoke_or_call(stmt, singularity_root!, compact) ||
-        is_known_invoke_or_call(stmt, time_periodic_singularity!, compact) ||
         is_solved_variable(stmt)
         # these have no meaning outside of DAE IR.
         # Its likely the transform has already converted these to something else
@@ -212,65 +165,11 @@ function check_for_daecompiler_intrinstics(ir::IRCode)
         inst = ir[SSAValue(i)][:inst]
         isexpr(inst, :invoke) || continue
         mi = inst.args[1]
+        if isa(mi, CodeInstance)
+            mi = mi.def
+        end
         if mi.def.module == DAECompiler.Intrinsics
             throw(UnexpectedIntrinsicException(inst))
         end
     end
-end
-
-"performs a copy of nonbits types, if possible"
-function defensive_copy(x)
-    if !isbits(x)
-        try
-            return copy(x)
-        catch
-        end
-    end
-    return x
-end
-defensive_copy(x::SciMLBase.AbstractODEIntegrator) = x
-
-function store_args_for_replay!(ir, debug_config, name, extra_ssas = [])
-    nargs=length(ir.argtypes)
-    # If our debug config is asking us to log replay values, insert code to do so.
-    if debug_config.replay_log !== nothing
-        if !haskey(debug_config.replay_log, name)
-            debug_config.replay_log[name] = Tuple[]
-        end
-
-        # First, copy all mutable args so that we can store them without them being modified by anyone else
-        arg_ssas = []
-        for arg_idx in 2:nargs
-            push!(arg_ssas, insert_node!(
-                ir,
-                length(ir.stmts),
-                NewInstruction(Expr(:call, defensive_copy, Argument(arg_idx)), Any),
-            ))
-        end
-
-        # Add any extra values requested by the user
-        for ssa in extra_ssas
-            push!(arg_ssas, insert_node!(
-                ir,
-                length(ir.stmts),
-                NewInstruction(Expr(:call, defensive_copy, ssa), Any),
-            ))
-        end
-
-        # Next, bundle them into a tuple
-        args_tuple_ssa = insert_node!(
-            ir,
-            length(ir.stmts),
-            NewInstruction(Expr(:call, tuple, arg_ssas...), Any),
-        )
-
-        # Then, push that tuple onto the appropriate replay log
-        insert_node!(
-            ir,
-            length(ir.stmts),
-            NewInstruction(Expr(:call, Base.push!, debug_config.replay_log[name], args_tuple_ssa), Any),
-        )
-        ir = compact!(ir)
-    end
-    return ir
 end
