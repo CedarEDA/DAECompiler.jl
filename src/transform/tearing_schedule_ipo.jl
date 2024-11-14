@@ -619,7 +619,7 @@ function tearing_schedule!(interp, ci::CodeInstance, key::TornCacheKey)
                 end
 
                 callee_codeinst = CC.get(CC.code_cache(interp), stmt.args[1], nothing)
-                callee_sicm_mi = tearing_schedule!(interp, callee_codeinst, callee_key)
+                callee_sicm_ci = tearing_schedule!(interp, callee_codeinst, callee_key)
 
                 inst[:type] = Any
                 inst[:flag] = UInt32(0)
@@ -630,8 +630,8 @@ function tearing_schedule!(interp, ci::CodeInstance, key::TornCacheKey)
                         (AssignedDiff, UnassignedDiff, Algebraic, Explicit))...)
                 resize!(stmt.args, 1)
 
-                if !isdefined(callee_sicm_mi.cache, :rettype_const)
-                    new_stmt.args[1] = callee_sicm_mi
+                if !isdefined(callee_sicm_ci, :rettype_const)
+                    new_stmt.args[1] = callee_sicm_ci
 
                     urs = userefs(new_stmt)
                     for ur in urs
@@ -646,7 +646,7 @@ function tearing_schedule!(interp, ci::CodeInstance, key::TornCacheKey)
                     state = insert_node_here!(compact, NewInstruction(inst; stmt=new_stmt, type=Tuple, flag=UInt32(0)))
                     push!(stmt.args, SICMSSAValue(state.id))
                 else
-                    push!(stmt.args, callee_sicm_mi.cache.rettype_const)
+                    push!(stmt.args, callee_sicm_ci.rettype_const)
                 end
             elseif stmt === nothing || isa(stmt, ReturnNode)
                 continue
@@ -948,24 +948,10 @@ function tearing_schedule!(interp, ci::CodeInstance, key::TornCacheKey)
         debuginfo = src.debuginfo
     end
 
-    sicm_mi = MethodSpecialization{SICMSpec}(ci.def, Tuple{}, sig)
-    sicm_mi.data = SICMSpec(key)
+    sicm_ci = cache_dae_ci!(ci, src, debuginfo, Core.ABIOverwrite(sig, SICMSpec(key)))
 
-    sicm_ci = CodeInstance(sicm_mi, Tuple, Union{}, ir_sicm === nothing ? () : nothing,
-        src, ir_sicm === nothing ? Int32(0x3) : Int32(0), UInt(1)#=ci.min_world=#, ci.max_world, ci.ipo_purity_bits, ci.purity_bits,
-        nothing, 0x0, debuginfo)
-
-    @atomic :release sicm_mi.cache = sicm_ci
-
-    result.sicm_cache[key] = sicm_mi
+    result.sicm_cache[key] = sicm_ci
     result.tearing_cache[key] = TornIR(ir_sicm, irs)
 
-    cache_mi = ci.def
-    while isdefined(cache_mi, :next)
-        cache_mi = @atomic cache_mi.next
-    end
-    @atomic :release cache_mi.next = sicm_mi
-    global nsicmcompiles += 1
-
-    return sicm_mi
+    return sicm_ci
 end

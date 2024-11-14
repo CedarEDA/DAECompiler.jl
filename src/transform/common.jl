@@ -40,9 +40,11 @@ function compile_invokes!(ir, interp)
         inst = ir.stmts[i]
         e = inst[:inst]
         if isexpr(e, :invoke)
-            mi = e.args[1]::MethodInstance
-            if !CC.haskey(CC.code_cache(interp), mi)
-                CC.typeinf_ext_toplevel(interp, mi, CC.SOURCE_MODE_ABI)
+            mi = e.args[1]
+            if isa(mi, MethodInstance)
+                if !CC.haskey(CC.code_cache(interp), mi)
+                    CC.typeinf_ext_toplevel(interp, mi, CC.SOURCE_MODE_ABI)
+                end
             end
         end
     end
@@ -212,6 +214,9 @@ function check_for_daecompiler_intrinstics(ir::IRCode)
         inst = ir[SSAValue(i)][:inst]
         isexpr(inst, :invoke) || continue
         mi = inst.args[1]
+        if isa(mi, CodeInstance)
+            mi = mi.def
+        end
         if mi.def.module == DAECompiler.Intrinsics
             throw(UnexpectedIntrinsicException(inst))
         end

@@ -461,8 +461,12 @@ function dae_result_for_inst(interp, inst::CC.Instruction)
             return result isa Union{DAEIPOResult, UncompilableIPOResult} ? result : nothing
         end
     else
-        codeinst = CC.get(CC.code_cache(interp), mi, nothing)
-        codeinst === nothing && return nothing
+        if isa(mi, MethodInstance)
+            codeinst = CC.get(CC.code_cache(interp), mi, nothing)
+            codeinst === nothing && return nothing
+        else
+            codeinst = mi::CodeInstance
+        end
         result = CC.traverse_analysis_results(codeinst) do @nospecialize result
             return result isa Union{DAEIPOResult, UncompilableIPOResult} ? result : nothing
         end
@@ -997,8 +1001,11 @@ end
                         return result
                     end
 
+                    mi_or_ci = stmt.args[1]
+                    isva = (isa(mi_or_ci, CodeInstance) ? mi_or_ci.def.def : mi_or_ci.def).isva
+
                     callee_argtypes = CC.va_process_argtypes(CC.optimizer_lattice(analysis_interp),
-                        CC.collect_argtypes(analysis_interp, stmt.args[2:end], nothing, irsv), UInt(length(result.argtypes)), stmt.args[1].def.isva)
+                        CC.collect_argtypes(analysis_interp, stmt.args[2:end], nothing, irsv), UInt(length(result.argtypes)), isva)
                     mapping = CalleeMapping(CC.optimizer_lattice(analysis_interp), callee_argtypes, result)
                 end
                 append!(warnings, result.warnings)

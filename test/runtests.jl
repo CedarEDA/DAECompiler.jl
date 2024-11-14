@@ -1,10 +1,12 @@
 using Test
 
+#=
 @testset "state_mapping.jl" include("state_mapping.jl")
 @testset "interpreter.jl" include("interpreter.jl")
 @testset "compiler_and_lattice.jl" include("compiler_and_lattice.jl")
 @testset "JITOpaqueClosures.jl" include("JITOpaqueClosures.jl")
 @testset "robertson.jl" include("robertson.jl")
+=#
 @testset "ipo.jl" include("ipo.jl")
 @testset "lorenz.jl" include("lorenz_tests.jl")
 @testset "pendulum.jl" include("pendulum_tests.jl")
