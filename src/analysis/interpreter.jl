@@ -170,54 +170,47 @@ end
 #=CC.=#get_inference_world(interp::DAEInterpreter) = interp.world
 CC.get_inference_cache(interp::DAEInterpreter) = interp.inf_cache
 
-if Base.__has_internal_change(v"1.12-alpha", :methodspecialization)
-    """
-        struct AnalysisSpec
+"""
+    struct AnalysisSpec
 
-    The cache partition for DAECompiler analysis results. This is essentially
-    equivalent to a regular type inference, except that optimization ir prohibited
-    from inlining any functions that have frules and we perform the DAE analysis
-    on every ir after optimization.
-    """
-    struct AnalysisSpec; end
+The cache partition for DAECompiler analysis results. This is essentially
+equivalent to a regular type inference, except that optimization ir prohibited
+from inlining any functions that have frules and we perform the DAE analysis
+on every ir after optimization.
+"""
+struct AnalysisSpec; end
 
-    """
-        struct RHSSpec
-
-    Cache partition for the RHS
-    """
+"""
     struct RHSSpec
-        key::TornCacheKey
-        ordinal::Int
-    end
 
-    Base.show(io::IO, ms::MethodSpecialization{RHSSpec}) = print(io, "RHS Spec#$(ms.data.ordinal) for ", ms.def)
-
-
-    """
-        struct SICMSpec
-
-    Cache partition for the state-invariant prologue
-    """
-    struct SICMSpec
-        key::TornCacheKey
-    end
-
-    Base.show(io::IO, ms::MethodSpecialization{SICMSpec}) = print(io, "SICM Spec for ", ms.def)
-
-    function CC.code_cache(interp::DAEInterpreter)
-        if interp.ipo_analysis_mode
-            return CC.WorldView(
-                CC.InternalCodeCache(Core.MethodSpecialization{AnalysisSpec}),
-                CC.WorldRange(CC.get_inference_world(interp)))
-        else
-            return interp.code_cache
-        end
-    end
-else
-    CC.cache_owner(interp::DAEInterpreter) = interp.code_cache
-    CC.method_table(interp::DAEInterpreter) = interp.method_table
+Cache partition for the RHS
+"""
+struct RHSSpec
+    key::TornCacheKey
+    ordinal::Int
 end
+
+
+"""
+    struct SICMSpec
+
+Cache partition for the state-invariant prologue
+"""
+struct SICMSpec
+    key::TornCacheKey
+end
+
+
+function CC.code_cache(interp::DAEInterpreter)
+    if interp.ipo_analysis_mode
+        return CC.WorldView(
+            CC.InternalCodeCache(AnalysisSpec()),
+            CC.WorldRange(CC.get_inference_world(interp)))
+    else
+        return interp.code_cache
+    end
+end
+CC.cache_owner(interp::DAEInterpreter) = interp.ipo_analysis_mode ? AnalysisSpec() : interp.code_cache
 
 # abstract interpretation
 # -----------------------
@@ -813,10 +806,14 @@ struct MappingInfo <: CC.CallInfo
 end
 
 function _abstract_eval_invoke_inst(interp::DAEInterpreter, inst::Union{CC.Instruction, Nothing}, @nospecialize(stmt), irsv::IRInterpretationState)
-    mi = stmt.args[1]
+    invokee = stmt.args[1]
     RT = Pair{Any, Tuple{Bool, Bool}}
     good_effects = (true, true)
-    m = mi.def
+    if isa(invokee, Core.CodeInstance)
+        m = invokee.def.def
+    else
+        m = invokee.def
+    end
     if m === variable_method0 || m === variable_method1
         # Nothing to do - we'll read the incidence out of the ssavaluetypes
         return RT(nothing, good_effects)

@@ -257,10 +257,7 @@ weakdeps = ["Dates", "LinearAlgebra"]
     CompatLinearAlgebraExt = "LinearAlgebra"
 
 [[deps.Compiler]]
-git-tree-sha1 = "870045695768dbf84ebc7c8a1ec4a8ad30c6b489"
-repo-rev = "master"
-repo-subdir = "Compiler"
-repo-url = "https://github.com/JuliaLang/julia.git"
+path = "/home/keno/julia-clean/Compiler"
 uuid = "807dbc54-b67e-4c79-8afb-eafe4df6f2e1"
 version = "0.0.1"
 
@@ -2059,7 +2056,7 @@ version = "1.3.1+1"
 [[deps.libblastrampoline_jll]]
 deps = ["Artifacts", "Libdl"]
 uuid = "8e850b90-86db-534c-a0d3-1478176c7d93"
-version = "5.11.1+0"
+version = "5.11.2+0"
 
 [[deps.nghttp2_jll]]
 deps = ["Artifacts", "Libdl"]

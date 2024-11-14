@@ -58,12 +58,6 @@ end
     CalleeInternal
 end
 
-@static if !Base.__has_internal_change(v"1.12-alpha", :methodspecialization)
-    const MethodSpecialization = Core.MethodInstance
-else
-    import Core: MethodSpecialization
-end
-
 struct DAEIPOResult
     ir::IRCode
     extended_rt::Any
@@ -90,8 +84,8 @@ struct DAEIPOResult
     tearing_cache::Dict{TornCacheKey, TornIR}
 
     # TODO: Should this be looked up via the regular code instance cache instead?
-    sicm_cache::Dict{TornCacheKey, MethodSpecialization}
-    dae_finish_cache::Dict{TornCacheKey, MethodSpecialization}
+    sicm_cache::Dict{TornCacheKey, CodeInstance}
+    dae_finish_cache::Dict{TornCacheKey, Vector{CodeInstance}}
 end
 
 struct UncompilableIPOResult

@@ -262,6 +262,19 @@ end
 
 const VectorViewType = SubArray{Float64, 1, Vector{Float64}, Tuple{UnitRange{Int}}, true}
 
+function cache_dae_ci!(old_ci, src, debuginfo, owner)
+    daef_ci = CC.engine_reserve(old_ci.def, owner)
+    ccall(:jl_fill_codeinst,  Cvoid, (Any, Any, Any, Any, Int32, UInt, UInt, UInt32, Any, Any, Any),
+        daef_ci, Tuple{}, Union{}, nothing, Int32(0),
+        UInt(1)#=ci.min_world=#, old_ci.max_world,
+        old_ci.ipo_purity_bits, nothing, nothing, CC.empty_edges)
+    ccall(:jl_update_codeinst, Cvoid, (Any, Any, Int32, UInt, UInt, UInt32, Any, UInt8, Any, Any),
+        daef_ci, src, Int32(0), UInt(1)#=ci.min_world=#, old_ci.max_world, old_ci.ipo_purity_bits,
+        nothing, 0x0, debuginfo, CC.empty_edges)
+    ccall(:jl_mi_cache_insert, Cvoid, (Any, Any), old_ci.def, daef_ci)
+    return daef_ci
+end
+
 function dae_finish_ipo!(
         interp,
         ci::CodeInstance,
@@ -288,6 +301,7 @@ function dae_finish_ipo!(
     old_daef_mi = nothing
     assigned_slots = falses(length(result.total_incidence))
 
+    cis = Vector{CodeInstance}()
     for (ir_ordinal, ir) in enumerate(torn.ir_seq)
         ir = torn.ir_seq[ir_ordinal]
 
@@ -338,11 +352,11 @@ function dae_finish_ipo!(
                 spec_data = stmt.args[1]
                 callee_key = stmt.args[1][2]
                 callee_ordinal = stmt.args[1][end]::Int
-                callee_daef_mi = dae_finish_ipo!(interp, callee_ci, callee_key, callee_ordinal)
+                callee_daef_cis = dae_finish_ipo!(interp, callee_ci, callee_key, callee_ordinal)
                 # Allocate a continuous block of variables for all callee alg and diff states
 
                 empty!(stmt.args)
-                push!(stmt.args, callee_daef_mi)
+                push!(stmt.args, callee_daef_cis[1])
                 push!(stmt.args, closure_env)
                 push!(stmt.args, in_vars)
 
@@ -402,33 +416,17 @@ function dae_finish_ipo!(
         widen_extra_info!(ir)
         src = ir_to_src(ir)
 
-        daef_mi = MethodSpecialization{RHSSpec}(ci.def, Tuple{}, Tuple{Tuple, Tuple, (VectorViewType for _ in arg_range)..., Float64})
-        daef_mi.data = RHSSpec(key, ir_ordinal)
+        abi = Tuple{Tuple, Tuple, (VectorViewType for _ in arg_range)..., Float64}
+        owner = Core.ABIOverwrite(abi, RHSSpec(key, ir_ordinal))
+        daef_ci = cache_dae_ci!(ci, src, src.debuginfo, owner)
 
-        daef_ci = CodeInstance(daef_mi, Tuple, Union{}, nothing,
-            src, Int32(0), UInt(1)#=ci.min_world=#, ci.max_world, ci.ipo_purity_bits, ci.purity_bits,
-            nothing, 0x0, src.debuginfo)
-
-        @atomic :release daef_mi.cache = daef_ci
         global nrhscompiles += 1
-
-        if old_daef_mi !== nothing
-            @atomic :release old_daef_mi.next = daef_mi
-        end
-        old_daef_mi = daef_mi
-
-        if rhs_ms === nothing
-            rhs_ms = daef_mi
-        end
+        push!(cis, daef_ci)
     end
 
-    result.dae_finish_cache[key] = rhs_ms
+    result.dae_finish_cache[key] = cis
 
-    ms = rhs_ms
-    while !isa(ms.data, RHSSpec) || ms.data.ordinal != ordinal
-        ms = ms.next
-    end
-    return ms
+    return cis
 end
 
 function ir_to_src(ir::IRCode)
@@ -499,6 +497,7 @@ function dae_factory_gen(world::UInt, source::LineNumberNode, _, @nospecialize(f
     src.ssavaluetypes = length(src.code)
     src.min_world = @atomic codeinst.min_world
     src.max_world = @atomic codeinst.max_world
+    src.edges = codeinst.edges
 
     return src
 end
@@ -527,7 +526,7 @@ function dae_factory_gen(interp, ci::CodeInstance, key)
 
     argt = Tuple{Vector{Float64}, Vector{Float64}, Vector{Float64}, SciMLBase.NullParameters, Float64}
 
-    daef_ci = dae_finish_ipo!(interp, ci, key, 1)
+    daef_cis = dae_finish_ipo!(interp, ci, key, 1)
 
     # Create a small opaque closure to adapt from SciML ABI to our own internal
     # ABI
@@ -582,7 +581,7 @@ function dae_factory_gen(interp, ci::CodeInstance, key)
     oc_sicm = insert_node_here!(oc_compact,
         NewInstruction(Expr(:call, getfield, Argument(1), 1), Tuple, line))
     insert_node_here!(oc_compact,
-        NewInstruction(Expr(:invoke, daef_ci, oc_sicm, (), out_du_mm, out_eq, in_u_mm, in_u_unassgn, in_du_unassgn, in_alg, Argument(6)), Nothing, line))
+        NewInstruction(Expr(:invoke, daef_cis[1], oc_sicm, (), out_du_mm, out_eq, in_u_mm, in_u_unassgn, in_du_unassgn, in_alg, Argument(6)), Nothing, line))
 
     # Manually apply mass matrix
     bc = insert_node_here!(oc_compact,
