@@ -15,6 +15,7 @@ Compiler = "807dbc54-b67e-4c79-8afb-eafe4df6f2e1"
 Cthulhu = "f68482b8-f384-11e8-15f7-abe071a5a75f"
 DiffEqBase = "2b5f629d-d688-5b77-993f-72d75c75574e"
 DiffEqCallbacks = "459566f4-90b8-5000-8ac3-15dfb0a30def"
+DifferentiationInterface = "a0c0ee7d-e4b9-4e03-894e-1c5f64a51d63"
 Diffractor = "9f5e2b26-1114-432f-b630-d3fe2085c51c"
 Distributions = "31c24e10-a181-5473-b8eb-7969acd0382f"
 ExprTools = "e2ba6199-217a-4e67-a87a-7c52f15ade04"
@@ -23,7 +24,6 @@ Graphs = "86223c79-3864-5bf0-83f7-82e725a168b6"
 LinearAlgebra = "37e2e46d-f89d-539d-b4ee-838fcccc9c8e"
 NonlinearSolve = "8913a72c-1f9b-4ce2-8d82-65094dcecaec"
 OrderedCollections = "bac558e1-5e72-5ebc-8fee-abe8a469f55d"
-OrdinaryDiffEq = "1dea7af3-3e70-54e6-95c3-0bf5283fa5ed"
 PrecompileTools = "aea7be01-6a6a-4083-8856-8a6e6704d82a"
 Preferences = "21216c6a-2e73-6563-6e65-726566657250"
 REPL = "3fa0cd96-eef1-5676-8a61-b3b8758bbffb"
@@ -41,29 +41,30 @@ Tracy = "e689c965-62c8-4b79-b2c5-8359227902fd"
 [weakdeps]
 ModelingToolkit = "961ee093-0014-501f-94e3-6117800e7a78"
 
-[sources]
-SciMLBase = {rev = "os/dae-get-du2", url = "https://github.com/CedarEDA/SciMLBase.jl"}
-SciMLSensitivity = {rev = "kf/mindep2", url = "https://github.com/CedarEDA/SciMLSensitivity.jl"}
-
 [extensions]
 DAECompilerModelingToolkitExt = "ModelingToolkit"
+
+[sources]
+SciMLSensitivity = {rev = "os/mindep4", url = "https://github.com/CedarEDA/SciMLSensitivity.jl"}
+DifferentiationInterface = {rev = "d6e494b", url = "https://github.com/JuliaDiff/DifferentiationInterface.jl.git:DifferentiationInterface"}
 
 [compat]
 Accessors = "0.1.36"
 CentralizedCaches = "1.1.0"
 ChainRules = "1.50"
 ChainRulesCore = "1.20"
-Compiler = "0.0.1"
+Compiler = "~0"
 Cthulhu = "2.10.1"
 DiffEqBase = "6.149.2"
+DifferentiationInterface = "0.6.23"
 Diffractor = "0.2.7"
 ForwardDiff = "0.10.36"
 NonlinearSolve = "3.5.0"
 OrderedCollections = "1.6.3"
 PrecompileTools = "1"
 Preferences = "1.4"
-SciMLBase = "2.24.0"
-SciMLSensitivity = "7.47"
+SciMLBase = "2.61.0"
+SciMLSensitivity = "7.71.1"
 StateSelection = "0.2.0"
 StaticArraysCore = "1.4.2"
 Sundials = "4.19"

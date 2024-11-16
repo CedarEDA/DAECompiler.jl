@@ -1,7 +1,7 @@
 module pendulum
 
 using Test
-using DAECompiler, SciMLBase, OrdinaryDiffEq
+using DAECompiler, SciMLBase, OrdinaryDiffEqBDF
 using StateSelection: MatchedSystemStructure
 using DAECompiler: assign_vars_and_eqs
 

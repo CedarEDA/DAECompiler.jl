@@ -1,4 +1,4 @@
-using OrdinaryDiffEq
+using OrdinaryDiffEqBDF
 using ModelingToolkit
 using DAECompiler
 using DAECompiler: batch_reconstruct

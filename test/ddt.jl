@@ -4,7 +4,6 @@ using Test
 using DAECompiler
 using DAECompiler.Intrinsics
 using SciMLBase
-using OrdinaryDiffEq, Sundials
 using ForwardDiff
 
 include(joinpath(Base.pkgdir(DAECompiler), "test/testutils.jl"))

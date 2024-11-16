@@ -5,7 +5,6 @@ using StateSelection: MatchedSystemStructure
 using SparseArrays
 using StaticArraysCore: StaticArraysCore
 using DiffEqCallbacks
-using OrdinaryDiffEq
 
 struct TransformedIRODESystem
     state::IRTransformationState

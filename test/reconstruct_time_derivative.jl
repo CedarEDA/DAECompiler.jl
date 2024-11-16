@@ -1,7 +1,7 @@
 module reconstruct_time_derivative
 using DAECompiler
 using Test
-using OrdinaryDiffEq
+using OrdinaryDiffEqRosenbrock
 using DAECompiler.Intrinsics
 using DAECompiler.Intrinsics: state_ddt
 using DAECompiler: reconstruct_time_deriv

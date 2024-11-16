@@ -4,7 +4,6 @@ using Test
 using DAECompiler
 using DAECompiler.Intrinsics
 using SciMLBase
-using OrdinaryDiffEq, Sundials
 using ForwardDiff
 import Compiler
 const CC = Compiler

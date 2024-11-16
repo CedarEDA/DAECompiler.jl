@@ -2,7 +2,7 @@ module sensitivity_rccircuit
 using DAECompiler
 using DAECompiler.Intrinsics;
 using DAECompiler.Intrinsics: state_ddt
-using OrdinaryDiffEq
+using OrdinaryDiffEqRosenbrock
 using SciMLSensitivity
 using Test
 using Roots

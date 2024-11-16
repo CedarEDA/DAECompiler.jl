@@ -4,7 +4,7 @@ using DAECompiler
 using DAECompiler.Intrinsics
 using ModelingToolkit
 using ModelingToolkit: t_nounits as t, D_nounits as D
-using OrdinaryDiffEq
+using OrdinaryDiffEqRosenbrock
 using Test
 
 const DMTK = Base.get_extension(DAECompiler, :DAECompilerModelingToolkitExt)
