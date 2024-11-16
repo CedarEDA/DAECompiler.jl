@@ -3,7 +3,7 @@ module index_lowering_ad
 using Test
 
 using DAECompiler, DAECompiler.Intrinsics, DAECompiler.ChainRulesCore
-using ChainRules, SciMLBase, OrdinaryDiffEq
+using ChainRules, SciMLBase
 
 include(joinpath(Base.pkgdir(DAECompiler), "test/testutils.jl"))
 include(joinpath(Base.pkgdir(DAECompiler), "test/irutils.jl"))

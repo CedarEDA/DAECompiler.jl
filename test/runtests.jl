@@ -1,5 +1,7 @@
 using Test
 using Compiler
+
+#needed until we get a release of Compiler with https://github.com/JuliaLang/julia/pull/56576
 @eval Compiler begin
 function compute_ir_rettype(ir::IRCode)
     rt = Union{}
