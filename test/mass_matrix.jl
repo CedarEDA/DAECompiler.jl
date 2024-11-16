@@ -6,7 +6,7 @@ using Test
 using DAECompiler
 using DAECompiler.Intrinsics
 using DAECompiler.Intrinsics: state_ddt
-using SciMLBase, OrdinaryDiffEqRosenbrock, 
+using SciMLBase, OrdinaryDiffEqRosenbrock
 
 struct MMTest1
     k::NTuple{3, Float64}

@@ -4,7 +4,7 @@ using Test
 using DAECompiler
 using DAECompiler.Intrinsics
 using DAECompiler.Intrinsics: state_ddt
-using SciMLBase, OrdinaryDiffEq, Sundials
+using SciMLBase, Sundials
 
 include(joinpath(Base.pkgdir(DAECompiler), "test", "testutils.jl"))
 

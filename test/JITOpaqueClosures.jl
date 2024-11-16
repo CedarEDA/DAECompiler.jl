@@ -7,7 +7,8 @@ using Compiler
     my_typeof(x) = string(typeof(x))
 
     my_typeof2 = JITOpaqueClosure{:my_typeof2}() do arg_types...
-        input_ir = first(only(Base.code_ircode(my_typeof, Tuple{Any})))
+        interp = Compiler.NativeInterpreter()
+        input_ir = first(only(Base.code_ircode(my_typeof, Tuple{Any}; interp)))
         ir = Compiler.copy(input_ir)
 
         compact = Compiler.IncrementalCompact(ir)
@@ -27,7 +28,6 @@ using Compiler
         push!(ir.argtypes, Tuple{})
         append!(ir.argtypes, arg_types)
 
-        interp = Compiler.NativeInterpreter()
         mi = DAECompiler.get_toplevel_mi_from_ir(ir, @__MODULE__);
         DAECompiler.infer_ir!(ir, interp, mi)
         return Core.OpaqueClosure(ir; do_compile=true)

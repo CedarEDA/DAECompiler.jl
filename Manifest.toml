@@ -2,7 +2,7 @@
 
 julia_version = "1.12.0-DEV"
 manifest_format = "2.0"
-project_hash = "1ad8306b53b4eb56312e21e5a0b1a17b197f923b"
+project_hash = "e329127fb30175abd062d7826326f29103a3247a"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "30bb95a372787af850addf28ac937f1be7b79173"
@@ -347,7 +347,7 @@ uuid = "f68482b8-f384-11e8-15f7-abe071a5a75f"
 version = "2.16.0"
 
 [[deps.DAECompiler]]
-deps = ["Accessors", "CentralizedCaches", "ChainRules", "ChainRulesCore", "Compiler", "Cthulhu", "DiffEqBase", "DiffEqCallbacks", "DifferentiationInterface", "Diffractor", "Distributions", "ExprTools", "ForwardDiff", "Graphs", "LinearAlgebra", "NonlinearSolve", "OrderedCollections", "PrecompileTools", "Preferences", "REPL", "Random", "SciMLBase", "SciMLSensitivity", "SparseArrays", "StateSelection", "StaticArraysCore", "Sundials", "SymbolicIndexingInterface", "TimerOutputs", "Tracy"]
+deps = ["Accessors", "CentralizedCaches", "ChainRules", "ChainRulesCore", "Compiler", "Cthulhu", "DiffEqBase", "DiffEqCallbacks", "DifferentiationInterface", "Diffractor", "Distributions", "ExprTools", "ForwardDiff", "Graphs", "LinearAlgebra", "NonlinearSolve", "OrderedCollections", "OrdinaryDiffEqCore", "PrecompileTools", "Preferences", "REPL", "Random", "SciMLBase", "SciMLSensitivity", "SparseArrays", "StateSelection", "StaticArraysCore", "Sundials", "SymbolicIndexingInterface", "TimerOutputs", "Tracy"]
 path = "."
 uuid = "32805668-c3d0-42c2-aafd-0d0a9857a104"
 version = "1.21.0"
@@ -468,7 +468,8 @@ version = "1.15.1"
 deps = ["ADTypes", "LinearAlgebra"]
 git-tree-sha1 = "131bd9c15d02ac25f03a52c8793dae4e6f8d7e2d"
 repo-rev = "d6e494b"
-repo-url = "https://github.com/JuliaDiff/DifferentiationInterface.jl.git:DifferentiationInterface"
+repo-subdir = "DifferentiationInterface"
+repo-url = "git@github.com:JuliaDiff/DifferentiationInterface.jl.git"
 uuid = "a0c0ee7d-e4b9-4e03-894e-1c5f64a51d63"
 version = "0.6.23"
 
@@ -1196,6 +1197,12 @@ version = "9.50.0"
     DeepDiffs = "ab62b9b5-e342-54a8-a765-a90f495de1a6"
     HomotopyContinuation = "f213a82b-91d6-5c5d-acf7-10f1c761b327"
     LabelledArrays = "2ee39098-c373-598a-b85f-a56591580800"
+
+[[deps.ModelingToolkitStandardLibrary]]
+deps = ["ChainRulesCore", "DiffEqBase", "IfElse", "LinearAlgebra", "ModelingToolkit", "PreallocationTools", "Symbolics"]
+path = "../ModelingToolkitStandardLibrary.jl"
+uuid = "16a59e39-deab-5bd0-87e4-056b12336739"
+version = "2.17.0"
 
 [[deps.MozillaCACerts_jll]]
 uuid = "14a3606d-f60d-562e-9121-12d972cd8159"
