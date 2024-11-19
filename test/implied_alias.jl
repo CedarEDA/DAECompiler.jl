@@ -4,7 +4,6 @@ using Test
 using SciMLBase
 using DAECompiler
 using DAECompiler.Intrinsics
-using OrdinaryDiffEq
 
 include("testutils.jl")
 

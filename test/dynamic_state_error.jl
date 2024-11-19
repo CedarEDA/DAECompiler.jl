@@ -4,7 +4,7 @@ using Test
 using DAECompiler
 using DAECompiler.Intrinsics
 using SciMLBase
-using OrdinaryDiffEq
+using OrdinaryDiffEqBDF
 
 function dynamic_state()
     v = variable()

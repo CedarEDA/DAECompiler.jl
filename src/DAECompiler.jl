@@ -20,6 +20,7 @@ function reconstruct_sensitivities(args...)
 end
 
 import Compiler
+
 const CC = Compiler
 import .CC: get_inference_world
 using Base: get_world_counter
@@ -114,45 +115,6 @@ using PrecompileTools
     override_precompiled_cache() # to precompile this callback itself
     push_inithook!(override_precompiled_cache)
 end
-
-# Based on https://github.com/JuliaLang/julia/blob/cfcf8a026276f31eff170fac6ede9d07297d56cf/stdlib/Sockets/test/runtests.jl#L658-L674
-mutable struct RLimit
-    cur::Int64
-    max::Int64
-end
-const RLIMIT_STACK = 3 # from /usr/include/sys/resource.h
-function get_max_stacksize()
-    rlim = Ref(RLimit(0, 0))
-    # Get the current maximum stack size in bytes
-    rc = ccall(:getrlimit, Cint, (Cint, Ref{RLimit}), RLIMIT_STACK, rlim)
-    @assert rc == 0
-    return rlim[].max
-end
-
-function set_stacksize!(stacksize::Int)
-    rlim = Ref(RLimit(0, 0))
-    # Get the current maximum stack size in bytes
-    rc = ccall(:getrlimit, Cint, (Cint, Ref{RLimit}), RLIMIT_STACK, rlim)
-    @assert rc == 0
-    current = rlim[].cur
-    rlim[].cur = stacksize
-    rc = ccall(:setrlimit, Cint, (Cint, Ref{RLimit}), RLIMIT_STACK, rlim)
-    if rc != 0
-        rc = ccall(:getrlimit, Cint, (Cint, Ref{RLimit}), RLIMIT_STACK, rlim)
-        @assert rc == 0
-        @warn "Could not raise stacksize" target=stacksize actual=rlim[].cur errno=Base.Libc.errno()
-    end
-    return nothing
-end
-function default_stacksize!()
-    # If we're on anything other than windows, set the stack size as cloe to 64MB as we can
-    if !Sys.iswindows()
-        set_stacksize!(min(64*1024*1024, get_max_stacksize()))
-    end
-end
-push_inithook!(default_stacksize!) # ensure we do not run out of stack.
-
-
 
 """
     @declare_MTKConnector(mtk_component::MTK.ODESystem, ports...)

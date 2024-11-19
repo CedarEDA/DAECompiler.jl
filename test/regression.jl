@@ -4,7 +4,6 @@ using Test
 using DAECompiler
 using DAECompiler.Intrinsics
 using SciMLBase
-using OrdinaryDiffEq, Sundials
 using ForwardDiff
 import Compiler
 const CC = Compiler
@@ -372,6 +371,7 @@ function (p::OneParam)()
     equation!(state_ddt(state_ddt(y)) - z*ẍ)
     equation!(x - ẍ)
 end
+using Sundails
 let sys = IRODESystem(Tuple{OneParam}; debug_config=(;store_ir_levels=true, store_ss_levels=true));
     daeprob = DAEProblem(sys, [0., 0., 0.], [1., 0., 1.], (0., 1.), OneParam(1.));
     sol = solve(daeprob, IDA())

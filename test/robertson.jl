@@ -1,5 +1,5 @@
 using Test
-using DAECompiler, SciMLBase, Sundials, OrdinaryDiffEq
+using DAECompiler, SciMLBase, Sundials, OrdinaryDiffEqBDF
 using DAECompiler: equation!, state_ddt, variables
 
 struct Robertson{T}

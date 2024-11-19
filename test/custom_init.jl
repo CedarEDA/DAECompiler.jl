@@ -2,7 +2,7 @@ module custom_init
 using DAECompiler
 using DAECompiler.Intrinsics
 using DAECompiler.Intrinsics: state_ddt
-using OrdinaryDiffEq
+using OrdinaryDiffEqRosenbrock
 using Test
 
 # This reduces to 3 states. two algebraic, and one not

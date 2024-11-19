@@ -3,7 +3,6 @@ module control
 using Test
 using DAECompiler
 using DAECompiler.Intrinsics
-using OrdinaryDiffEq
 using SciMLBase
 
 include("testutils.jl")

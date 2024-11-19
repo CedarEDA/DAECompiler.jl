@@ -4,7 +4,7 @@ using Test
 using DAECompiler
 using DAECompiler.Intrinsics
 using DAECompiler.Intrinsics: state_ddt
-using SciMLBase, OrdinaryDiffEq
+using SciMLBase, OrdinaryDiffEqRosenbrock
 
 @testset "expeps" begin
     function expeps()

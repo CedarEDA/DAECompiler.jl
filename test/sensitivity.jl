@@ -2,7 +2,7 @@ module sensitivity
 using Test
 using DAECompiler
 using SciMLSensitivity
-using OrdinaryDiffEq
+using OrdinaryDiffEqRosenbrock
 using DAECompiler.Intrinsics: variable, variables, equation, equation!, state_ddt, sim_time, observed!
 import FiniteDifferences
 

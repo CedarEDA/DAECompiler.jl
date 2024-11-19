@@ -4,7 +4,7 @@ using DAECompiler
 # Load all the MSL test dependencies
 using SciMLBase
 using ModelingToolkitStandardLibrary
-using OrdinaryDiffEq
+using OrdinaryDiffEqBDF, OrdinaryDiffEqRosenbrock
 using SafeTestsets
 using Test
 

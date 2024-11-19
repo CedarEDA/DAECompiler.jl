@@ -1,7 +1,7 @@
 module lorenz
 
 using Test
-using DAECompiler, SciMLBase, OrdinaryDiffEq, Sundials
+using DAECompiler, SciMLBase, OrdinaryDiffEqRosenbrock, OrdinaryDiffEqBDF, Sundials
 include(joinpath(Base.pkgdir(DAECompiler), "test", "testutils.jl"))
 include(joinpath(Base.pkgdir(DAECompiler), "test", "lorenz.jl"))
 

@@ -1,6 +1,6 @@
 module testutils
 
-using OrdinaryDiffEq, Test, Sundials
+using OrdinaryDiffEqBDF, Test, Sundials
 using DAECompiler
 export solve_dae_and_ode, solve_dae, solve_ode, test_ddx_eq_x
 
