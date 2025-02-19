@@ -367,6 +367,7 @@ function classify_var(var_to_diff, key::TornCacheKey, var)
 end
 
 function tearing_schedule!(interp, ci::CodeInstance, key::TornCacheKey)
+    @show key
     result = CC.traverse_analysis_results(ci) do @nospecialize result
         return result isa Union{DAEIPOResult, UncompilableIPOResult} ? result : nothing
     end
@@ -396,6 +397,7 @@ function tearing_schedule!(interp, ci::CodeInstance, key::TornCacheKey)
     end
 
     for (ordinal, (in_vars, out_eqs)) in enumerate(key.var_schedule)
+        @show (ordinal, (in_vars, out_eqs))
         for in_var in in_vars
             isa(var_eq_matching[in_var], InOut) && continue
             var_eq_matching[in_var] = InOut(ordinal)
@@ -408,15 +410,20 @@ function tearing_schedule!(interp, ci::CodeInstance, key::TornCacheKey)
 
     mss = MatchedSystemStructure(structure, var_eq_matching)
     (eq_orders, callee_schedules) = compute_eq_schedule(key, result, mss)
+    display(mss)
 
     # TODO: This should be the post-AD IR
     ir = copy(result.ir)
+
+    display(ir)
 
     # First, schedule any statements that do not have state dependence
     sicm_rename = Vector{Any}(undef, length(ir.stmts))
     nonlin_sicm_rename = Vector{Any}(undef, length(ir.stmts))
 
     compact = IncrementalCompact(copy(ir))
+    line = ir[SSAValue(1)][:line]
+    #insert_node_here!(compact, NewInstruction(Expr(:call, println, "Trace: SICM"), Cvoid, line))
 
     isready(ssa::SSAValue) = isassigned(sicm_rename, ssa.id)
     function isready(inst::Instruction)
@@ -490,6 +497,7 @@ function tearing_schedule!(interp, ci::CodeInstance, key::TornCacheKey)
         return (slot, kind)
     end
 
+    # Generate SICM partition
     for i = 1:length(ir.stmts)
         inst = ir[SSAValue(i)]
         # TODO: This ignores all control flow
@@ -618,7 +626,10 @@ function tearing_schedule!(interp, ci::CodeInstance, key::TornCacheKey)
                     end
                 end
 
-                callee_codeinst = CC.get(CC.code_cache(interp), stmt.args[1], nothing)
+                callee_codeinst = stmt.args[1]
+                if isa(callee_codeinst, MethodInstance)
+                    callee_codeinst = CC.get(CC.code_cache(interp), callee_codeinst, nothing)
+                end
                 callee_sicm_ci = tearing_schedule!(interp, callee_codeinst, callee_key)
 
                 inst[:type] = Any
@@ -725,10 +736,12 @@ function tearing_schedule!(interp, ci::CodeInstance, key::TornCacheKey)
         ret = ir[lastssa]
         @assert isa(ret[:stmt], ReturnNode)
         # TODO: Handle structures
+        #=
         @assert widenconst(argextype(ret[:stmt].val, ir)) === Float64
         implicitvar = length(result.var_to_diff)
         @assert var_eq_matching[implicitvar] == length(result.total_incidence)
         ssavar = insert_node!(ir, lastssa, NewInstruction(ret; stmt=Expr(:call, solved_variable, implicitvar, ret[:stmt].val), type=Nothing))
+        =#
         ret[:stmt] = ReturnNode(nothing)
     end
 
@@ -810,6 +823,8 @@ function tearing_schedule!(interp, ci::CodeInstance, key::TornCacheKey)
         push!(nir.argtypes, Tuple)
         compact1 = IncrementalCompact(nir)
         line = nir[SSAValue(1)][:line]
+
+        #insert_node_here!(compact1, NewInstruction(Expr(:call, println, "Trace: Ordinal $ordinal"), Cvoid, line))
 
         (in_vars, out_eqs) = sched
         for (idx, var) in enumerate(in_vars)
@@ -948,7 +963,7 @@ function tearing_schedule!(interp, ci::CodeInstance, key::TornCacheKey)
         debuginfo = src.debuginfo
     end
 
-    sicm_ci = cache_dae_ci!(ci, src, debuginfo, Core.ABIOverwrite(sig, SICMSpec(key)))
+    sicm_ci = cache_dae_ci!(interp, ci, src, debuginfo, sig, SICMSpec(key))
 
     result.sicm_cache[key] = sicm_ci
     result.tearing_cache[key] = TornIR(ir_sicm, irs)

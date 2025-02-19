@@ -245,8 +245,8 @@ function ir_to_cache(ir::IRCode)
     ir.debuginfo.def === nothing && (ir.debuginfo.def = :var"generated IR for OpaqueClosure")
     nargtypes = length(ir.argtypes)
     nargs = nargtypes-1
-    sig = Base.Experimental.compute_oc_signature(ir, nargs, isva)
-    rt = Base.Experimental.compute_ir_rettype(ir)
+    sig = Compiler.compute_oc_signature(ir, nargs, isva)
+    rt = Compiler.compute_ir_rettype(ir)
     src = ccall(:jl_new_code_info_uninit, Ref{CodeInfo}, ())
     if slotnames === nothing
         src.slotnames = fill(:none, nargtypes)
@@ -262,14 +262,9 @@ end
 
 const VectorViewType = SubArray{Float64, 1, Vector{Float64}, Tuple{UnitRange{Int}}, true}
 
-function cache_dae_ci!(old_ci, src, debuginfo, owner)
-    daef_ci = CC.engine_reserve(old_ci.def, owner)
-    ccall(:jl_fill_codeinst,  Cvoid, (Any, Any, Any, Any, Int32, UInt, UInt, UInt32, Any, Any, Any),
-        daef_ci, Tuple{}, Union{}, nothing, Int32(0),
-        UInt(1)#=ci.min_world=#, old_ci.max_world,
-        old_ci.ipo_purity_bits, nothing, nothing, CC.empty_edges)
-    ccall(:jl_update_codeinst, Cvoid, (Any, Any, Int32, UInt, UInt, UInt32, Any, UInt8, Any, Any),
-        daef_ci, src, Int32(0), UInt(1)#=ci.min_world=#, old_ci.max_world, old_ci.ipo_purity_bits,
+function cache_dae_ci!(interp, old_ci, src, debuginfo, abi, owner)
+    daef_ci = CodeInstance(Core.ABIOverride(abi, old_ci.def), owner, Tuple, Union{}, nothing, src, Int32(0),
+        UInt(1)#=ci.min_world=#, old_ci.max_world, old_ci.ipo_purity_bits,
         nothing, 0x0, debuginfo, CC.empty_edges)
     ccall(:jl_mi_cache_insert, Cvoid, (Any, Any), old_ci.def, daef_ci)
     return daef_ci
@@ -287,11 +282,7 @@ function dae_finish_ipo!(
     end
 
     if haskey(result.dae_finish_cache, key)
-        ms = result.dae_finish_cache[key]
-        while !isa(ms.data, RHSSpec) || ms.data.ordinal != ordinal
-            ms = ms.next
-        end
-        return ms
+        return result.dae_finish_cache[key][ordinal]
     end
 
     allow_unassigned = false
@@ -342,21 +333,25 @@ function dae_finish_ipo!(
 
             if isexpr(stmt, :invoke) && isa(stmt.args[1], Tuple)
                 info::MappingInfo
-                callee_mi = stmt.args[1][1]
+                callee_ci = stmt.args[1][1]
                 closure_env = stmt.args[2]
                 in_vars = stmt.args[3]
-                callee_ci = CC.get(CC.code_cache(interp), callee_mi, nothing)
+                if isa(callee_ci, MethodInstance)
+                    callee_ci = CC.get(CC.code_cache(interp), callee_ci, nothing)
+                end
 
                 @assert callee_ci !== nothing
 
                 spec_data = stmt.args[1]
                 callee_key = stmt.args[1][2]
                 callee_ordinal = stmt.args[1][end]::Int
-                callee_daef_cis = dae_finish_ipo!(interp, callee_ci, callee_key, callee_ordinal)
+                callee_daef_ci = dae_finish_ipo!(interp, callee_ci, callee_key, callee_ordinal)
                 # Allocate a continuous block of variables for all callee alg and diff states
 
+                @show callee_daef_ci.rettype
+
                 empty!(stmt.args)
-                push!(stmt.args, callee_daef_cis[1])
+                push!(stmt.args, callee_daef_ci)
                 push!(stmt.args, closure_env)
                 push!(stmt.args, in_vars)
 
@@ -417,8 +412,7 @@ function dae_finish_ipo!(
         src = ir_to_src(ir)
 
         abi = Tuple{Tuple, Tuple, (VectorViewType for _ in arg_range)..., Float64}
-        owner = Core.ABIOverwrite(abi, RHSSpec(key, ir_ordinal))
-        daef_ci = cache_dae_ci!(ci, src, src.debuginfo, owner)
+        daef_ci = cache_dae_ci!(interp, ci, src, src.debuginfo, abi, RHSSpec(key, ir_ordinal))
 
         global nrhscompiles += 1
         push!(cis, daef_ci)
@@ -426,7 +420,7 @@ function dae_finish_ipo!(
 
     result.dae_finish_cache[key] = cis
 
-    return cis
+    return cis[ordinal]
 end
 
 function ir_to_src(ir::IRCode)
@@ -435,8 +429,8 @@ function ir_to_src(ir::IRCode)
     ir.debuginfo.def === nothing && (ir.debuginfo.def = :var"generated IR for OpaqueClosure")
     nargtypes = length(ir.argtypes)
     nargs = nargtypes-1
-    sig = Base.Experimental.compute_oc_signature(ir, nargs, isva)
-    rt = Base.Experimental.compute_ir_rettype(ir)
+    sig = Compiler.compute_oc_signature(ir, nargs, isva)
+    rt = Compiler.compute_ir_rettype(ir)
     src = ccall(:jl_new_code_info_uninit, Ref{CodeInfo}, ())
     if slotnames === nothing
         src.slotnames = Symbol[Symbol("arg$i") for i = 1:nargtypes]
@@ -452,7 +446,7 @@ function ir_to_src(ir::IRCode)
     return src
 end
 
-function dae_factory_gen(world::UInt, source::LineNumberNode, _, @nospecialize(fT))
+function dae_factory_gen(world::UInt, source::LineNumberNode, @nospecialize(_gen), @nospecialize(fT))
     sys_ipo = IRODESystem(Tuple{fT}; world, ipo_analysis_mode=true);
 
     result = getfield(sys_ipo, :result)
@@ -494,10 +488,11 @@ function dae_factory_gen(world::UInt, source::LineNumberNode, _, @nospecialize(f
     DAECompiler.tearing_schedule!(interp, codeinst, key)
     ir_factory = dae_factory_gen(interp, codeinst, key)
     src = ir_to_src(ir_factory)
+
     src.ssavaluetypes = length(src.code)
     src.min_world = @atomic codeinst.min_world
     src.max_world = @atomic codeinst.max_world
-    src.edges = codeinst.edges
+    src.edges = Core.svec(codeinst.def)
 
     return src
 end
@@ -515,18 +510,21 @@ function dae_factory_gen(interp, ci::CodeInstance, key)
     pushfirst!(ir_factory.argtypes, Tuple{})
     compact = IncrementalCompact(ir_factory)
 
+
     local line
     if ir_sicm !== nothing
         line = result.ir[SSAValue(1)][:line]
+        #insert_node_here!(compact, NewInstruction(Expr(:call, println, "Trace: A"), Cvoid, line))
         sicm = insert_node_here!(compact,
-            NewInstruction(Expr(:invoke, result.sicm_cache[key], (Argument(i+1) for i = 1:length(result.ir.argtypes))...), Tuple, line))
+            NewInstruction(Expr(:call, invoke, Argument(2), result.sicm_cache[key], (Argument(i+1) for i = 2:length(result.ir.argtypes))...), Tuple, line))
+        #insert_node_here!(compact, NewInstruction(Expr(:call, println, "Trace: B"), Cvoid, line))
     else
         sicm = ()
     end
 
     argt = Tuple{Vector{Float64}, Vector{Float64}, Vector{Float64}, SciMLBase.NullParameters, Float64}
 
-    daef_cis = dae_finish_ipo!(interp, ci, key, 1)
+    daef_ci = dae_finish_ipo!(interp, ci, key, 1)
 
     # Create a small opaque closure to adapt from SciML ABI to our own internal
     # ABI
@@ -581,7 +579,7 @@ function dae_factory_gen(interp, ci::CodeInstance, key)
     oc_sicm = insert_node_here!(oc_compact,
         NewInstruction(Expr(:call, getfield, Argument(1), 1), Tuple, line))
     insert_node_here!(oc_compact,
-        NewInstruction(Expr(:invoke, daef_cis[1], oc_sicm, (), out_du_mm, out_eq, in_u_mm, in_u_unassgn, in_du_unassgn, in_alg, Argument(6)), Nothing, line))
+        NewInstruction(Expr(:invoke, daef_ci, oc_sicm, (), out_du_mm, out_eq, in_u_mm, in_u_unassgn, in_du_unassgn, in_alg, Argument(6)), Nothing, line))
 
     # Manually apply mass matrix
     bc = insert_node_here!(oc_compact,
@@ -604,7 +602,7 @@ function dae_factory_gen(interp, ci::CodeInstance, key)
     @atomic oc_ci.min_world = 1 # @atomic ci.min_world
 
     new_oc = insert_node_here!(compact, NewInstruction(Expr(:new_opaque_closure,
-        argt, Union{}, Nothing, oc_source_method, sicm), Core.OpaqueClosure, line), true)
+        argt, Union{}, Nothing, true, oc_source_method, sicm), Core.OpaqueClosure, line), true)
 
     differential_states = Bool[v in key.diff_states for v in all_states]
 

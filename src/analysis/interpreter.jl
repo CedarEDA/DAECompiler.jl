@@ -566,7 +566,7 @@ end
 
 @override function CC.abstract_eval_phi_stmt(interp::DAEInterpreter, phi::PhiNode, idx::Int, irsv::IRInterpretationState)
     ir = irsv.ir
-    valr = CC.abstract_eval_phi(interp, phi, nothing, irsv)
+    valr = CC.abstract_eval_phi(interp, phi, CC.StatementState(nothing, false), irsv)
     if interp.ipo_analysis_mode && !interp.in_analysis
         return valr
     end
@@ -839,7 +839,7 @@ function _abstract_eval_invoke_inst(interp::DAEInterpreter, inst::Union{CC.Instr
     elseif m === rand_method
         return RT(Incidence(Float64), good_effects)
     elseif m === ddt_method
-        argtypes = CC.collect_argtypes(interp, stmt.args, nothing, irsv)
+        argtypes = CC.collect_argtypes(interp, stmt.args, CC.StatementState(nothing, false), irsv)
         argtypes === nothing && return RT(Union{}, (false, true))
         # First arg is invoke mi
         if length(argtypes) == 3 && isa(argtypes[3], Union{Incidence, Const})
@@ -852,7 +852,7 @@ function _abstract_eval_invoke_inst(interp::DAEInterpreter, inst::Union{CC.Instr
         @assert interp.ipo_analysis_mode
         info = inst[:info]
 
-        argtypes = CC.collect_argtypes(interp, stmt.args[2:end], nothing, irsv)
+        argtypes = CC.collect_argtypes(interp, stmt.args[2:end], CC.StatementState(nothing, false), irsv)
         argtypes === nothing && return Pair{Any,Tuple{Bool,Bool}}(Bottom, (false, false))
 
         if isa(argtypes[1], Const)
@@ -888,7 +888,10 @@ function _abstract_eval_invoke_inst(interp::DAEInterpreter, inst::Union{CC.Instr
             end
         end
 
-        codeinst = CC.get(CC.code_cache(interp), mi, nothing)
+        codeinst = invokee
+        if isa(invokee, MethodInstance)
+            codeinst = CC.get(CC.code_cache(interp), invokee, nothing)
+        end
         if codeinst === nothing
             return RT(nothing, (false, false))
         end
@@ -898,7 +901,7 @@ function _abstract_eval_invoke_inst(interp::DAEInterpreter, inst::Union{CC.Instr
         if isa(info, Diffractor.FRuleCallInfo)
             info = info.info
         end
-        argtypes = CC.collect_argtypes(interp, stmt.args, nothing, irsv)[2:end]
+        argtypes = CC.collect_argtypes(interp, stmt.args, CC.StatementState(nothing, false), irsv)[2:end]
         callee_result = dae_result_for_inst(interp, inst)
         callee_result === nothing && return RT(nothing, (false, false))
         if isa(callee_result, UncompilableIPOResult) || isa(callee_result.extended_rt, Const) || isa(callee_result.extended_rt, Type)
@@ -935,7 +938,7 @@ function _abstract_eval_invoke_inst(interp::DAEInterpreter, inst::Union{CC.Instr
     end
 
     if !isa(rt, Const) && !isa(rt, Incidence)
-        argtypes = CC.collect_argtypes(interp, stmt.args, nothing, irsv)
+        argtypes = CC.collect_argtypes(interp, stmt.args, CC.StatementState(nothing, false), irsv)
         argtypes === nothing && return RT(Union{}, (false, true))
         if is_all_inc_or_const(argtypes) && !is_all_inc_or_const(Any[rt])
             fb_inci = _fallback_incidence(argtypes)
@@ -952,12 +955,12 @@ function _abstract_eval_invoke_inst(interp::DAEInterpreter, inst::Union{CC.Instr
     return RT(rt, effects)
 end
 
-@override function CC.abstract_eval_statement_expr(interp::DAEInterpreter, inst::Expr, vtypes::Nothing, irsv::IRInterpretationState)
-    ret = @invoke CC.abstract_eval_statement_expr(interp::AbstractInterpreter, inst::Expr, vtypes::Nothing, irsv::IRInterpretationState)
+@override function CC.abstract_eval_statement_expr(interp::DAEInterpreter, inst::Expr, sstate::CC.StatementState, irsv::IRInterpretationState)
+    ret = @invoke CC.abstract_eval_statement_expr(interp::AbstractInterpreter, inst::Expr, sstate::CC.StatementState, irsv::IRInterpretationState)
     return Future{CC.RTEffects}(ret, interp, irsv) do ret, interp, irsv
         (; rt, exct, effects) = ret
         if (!interp.ipo_analysis_mode || interp.in_analysis) && !isa(rt, Const) && !isa(rt, Incidence) && !CC.isType(rt) && !is_all_inc_or_const(Any[rt])
-            argtypes = CC.collect_argtypes(interp, inst.args, nothing, irsv)
+            argtypes = CC.collect_argtypes(interp, inst.args, sstate, irsv)
             if argtypes === nothing
                 return CC.RTEffects(rt, exct, effects)
             end

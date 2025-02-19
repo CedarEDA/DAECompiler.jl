@@ -1005,7 +1005,7 @@ end
                     isva = (isa(mi_or_ci, CodeInstance) ? mi_or_ci.def.def : mi_or_ci.def).isva
 
                     callee_argtypes = CC.va_process_argtypes(CC.optimizer_lattice(analysis_interp),
-                        CC.collect_argtypes(analysis_interp, stmt.args[2:end], nothing, irsv), UInt(length(result.argtypes)), isva)
+                        CC.collect_argtypes(analysis_interp, stmt.args[2:end], CC.StatementState(nothing, false), irsv), UInt(length(result.argtypes)), isva)
                     mapping = CalleeMapping(CC.optimizer_lattice(analysis_interp), callee_argtypes, result)
                 end
                 append!(warnings, result.warnings)

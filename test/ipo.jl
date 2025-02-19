@@ -22,11 +22,8 @@ end
 
 sys = IRODESystem(Tuple{typeof(x2!)}; debug_config, ipo_analysis_mode=false);
 sol = solve(DAEProblem(sys, [0., 0.], [1., 1.], (0., 1.)), IDA())
-
-if Base.__has_internal_change(v"1.12-alpha", :methodspecialization)
-    sol_ipo = solve(DAECProblem(x2!, (1, 2) .=> 1.), IDA())
-    @test sol_ipo(sol.t).u ≈ sol.u
-end
+sol_ipo = solve(DAECProblem(x2!, (1, 2) .=> 1.), IDA())
+@test sol_ipo(sol.t).u ≈ sol.u
 
 #=================== + NonLinear =============================#
 @noinline function x_sin!()
@@ -44,12 +41,10 @@ sys = IRODESystem(Tuple{typeof(x2_sin!)}; debug_config, ipo_analysis_mode=false)
 @test length(getfield(sys_ipo, :result).var_to_diff) ==
       length(getfield(sys, :result).var_to_diff)
 
-if Base.__has_internal_change(v"1.12-alpha", :methodspecialization)
-    sol_ipo = solve(DAECProblem(x2_sin!, (1, 2) .=> 1.), IDA())
-    sol = solve(DAEProblem(sys, [0., 0.], [1., 1.], (0., 1.)), IDA())
+sol_ipo = solve(DAECProblem(x2_sin!, (1, 2) .=> 1.), IDA())
+sol = solve(DAEProblem(sys, [0., 0.], [1., 1.], (0., 1.)), IDA())
 
-    @test sol_ipo(sol.t).u ≈ sol.u
-end
+@test sol_ipo(sol.t).u ≈ sol.u
 
 #=================== + SICM =============================#
 struct x_sicm!
@@ -74,12 +69,10 @@ end
 sys_ipo = IRODESystem(Tuple{x_sicm2!}; debug_config, ipo_analysis_mode=true);
 sys = IRODESystem(Tuple{x_sicm2!}; debug_config, ipo_analysis_mode=false);
 
-if Base.__has_internal_change(v"1.12-alpha", :methodspecialization)
-    sol_ipo = solve(DAECProblem(x_sicm2!(1.0, 2.0), (1, 2) .=> 1.), IDA())
-    sol = solve(DAEProblem(sys, [0., 0.], [1., 1.], (0., 1.), x_sicm2!(1.0, 2.0)), IDA())
+sol_ipo = solve(DAECProblem(x_sicm2!(1.0, 2.0), (1, 2) .=> 1.), IDA())
+sol = solve(DAEProblem(sys, [0., 0.], [1., 1.], (0., 1.), x_sicm2!(1.0, 2.0)), IDA())
 
-    @test sol_ipo(sol.t).u ≈ sol.u
-end
+@test sol_ipo(sol.t).u ≈ sol.u
 
 #=================== + NonLinear SICM =============================#
 struct x_nl_sicm!
@@ -104,12 +97,10 @@ end
 sys_ipo = IRODESystem(Tuple{x_nl_sicm2!}; debug_config, ipo_analysis_mode=true);
 sys = IRODESystem(Tuple{x_nl_sicm2!}; debug_config, ipo_analysis_mode=false);
 
-if Base.__has_internal_change(v"1.12-alpha", :methodspecialization)
-    sol_ipo = solve(DAECProblem(x_nl_sicm2!(1.0, 2.0), (1, 2) .=> 1.), IDA())
-    sol = solve(DAEProblem(sys, [0., 0.], [1., 1.], (0., 1.), x_nl_sicm2!(1.0, 2.0)), IDA())
+sol_ipo = solve(DAECProblem(x_nl_sicm2!(1.0, 2.0), (1, 2) .=> 1.), IDA())
+sol = solve(DAEProblem(sys, [0., 0.], [1., 1.], (0., 1.), x_nl_sicm2!(1.0, 2.0)), IDA())
 
-    @test sol_ipo(sol.t).u ≈ sol.u
-end
+@test sol_ipo(sol.t).u ≈ sol.u
 
 #======================== + Ping Pong =============================#
 @noinline function ping(a, b, c, d)
@@ -136,12 +127,10 @@ end
 sys_ipo = IRODESystem(Tuple{typeof(pingpong)}; debug_config, ipo_analysis_mode=true);
 sys = IRODESystem(Tuple{typeof(pingpong)}; debug_config, ipo_analysis_mode=false);
 
-if Base.__has_internal_change(v"1.12-alpha", :methodspecialization)
-    sol_ipo = solve(DAECProblem(pingpong, (1,) .=> 1.), IDA())
-    sol = solve(DAEProblem(sys, [0.], [1.], (0.), pingpong), IDA())
+sol_ipo = solve(DAECProblem(pingpong, (1,) .=> 1.), IDA())
+sol = solve(DAEProblem(sys, [0.], [1.], (0.), pingpong), IDA())
 
-    @test sol_ipo(sol.t).u ≈ sol.u
-end
+@test sol_ipo(sol.t).u ≈ sol.u
 
 #=================== + Implicit External ==========================#
 @noinline x_intro() = state_ddt(variable())
@@ -154,12 +143,10 @@ sys = IRODESystem(Tuple{typeof(x_implicit)}; debug_config, ipo_analysis_mode=fal
 @test length(getfield(sys_ipo, :result).var_to_diff) ==
       length(getfield(sys, :result).var_to_diff)
 
-if Base.__has_internal_change(v"1.12-alpha", :methodspecialization)
-    sol_ipo = solve(DAECProblem(x_implicit, (1,) .=> 1.), IDA())
-    sol = solve(DAEProblem(sys, [0.], [1.], (0.), x_implicit), IDA())
+sol_ipo = solve(DAECProblem(x_implicit, (1,) .=> 1.), IDA())
+sol = solve(DAEProblem(sys, [0.], [1.], (0.), x_implicit), IDA())
 
-    @test sol_ipo(sol.t).u ≈ sol.u
-end
+@test sol_ipo(sol.t).u ≈ sol.u
 
 #=================== + Non-linear Implicit External ==========================#
 @noinline x_intro_nl()  = tanh(state_ddt(variable()))
@@ -169,13 +156,11 @@ x_implicit_nl() = x_outro_nl(x_intro_nl())
 sys_ipo = IRODESystem(Tuple{typeof(x_implicit_nl)}; debug_config, ipo_analysis_mode=true);
 sys = IRODESystem(Tuple{typeof(x_implicit_nl)}; debug_config, ipo_analysis_mode=false);
 
-if Base.__has_internal_change(v"1.12-alpha", :methodspecialization)
-    sol_ipo = solve(DAECProblem(x_implicit_nl, (1,) .=> 1.), IDA())
-    sol = solve(DAEProblem(sys, [0.], [1.], (0.), x_implicit_nl), IDA())
+sol_ipo = solve(DAECProblem(x_implicit_nl, (1,) .=> 1.), IDA())
+sol = solve(DAEProblem(sys, [0.], [1.], (0.), x_implicit_nl), IDA())
 
-    @test map(x->x[1], sol_ipo(sol_ipo.t).u) ≈ (1. .+ atanh(0.5)*sol_ipo.t)
-    @test sol_ipo(sol.t).u ≈ sol.u
-end
+@test map(x->x[1], sol_ipo(sol_ipo.t).u) ≈ (1. .+ atanh(0.5)*sol_ipo.t)
+@test sol_ipo(sol.t).u ≈ sol.u
 
 #============================= + External Eq =================================#
 @noinline x_intro_eq()  = equation()
@@ -188,13 +173,11 @@ x_implicit_eq() = x_outro_eq(x_intro_eq())
 sys_ipo = IRODESystem(Tuple{typeof(x_implicit_eq)}; debug_config, ipo_analysis_mode=true);
 sys = IRODESystem(Tuple{typeof(x_implicit_eq)}; debug_config, ipo_analysis_mode=false);
 
-if Base.__has_internal_change(v"1.12-alpha", :methodspecialization)
-    sol_ipo = solve(DAECProblem(x_implicit_eq, (1,) .=> 1.), IDA())
-    sol = solve(DAEProblem(sys, [0.], [1.], (0.), x_implicit_eq), IDA())
+sol_ipo = solve(DAECProblem(x_implicit_eq, (1,) .=> 1.), IDA())
+sol = solve(DAEProblem(sys, [0.], [1.], (0.), x_implicit_eq), IDA())
 
-    @test map(x->x[1], sol_ipo(sol_ipo.t).u) ≈ exp.(sol_ipo.t) atol=0.1
-    @test_broken sol_ipo(sol.t).u ≈ sol.u
-end
+@test map(x->x[1], sol_ipo(sol_ipo.t).u) ≈ exp.(sol_ipo.t) atol=0.1
+@test_broken sol_ipo(sol.t).u ≈ sol.u
 
 #============================= + External Eq NL =================================#
 @noinline x_intro_eq_nl()  = equation()
@@ -227,14 +210,12 @@ end
 sys_ipo = IRODESystem(Tuple{typeof(x_implicit_eq_var)}; debug_config, ipo_analysis_mode=true);
 sys = IRODESystem(Tuple{typeof(x_implicit_eq_var)}; debug_config, ipo_analysis_mode=false);
 
-if Base.__has_internal_change(v"1.12-alpha", :methodspecialization)
-    sol_ipo = solve(DAECProblem(x_implicit_eq_var, (1,) .=> 1.), IDA())
-    sol = solve(DAEProblem(sys, [0.], [1.], (0.), x_implicit_eq_var), IDA())
+sol_ipo = solve(DAECProblem(x_implicit_eq_var, (1,) .=> 1.), IDA())
+sol = solve(DAEProblem(sys, [0.], [1.], (0.), x_implicit_eq_var), IDA())
 
-    # 2dx/dt = 2
-    @test map(x->x[1], sol_ipo(sol_ipo.t).u) ≈ (1. .+ sol.t) atol=0.1
-    @test sol_ipo(sol.t).u ≈ sol.u
-end
+# 2dx/dt = 2
+@test map(x->x[1], sol_ipo(sol_ipo.t).u) ≈ (1. .+ sol.t) atol=0.1
+@test sol_ipo(sol.t).u ≈ sol.u
 
 #============================= External Eq Multi (2) =================================#
 @noinline x_intro_eq_var2()  = (state_ddt(variable()), equation())
@@ -249,13 +230,11 @@ end
 sys_ipo = IRODESystem(Tuple{typeof(x_implicit_eq_var2)}; debug_config, ipo_analysis_mode=true);
 sys = IRODESystem(Tuple{typeof(x_implicit_eq_var2)}; debug_config, ipo_analysis_mode=false);
 
-if Base.__has_internal_change(v"1.12-alpha", :methodspecialization)
-    sol_ipo = solve(DAECProblem(x_implicit_eq_var2, (1,) .=> 1.), IDA())
-    sol = solve(DAEProblem(sys, [0.], [1.], (0.), x_implicit_eq_var2), IDA())
+sol_ipo = solve(DAECProblem(x_implicit_eq_var2, (1,) .=> 1.), IDA())
+sol = solve(DAEProblem(sys, [0.], [1.], (0.), x_implicit_eq_var2), IDA())
 
-    @test map(x->x[1], sol_ipo(sol_ipo.t).u) ≈ (1. .+ 2sol_ipo.t) atol=0.1
-    @test sol_ipo(sol.t).u ≈ sol.u
-end
+@test map(x->x[1], sol_ipo(sol_ipo.t).u) ≈ (1. .+ 2sol_ipo.t) atol=0.1
+@test sol_ipo(sol.t).u ≈ sol.u
 
 #=================== + Scope handling =============================#
 @noinline function x_scope!(scope)
