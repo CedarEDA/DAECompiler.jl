@@ -2,7 +2,7 @@
 
 julia_version = "1.13.0-DEV"
 manifest_format = "2.0"
-project_hash = "51c6df7c9f324a79bad39225c3eaa18c1a61c3fc"
+project_hash = "c5ae3def109cfc2c4a75613bf3c99e6611f69f08"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "e2478490447631aedba0823d4d7a80b2cc8cdb32"
@@ -484,7 +484,10 @@ version = "1.15.1"
 
 [[deps.DifferentiationInterface]]
 deps = ["ADTypes", "LinearAlgebra"]
-path = "/home/keno/.julia/dev/DifferentiationInterface/DifferentiationInterface"
+git-tree-sha1 = "ab33044805c0c6a3d85c9e75f35c3f7d765235f2"
+repo-rev = "main"
+repo-subdir = "DifferentiationInterface"
+repo-url = "https://github.com/Keno/DifferentiationInterface.jl#main"
 uuid = "a0c0ee7d-e4b9-4e03-894e-1c5f64a51d63"
 version = "0.6.52"
 
@@ -534,7 +537,9 @@ version = "0.6.52"
 
 [[deps.Diffractor]]
 deps = ["AbstractDifferentiation", "ChainRules", "ChainRulesCore", "Combinatorics", "Compiler", "Cthulhu", "InteractiveUtils", "OffsetArrays", "PrecompileTools", "StaticArrays", "StructArrays"]
-path = "/home/keno/.julia/dev/Diffractor"
+git-tree-sha1 = "5e7422e9b066f2b8c538a28252504cd092ebf6b5"
+repo-rev = "main"
+repo-url = "https://github.com/JuliaDiff/Diffractor.jl.git"
 uuid = "9f5e2b26-1114-432f-b630-d3fe2085c51c"
 version = "0.2.10"
 
@@ -2029,7 +2034,9 @@ weakdeps = ["ChainRulesCore"]
 
 [[deps.StateSelection]]
 deps = ["DocStringExtensions", "FindFirstFunctions", "Graphs", "LinearAlgebra", "Setfield", "SparseArrays", "UnPack"]
-path = "/home/keno/.julia/dev/StateSelection"
+git-tree-sha1 = "2a0ed1aab2c5bea031e863da4668dfcffdb7b80d"
+repo-rev = "main"
+repo-url = "git@github.com:JuliaComputing/StateSelection.jl.git"
 uuid = "64909d44-ed92-46a8-bbd9-f047dfbdc84b"
 version = "0.2.1"
 
