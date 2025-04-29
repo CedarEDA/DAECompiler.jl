@@ -1,3 +1,48 @@
+"""
+    sciml_dae_split_u!(compact, arg, numstates)
+
+Given an IR value `arg` that corresponds to `u` in SciML's DAE ABI, split it into component pieces for
+the DAECompiler internal ABI.
+"""
+function sciml_dae_split_u!(compact, line, arg, numstates)
+    nassgn = numstates[AssignedDiff]
+    ntotalstates = numstates[AssignedDiff] + numstates[UnassignedDiff] + numstates[Algebraic]
+
+    u_mm = insert_node_here!(compact,
+        NewInstruction(Expr(:call, view, arg, 1:nassgn), VectorViewType, line))
+    u_unassgn = insert_node_here!(compact,
+        NewInstruction(Expr(:call, view, arg, (nassgn+1):(nassgn+numstates[UnassignedDiff])), VectorViewType, line))
+    alg = insert_node_here!(compact,
+        NewInstruction(Expr(:call, view, arg, (nassgn+numstates[UnassignedDiff]+1):ntotalstates), VectorViewType, line))
+
+    return (u_mm, u_unassgn, alg)
+end
+
+"""
+    sciml_dae_split_du!(compact, arg, numstates)
+
+Given an IR value `arg` that corresponds to `du` in SciML's DAE ABI, split it into component pieces for
+the DAECompiler internal ABI.
+"""
+function sciml_dae_split_du!(compact, line, arg, numstates)
+    nassgn = numstates[AssignedDiff]
+    ntotalstates = numstates[AssignedDiff] + numstates[UnassignedDiff] + numstates[Algebraic]
+
+    in_du_unassgn = insert_node_here!(compact,
+        NewInstruction(Expr(:call, view, arg, (nassgn+1):(nassgn+numstates[UnassignedDiff])), VectorViewType, line))
+    du_assgn = insert_node_here!(compact,
+        NewInstruction(Expr(:call, view, arg, 1:nassgn), VectorViewType, line))
+
+    return (in_du_unassgn, du_assgn)
+end
+
+function make_daefunction(f)
+    DAEFunction(f)
+end
+
+function make_daefunction(f, initf)
+    DAEFunction(f; initialization_data = SciMLBase.OverrideInitData(NonlinearProblem((args...)->nothing, nothing, nothing), nothing, initf, nothing, nothing))
+end
 
 """
     dae_factory_gen(ci, key)
@@ -15,8 +60,9 @@ end
 ```
 
 """
-function dae_factory_gen(result::DAEIPOResult, ci::CodeInstance, key::TornCacheKey, world::UInt)
-    torn_ir = result.tearing_cache[key]
+function dae_factory_gen(result::DAEIPOResult, ci::CodeInstance, key::TornCacheKey, world::UInt, init_key::Union{TornCacheKey, Nothing})
+    torn_ci = find_matching_ci(ci->isa(ci.owner, TornIRSpec) && ci.owner.key == key, ci.def, world)
+    torn_ir = torn_ci.inferred
 
     (;ir_sicm) = torn_ir
 
@@ -27,10 +73,13 @@ function dae_factory_gen(result::DAEIPOResult, ci::CodeInstance, key::TornCacheK
 
     local line
     if ir_sicm !== nothing
+        sicm_ci = find_matching_ci(ci->isa(ci.owner, SICMSpec) && ci.owner.key == key, ci.def, world)
+        @assert sicm_ci !== nothing
+
         line = result.ir[SSAValue(1)][:line]
         #insert_node_here!(compact, NewInstruction(Expr(:call, println, "Trace: A"), Cvoid, line))
         sicm = insert_node_here!(compact,
-            NewInstruction(Expr(:call, invoke, Argument(3), result.sicm_cache[key], (Argument(i+1) for i = 2:length(result.ir.argtypes))...), Tuple, line))
+            NewInstruction(Expr(:call, invoke, Argument(3), sicm_ci, (Argument(i+1) for i = 2:length(result.ir.argtypes))...), Tuple, line))
         #insert_node_here!(compact, NewInstruction(Expr(:call, println, "Trace: B"), Cvoid, line))
     else
         sicm = ()
@@ -38,7 +87,7 @@ function dae_factory_gen(result::DAEIPOResult, ci::CodeInstance, key::TornCacheK
 
     argt = Tuple{Vector{Float64}, Vector{Float64}, Vector{Float64}, SciMLBase.NullParameters, Float64}
 
-    daef_ci = dae_finish_ipo!(result, ci, key, world, 1)
+    daef_ci = rhs_finish!(result, ci, key, world, 1)
 
     # Create a small opaque closure to adapt from SciML ABI to our own internal
     # ABI
@@ -77,23 +126,16 @@ function dae_factory_gen(result::DAEIPOResult, ci::CodeInstance, key::TornCacheK
     out_eq = insert_node_here!(oc_compact,
         NewInstruction(Expr(:call, view, Argument(2), (nassgn+1):ntotalstates), VectorViewType, line))
 
-    in_du_unassgn = insert_node_here!(oc_compact,
-        NewInstruction(Expr(:call, view, Argument(3), (nassgn+1):(nassgn+numstates[UnassignedDiff])), VectorViewType, line))
-    du_assgn = insert_node_here!(oc_compact,
-        NewInstruction(Expr(:call, view, Argument(3), 1:nassgn), VectorViewType, line))
-
-    in_u_mm = insert_node_here!(oc_compact,
-        NewInstruction(Expr(:call, view, Argument(4), 1:nassgn), VectorViewType, line))
-    in_u_unassgn = insert_node_here!(oc_compact,
-        NewInstruction(Expr(:call, view, Argument(4), (nassgn+1):(nassgn+numstates[UnassignedDiff])), VectorViewType, line))
-    in_alg = insert_node_here!(oc_compact,
-        NewInstruction(Expr(:call, view, Argument(4), (nassgn+numstates[UnassignedDiff]+1):ntotalstates), VectorViewType, line))
+    (in_du_unassgn, du_assgn) = sciml_dae_split_du!(oc_compact, line, Argument(3), numstates)
+    (in_u_mm, in_u_unassgn, in_alg) = sciml_dae_split_u!(oc_compact, line, Argument(4), numstates)
 
     # Call DAECompiler-generated RHS with internal ABI
     oc_sicm = insert_node_here!(oc_compact,
         NewInstruction(Expr(:call, getfield, Argument(1), 1), Tuple, line))
+
+    # N.B: The ordering of arguments should match the ordering in the StateKind enum
     insert_node_here!(oc_compact,
-        NewInstruction(Expr(:invoke, daef_ci, oc_sicm, (), out_du_mm, out_eq, in_u_mm, in_u_unassgn, in_du_unassgn, in_alg, Argument(6)), Nothing, line))
+        NewInstruction(Expr(:invoke, daef_ci, oc_sicm, (), in_u_mm, in_u_unassgn, in_du_unassgn, in_alg, out_du_mm, out_eq, Argument(6)), Nothing, line))
 
     # Manually apply mass matrix
     bc = insert_node_here!(oc_compact,
@@ -120,8 +162,14 @@ function dae_factory_gen(result::DAEIPOResult, ci::CodeInstance, key::TornCacheK
 
     differential_states = Bool[v in key.diff_states for v in all_states]
 
-    daef = insert_node_here!(compact, NewInstruction(Expr(:call, DAEFunction, new_oc),
-    DAEFunction, line), true)
+    if init_key !== nothing
+        initf = init_uncompress_gen!(compact, result, ci, init_key, key, world)
+        daef = insert_node_here!(compact, NewInstruction(Expr(:call, make_daefunction, new_oc, initf),
+            DAEFunction, line), true)
+    else
+        daef = insert_node_here!(compact, NewInstruction(Expr(:call, make_daefunction, new_oc),
+        DAEFunction, line), true)
+    end
 
     # TODO: Ideally, this'd be in DAEFunction
     daef_and_diff = insert_node_here!(compact, NewInstruction(

@@ -1,28 +1,42 @@
+@enum GenerationMode begin
+    DAE
+    DAENoInit
+
+    ODE
+    ODENoInit
+
+    # These are primarily for debug
+    InitUncompress
+end
+
 struct Settings
-    dae::Bool
+    mode::GenerationMode
     force_inline_all::Bool
 end
-Settings(; dae::Bool=true, force_inline_all::Bool=false) = Settings(dae, force_inline_all)
+Settings(; mode::GenerationMode=DAE, force_inline_all::Bool=false) = Settings(mode, force_inline_all)
 
 using StateSelection: Unassigned, SelectedState, unassigned
 function top_level_state_selection(result)
-    @show result.nexternalvars
-
     # For the top-level problem, all external vars are state-invariant, and we do no other fissioning
     param_vars = BitSet(1:result.nexternalvars)
 
     structure = make_structure_from_ipo(result)
     StateSelection.complete!(structure)
 
-    varwhitelist = StateSelection.computed_highest_diff_variables(structure)
-
+    diffvars = result.varkinds .== Intrinsics.Continuous
     for param in param_vars
-        varwhitelist[param] = false
+        diffvars[param] = false
     end
+
+    @assert length(diffvars) == ndsts(structure.graph)
+    varwhitelist = StateSelection.computed_highest_diff_variables(structure, diffvars)
+
+    ## Part 1: Perform the selection of differential states and subsequent tearing of the
+    #          non-linear problem at every time step. 
 
     # Max match is the (unique) tearing result given the choice of states
     var_eq_matching = StateSelection.complete(StateSelection.maximal_matching(structure.graph, Union{Unassigned, SelectedState};
-        dstfilter = var->varwhitelist[var]))
+        dstfilter = var->varwhitelist[var], srcfilter = eq->result.eqkinds[eq] == Intrinsics.Always), nsrcs(structure.graph))
 
     var_eq_matching = StateSelection.partial_state_selection_graph!(structure, var_eq_matching)
 
@@ -38,7 +52,24 @@ function top_level_state_selection(result)
         end
     end
 
-    key = TornCacheKey(diff_vars, alg_vars, param_vars, Vector{Pair{BitSet, BitSet}}())
+    diff_key = TornCacheKey(diff_vars, alg_vars, param_vars, Vector{Pair{BitSet, BitSet}}())
+
+    ## Part 2: Perform the selection of differential states and subsequent tearing of the
+    #          non-linear problem at every time step. 
+    init_var_eq_matching = StateSelection.complete(StateSelection.maximal_matching(structure.graph;
+        dstfilter = var->diffvars[var], srcfilter = eq->result.eqkinds[eq] in (Intrinsics.Always, Intrinsics.Initial)))
+    init_var_eq_matching = StateSelection.pss_graph_modia!(structure, init_var_eq_matching)
+
+    init_state_vars = BitSet()
+    for (v, match) in enumerate(init_var_eq_matching)
+        diffvars[v] || continue
+        if match === unassigned
+            push!(init_state_vars, v)
+        end
+    end
+    init_key = TornCacheKey(nothing, init_state_vars, param_vars, Vector{Pair{BitSet, BitSet}}())
+
+    (diff_key, init_key)
 end
 
 """
@@ -65,15 +96,25 @@ function factory_gen(world::UInt, source::Method, @nospecialize(_gen), settings,
     # TODO: Pantelides here
 
     # Select differential and algebraic states
-    key = top_level_state_selection(result)
+    (diff_key, init_key) = top_level_state_selection(result)
 
-    tearing_schedule!(result, ci, key, world)
+    if settings.mode in (DAE, DAENoInit)
+        tearing_schedule!(result, ci, diff_key, world)
+    end
+    if settings.mode in (InitUncompress, DAE)
+        tearing_schedule!(result, ci, init_key, world)
+    end
 
     # Generate the IR implementation of `factory`, returning the DAEFunction
-    @assert settings.dae
-    ir_factory = dae_factory_gen(result, ci, key, world)
-    src = ir_to_src(ir_factory)
+    if settings.mode in (DAE, DAENoInit)
+        ir_factory = dae_factory_gen(result, ci, diff_key, world, settings.mode == DAE ? init_key : nothing)
+    elseif settings.mode == InitUncompress
+        ir_factory = init_uncompress_gen(result, ci, init_key, diff_key, world)
+    else
+        return :(error("Unknown generation mode: $(settings.mode)"))
+    end
 
+    src = ir_to_src(ir_factory)
     src.ssavaluetypes = length(src.code)
     src.min_world = @atomic ci.min_world
     src.max_world = @atomic ci.max_world

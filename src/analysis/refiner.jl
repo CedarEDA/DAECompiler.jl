@@ -8,8 +8,8 @@ of structural incidence information.
 struct StructuralRefiner <: Compiler.AbstractInterpreter
     world::UInt
     var_to_diff::DiffGraph
+    varkinds::Vector{Intrinsics.VarKind}
     varclassification::Vector{VarEqClassification}
-    eqclassification::Vector{VarEqClassification}
 end
 
 struct StructureCache; end
@@ -36,13 +36,12 @@ Compiler.cache_owner(::StructuralRefiner) = StructureCache()
         m = invokee.def
     end
 
-    @show m
     if m === Intrinsics.ddt_method
         argtypes = Compiler.collect_argtypes(interp, stmt.args, Compiler.StatementState(nothing, false), irsv)
         argtypes === nothing && return RT(Union{}, (false, true))
         # First arg is invoke mi
         if length(argtypes) == 3 && isa(argtypes[3], Union{Incidence, Const})
-            return RT(structural_inc_ddt(interp.var_to_diff, interp.varclassification, argtypes[3]), (false, true))
+            return RT(structural_inc_ddt(interp.var_to_diff, interp.varclassification, interp.varkinds, argtypes[3]), (false, true))
         end
         return RT(nothing, (false, true))
     elseif m === Intrinsics.equation_method
@@ -59,7 +58,7 @@ Compiler.cache_owner(::StructuralRefiner) = StructureCache()
 
     argtypes = Compiler.collect_argtypes(interp, stmt.args, Compiler.StatementState(nothing, false), irsv)[2:end]
     mapping = CalleeMapping(Compiler.optimizer_lattice(interp), argtypes, callee_result)
-    new_rt = apply_linear_incidence(Compiler.optimizer_lattice(interp), callee_result.extended_rt, callee_result, interp.var_to_diff, interp.varclassification, interp.eqclassification, mapping)
+    new_rt = apply_linear_incidence(Compiler.optimizer_lattice(interp), callee_result.extended_rt, callee_result, interp.var_to_diff, interp.varclassification, VarEqClassification[], mapping)
 
     # Remember this mapping, both for performance of not having to recompute it
     # and because we may have assigned caller variables to internal variables
@@ -74,7 +73,7 @@ end
 
 #==================== DAECompiler Intrinsic Refinement Models ===========================#
 
-function structural_inc_ddt(var_to_diff::DiffGraph, varclassification::Vector{VarEqClassification}, inc::Union{Incidence, Const})
+function structural_inc_ddt(var_to_diff::DiffGraph, varclassification::Vector{VarEqClassification}, varkinds::Vector{Intrinsics.VarKind}, inc::Union{Incidence, Const})
     isa(inc, Const) && return Const(zero(inc.val))
     r = _zero_row()
     function get_or_make_diff(v_offset::Int)
@@ -82,6 +81,7 @@ function structural_inc_ddt(var_to_diff::DiffGraph, varclassification::Vector{Va
         var_to_diff[v] !== nothing && return var_to_diff[v] + 1
         dv = add_vertex!(var_to_diff)
         push!(varclassification, varclassification[v])
+        push!(varkinds, Intrinsics.Continuous)
         add_edge!(var_to_diff, v, dv)
         return dv + 1
     end
@@ -210,11 +210,11 @@ function is_elem_inc_ir_const(@nospecialize(x))
     x === Union{} && return true
     isa(x, Incidence) && return true
     isa(x, Eq) && return true
-    CC.isalreadyconst(x) && return true
+    Compiler.isalreadyconst(x) && return true
     if isa(x, PartialStruct)
         return is_all_inc_or_const(x.fields)
     end
-    if isa(x, CC.Conditional)
+    if isa(x, Compiler.Conditional)
         return is_elem_inc_ir_const(x.thentype) && is_elem_inc_ir_const(x.elsetype)
     end
     return false

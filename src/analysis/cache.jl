@@ -13,7 +13,8 @@ struct TornIR
 end
 
 @auto_hash_equals struct TornCacheKey
-    diff_states::BitSet
+    # If nothing, includes init equations
+    diff_states::Union{BitSet, Nothing}
     alg_states::BitSet
     param_vars::BitSet
     var_schedule::Vector{Pair{BitSet, BitSet}}
@@ -34,15 +35,10 @@ struct DAEIPOResult
     eqclassification::Vector{VarEqClassification}
     eq_callee_mapping::Vector{Union{Nothing, Vector{Pair{SSAValue, Int}}}}
     names::OrderedDict{Any, ScopeDictEntry} # TODO: OrderedIdDict
+    varkinds::Vector{Union{Intrinsics.VarKind, Nothing}}
+    eqkinds::Vector{Union{Intrinsics.EqKind, Nothing}}
     # TODO: Chain these rather than copying them
     warnings::Vector{UnsupportedIRException}
-
-    # TODO: Should this by a code instance
-    tearing_cache::Dict{TornCacheKey, TornIR}
-
-    # TODO: Should this be looked up via the regular code instance cache instead?
-    sicm_cache::Dict{TornCacheKey, CodeInstance}
-    dae_finish_cache::Dict{TornCacheKey, Vector{CodeInstance}}
 end
 
 struct UncompilableIPOResult
@@ -92,23 +88,3 @@ function make_structure_from_ipo(ipo::DAEIPOResult)
 
     structure = DAESystemStructure(StateSelection.complete(var_to_diff), StateSelection.complete(eq_to_diff), graph, solvable_graph)
 end
-
-"""
-    struct RHSSpec
-
-Cache partition for the RHS
-"""
-struct RHSSpec
-    key::TornCacheKey
-    ordinal::Int
-end
-
-"""
-    struct SICMSpec
-
-Cache partition for the state-invariant prologue
-"""
-struct SICMSpec
-    key::TornCacheKey
-end
-

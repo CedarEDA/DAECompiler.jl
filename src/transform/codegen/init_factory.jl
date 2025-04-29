@@ -1,0 +1,105 @@
+
+function init_uncompress_gen(result::DAEIPOResult, ci::CodeInstance, init_key::TornCacheKey, diff_key::TornCacheKey, world::UInt)
+    ir_factory = copy(result.ir)
+    pushfirst!(ir_factory.argtypes, Settings)
+    pushfirst!(ir_factory.argtypes, typeof(factory))
+    compact = IncrementalCompact(ir_factory)
+
+    new_oc = init_uncompress_gen!(compact, result, ci, init_key, diff_key, world)
+    insert_node_here!(compact, NewInstruction(ReturnNode(new_oc), Core.OpaqueClosure, result.ir[SSAValue(1)][:line]), true)
+
+    ir_factory = Compiler.finish(compact)
+
+    return ir_factory
+end
+
+function init_uncompress_gen!(compact::Compiler.IncrementalCompact, result::DAEIPOResult, ci::CodeInstance, init_key::TornCacheKey, diff_key::TornCacheKey, world::UInt)
+    torn_ci = find_matching_ci(ci->isa(ci.owner, TornIRSpec) && ci.owner.key == init_key, ci.def, world)
+    @assert torn_ci !== nothing
+    torn_ir = torn_ci.inferred
+    (;ir_sicm) = torn_ir
+
+    local line
+    if ir_sicm !== nothing
+        sicm_ci = find_matching_ci(ci->isa(ci.owner, SICMSpec) && ci.owner.key == init_key, ci.def, world)
+        @assert sicm_ci !== nothing
+
+        line = result.ir[SSAValue(1)][:line]
+        #insert_node_here!(compact, NewInstruction(Expr(:call, println, "Trace: A"), Cvoid, line))
+        sicm = insert_node_here!(compact,
+            NewInstruction(Expr(:call, invoke, Argument(3), sicm_ci, (Argument(i+1) for i = 2:length(result.ir.argtypes))...), Tuple, line))
+        #insert_node_here!(compact, NewInstruction(Expr(:call, println, "Trace: B"), Cvoid, line))
+    else
+        sicm = ()
+    end
+
+    # (nlsol,)
+    argt = Tuple{Any}
+    daef_ci = gen_init_uncompress!(result, ci, init_key, diff_key, world, 1)
+
+    # Create a small opaque closure to adapt from SciML ABI to our own internal
+    # ABI
+
+    numstates = zeros(Int, Int(LastEquationStateKind))
+
+    all_states = Int[]
+    for var = 1:length(result.var_to_diff)
+        kind = classify_var(result.var_to_diff, diff_key, var)
+        kind == nothing && continue
+        numstates[kind] += 1
+        (kind != AlgebraicDerivative) && push!(all_states, var)
+    end
+
+    ir_oc = copy(result.ir)
+    empty!(ir_oc.argtypes)
+    push!(ir_oc.argtypes, Tuple)
+    push!(ir_oc.argtypes, Any)
+
+    oc_compact = IncrementalCompact(ir_oc)
+    line = ir_oc[SSAValue(1)][:line]
+
+    # Zero the output
+    nout = numstates[UnassignedDiff] + numstates[AssignedDiff]
+    out_arr = insert_node_here!(oc_compact,
+        NewInstruction(Expr(:call, zeros, nout), Vector{Float64}, line))
+
+    nscratch = numstates[Algebraic] + numstates[AlgebraicDerivative]
+    scratch_arr = insert_node_here!(oc_compact,
+        NewInstruction(Expr(:call, zeros, nout), Vector{Float64}, line))
+
+    # Get the solution vector out of the solution object
+    in_nlsol_u = insert_node_here!(oc_compact,
+        NewInstruction(Expr(:call, getproperty, Argument(2), QuoteNode(:u0)), Vector{Float64}, line))
+
+    # Adapt to DAECompiler ABI
+    nassgn = numstates[AssignedDiff]
+    ntotalstates = numstates[AssignedDiff] + numstates[UnassignedDiff] + numstates[Algebraic]
+
+    (out_u_mm, out_u_unassgn, out_alg) = sciml_dae_split_u!(oc_compact, line, out_arr, numstates)
+    (out_du_unassgn, _) = sciml_dae_split_du!(oc_compact, line, scratch_arr, numstates) 
+
+    # Call DAECompiler-generated RHS with internal ABI
+    oc_sicm = insert_node_here!(oc_compact,
+        NewInstruction(Expr(:call, getfield, Argument(1), 1), Tuple, line))
+    insert_node_here!(oc_compact,
+        NewInstruction(Expr(:invoke, daef_ci, oc_sicm, (), out_u_mm, out_u_unassgn, out_du_unassgn, out_alg, in_nlsol_u, 0.0), Nothing, line))
+
+    # Return
+    insert_node_here!(oc_compact, NewInstruction(ReturnNode(out_arr), Vector{Float64}, line))
+
+    ir_oc = Compiler.finish(oc_compact)
+    oc = Core.OpaqueClosure(ir_oc)
+
+    line = result.ir[SSAValue(1)][:line]
+
+    oc_source_method = oc.source
+    # Sketchy, but not clear that we have something better for the time being
+    oc_ci = oc_source_method.specializations.cache
+    @atomic oc_ci.max_world = @atomic ci.max_world
+    @atomic oc_ci.min_world = 1 # @atomic ci.min_world
+
+    new_oc = insert_node_here!(compact, NewInstruction(Expr(:new_opaque_closure,
+        argt, Vector{Float64}, Vector{Float64}, true, oc_source_method, sicm), Core.OpaqueClosure, line), true)
+
+    return new_oc
+end

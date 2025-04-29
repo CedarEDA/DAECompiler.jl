@@ -44,15 +44,12 @@ end
     if isa(info, Diffractor.FRuleCallInfo) && info.frule_call.rt !== Const(nothing)
         return false
     end
-    @show (typeof(src), info)
     if isa(src, Compiler.OptimizationState)
         @show src.linfo
         @show src.src
         error()
     end
     if isa(src, AnalyzedSource)
-        @show src.inline_cost
-        display(src.ir)
         return src.inline_cost != Compiler.MAX_INLINE_COST
     end
     return @invoke Compiler.src_inlining_policy(interp::AbstractInterpreter, src::Any, info, stmt_flag)

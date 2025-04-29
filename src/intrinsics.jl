@@ -18,8 +18,8 @@ functions are:
 module Intrinsics
 
     import ..@defintrmethod
-    export continuous, discrete, epsilon, variable, equation, always, initial, observed,
-        always!, initial!, observed!, sim_time, ett!, pre, threshold, ddt
+    export continuous, discrete, epsilon, variable, equation, always, initial, initialguess, observed,
+        always!, initial!, initialguess!, observed!, sim_time, ett!, pre, threshold, ddt
 
     abstract type AbstractScope; end
 
@@ -90,6 +90,7 @@ module Intrinsics
     @enum EqKind begin
         Always=1
         Initial
+        InitialGuess
         Observed
         RemovedEq
     end
@@ -317,9 +318,37 @@ using .Intrinsics
 
 module InternalIntrinsics
     export solved_variable, state, contribution!
-    export StateKind, AssignedDiff, UnassignedDiff, AlgebraicDerivative, Algebraic
+    export StateKind, AssignedDiff, UnassignedDiff, AlgebraicDerivative, Algebraic, LastStateKind
     export EquationStateKind, StateDiff, Explicit, LastEquationStateKind
 
+    """
+        StateKind
+
+    DAECompiler's internal ABI supports being called either from a SciML DAE or ODE (with mass matrix) ABI.
+    To support this, we assign all variables that will become states to one of our kinds:
+
+    - `AssignedDiff`:   A differential variable for which we have a variable-equation assignment for its derivative.
+                        In ODE form, this variable will have a slot and the corresponding `du` will be set to the residual
+                        of the assigned equation.
+                        In DAE form, we will generate an implicit `du[i] - red` in the corresponding equation slot.
+
+    - `UnassignedDiff`: A differential variable for which we do NOT have a variable-equation assignment for its derivative.
+                        The derivative of this variable will be an algebraic variable of StateKind `AlgebraicDerivative`.
+                        In ODE form, the corresponding `du` entry will be set to this algebraic variable, while the (null row
+                        mass matrix) entry corresponding to the derivative will be used for one of the remaining unassigned equations.
+                        In DAE form, the corresponding `du` entry will be directly used for the algebraic variable.
+
+    - `Algebraic`:      An algebraic variable that is not the derivative of a differential variable. In ODE form, these are appended to the
+                        `u` array (with the correponding mass matrix row being `0`). In DAE form, these are also appended to the `u` array,
+                        with the corresponding entry of `differential_vars` being `false`.
+                    
+    - `AlgebraicDerivative`:
+                        An algebraic variable that is the derivative of a differential variable. In ODE form, these are appended to the `u`
+                        array (like ordinary `Algebraic` variables). In DAE form, these are appended to the `du` array as described above.
+        
+    In order to support both SciML ABIs, the DAECompiler ABI, passes separate views for each of these kinds of variables. The ordering in this
+    enum corresponds to the ordering in the arguments of the DAECompiler internal ABI.
+    """
     @enum StateKind begin
         AssignedDiff=1
         UnassignedDiff
@@ -329,6 +358,17 @@ module InternalIntrinsics
     const LastStateKind = Algebraic
     Base.to_index(kind::StateKind) = Int(kind)
 
+    """
+        EquationStateKind
+
+    Extends `StateKinds` to include the output states of equations. The two equation state kinds are:
+
+    - `StateDiff`:      This is the output state that corresponds to an `AssignedDiff` variable above. In ODE form this is a mass-matrix with non-zero entry.
+                        In DAE form, we reserve a slot in the `out` array for the explicit residual and the toplevel adapter to DAE form then manually applies
+                        the mass matrix.
+    - `Explicit`:       This is the output state corresponds to an unassigned equation. In ODE form, this corresponds to a mass matrix with zero row. In DAE form,
+                        it is any entry of the output array.
+    """
     @enum EquationStateKind begin
         StateDiff=Int(LastStateKind)+1
         Explicit

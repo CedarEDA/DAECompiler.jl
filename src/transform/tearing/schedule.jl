@@ -120,7 +120,11 @@ Base.setindex!(rno::RenameOverlayVector, @nospecialize(val), i::Int) =
     Base.setindex!(rno.overlay, val, i)
 Base.size(rno::RenameOverlayVector) = Base.size(rno.base)
 
-is_fully_state_linear(incT, param_vars) = !(any(==(nonlinear), incT.row) || any(x->((x-1) in param_vars), rowvals(incT.row)) || incT.typ != Const(0.0))
+is_state_part_linear(incT::Const, param_vars) = true
+is_state_part_linear(incT, param_vars) = !(any(==(nonlinear), incT.row) || any(x->((x-1) in param_vars), rowvals(incT.row)))
+is_const_plus_state_linear(incT, param_vars) = is_state_part_linear(incT, param_vars) && isa(incT.typ, Const)
+
+is_fully_state_linear(incT, param_vars) = is_const_plus_state_linear(incT, param_vars) && is_fully_state_linear(incT.typ, param_vars)
 is_fully_state_linear(incT::Const, param_vars) = iszero(incT.val)
 
 function schedule_nonlinear!(compact, param_vars, var_eq_matching, ir, val::Union{SSAValue, Argument}, ssa_rename::AbstractVector{Any}; vars, schedule_missing_var! = nothing)
@@ -141,19 +145,17 @@ function schedule_nonlinear!(compact, param_vars, var_eq_matching, ir, val::Unio
     end
 
 
+    stmt = inst[:stmt]
     info = inst[:info]
     if isa(info, Diffractor.FRuleCallInfo)
         info = info.info
     end
-    @show inst[:stmt]
     info::MappingInfo
     result = info.result
     extended_rt = result.extended_rt
     incT = inst[:type]::Incidence
 
-    stmt = inst[:stmt]
 
-    @show result.argtypes
     args = map(zip(Iterators.drop(userefs(stmt), 1), result.argtypes)) do (ur, template_argtype)
         arg = ur[]
         typ = argextype(arg, ir)
@@ -163,7 +165,6 @@ function schedule_nonlinear!(compact, param_vars, var_eq_matching, ir, val::Unio
 
         # TODO: SICM
 
-        @show is_fully_state_linear(typ::Incidence, param_vars)
         if !is_fully_state_linear(typ::Incidence, param_vars)
             this_nonlinear = schedule_nonlinear!(compact, param_vars, var_eq_matching, ir, arg, ssa_rename; vars, schedule_missing_var!)
         else
@@ -173,11 +174,9 @@ function schedule_nonlinear!(compact, param_vars, var_eq_matching, ir, val::Unio
             end
             this_nonlinear = nothing
         end
-        @show (arg, typ, this_nonlinear)
 
         return schedule_incidence!(compact, var_eq_matching, this_nonlinear, typ, -1, inst[:line]; vars, schedule_missing_var!)[1]
     end
-    @show args
 
     if is_fully_state_linear(incT, param_vars)
         # TODO: This needs to do a proper template match
@@ -219,7 +218,9 @@ function compute_eq_schedule(key::TornCacheKey, result, mss::StateSelection.Matc
 
     available = BitSet()
     # Add all selected states to available
-    union!(available, diff_states) # Computed by integrator
+    if diff_states !== nothing
+        union!(available, diff_states) # Computed by integrator
+    end
     union!(available, alg_states)  # Computed by NL solver
     union!(available, key.param_vars)  # Computed by SCIM hoist
 
@@ -347,7 +348,6 @@ function compute_eq_schedule(key::TornCacheKey, result, mss::StateSelection.Matc
             end
 
             schedule_frontier_var!(only(frontier); force=true)
-            @show new_available
             @assert !isempty(new_available)
             union!(available, new_available)
             setdiff!(frontier, new_available)
@@ -387,7 +387,7 @@ function classify_var(var_to_diff, key::TornCacheKey, var)
         else
             kind = Algebraic
         end
-    elseif var in key.diff_states
+    elseif key.diff_states !== nothing && (var in key.diff_states)
         vdiff = var_to_diff[var]
         if vdiff in key.alg_states
             kind = UnassignedDiff
@@ -400,25 +400,82 @@ function classify_var(var_to_diff, key::TornCacheKey, var)
     return kind
 end
 
-function tearing_schedule!(result::DAEIPOResult, ci::CodeInstance, key::TornCacheKey, world::UInt)
-    if haskey(result.sicm_cache, key)
-        return result.sicm_cache[key]
+function assign_slots(result::DAEIPOResult, key::TornCacheKey, var_eq_matching::Union{StateSelection.Matching, Nothing})
+    slot_assignments = zeros(Int, Int(LastEquationStateKind))
+    var_assignment = Vector{Union{Nothing, Pair{StateKind, Int}}}(nothing, length(result.var_to_diff))
+    eq_assignment = var_eq_matching === nothing ? nothing : Vector{Union{Nothing, Pair{EquationStateKind, Int}}}(nothing, length(result.total_incidence))
+
+    function assign_slot!(kind, varnum)
+        @assert kind != AlgebraicDerivative # Always the same assignment as the UnassignedDiff of the vint
+        @assert kind != StateDiff # Always the same as the assignment as the AssignedDiff of the var
+        iseq = kind in (StateDiff, Explicit)
+        arr = (iseq ? eq_assignment : var_assignment)
+        if arr[varnum] === nothing
+            slot_assignments[kind] += 1
+            arr[varnum] = kind => slot_assignments[kind]
+        end
+        (skind, slot) = arr[varnum]
+        @assert skind == kind
+        return slot
     end
 
-    (; diff_states, alg_states, var_schedule) = key
-    structure = make_structure_from_ipo(result)
-    StateSelection.complete!(structure)
+    for i = 1:length(var_assignment)
+        kind = classify_var(result.var_to_diff, key, i)
+        kind === nothing && continue
+        cache_kind = kind
+        varnum = i
+        if kind == AlgebraicDerivative
+            cache_kind = UnassignedDiff
+            varnum = invview(result.var_to_diff)[varnum]::Int
+        end
+        slot = assign_slot!(cache_kind, varnum)
+        if kind == AlgebraicDerivative
+            var_assignment[i] = kind => slot
+        elseif kind == AssignedDiff && var_eq_matching !== nothing
+            eq_assignment[var_eq_matching[result.var_to_diff[i]]] = StateDiff => slot
+        end
+    end
 
-    # Perform state selection for this sub-problem
-    varwhitelist = StateSelection.computed_highest_diff_variables(structure)
+    if var_eq_matching !== nothing
+        for eq = 1:length(result.total_incidence)
+            (invview(var_eq_matching)[eq] === unassigned) || continue
+            assign_slot!(Explicit, eq)
+        end
+    end
+
+    (slot_assignments, var_assignment, eq_assignment)
+end
+
+"""
+    struct SICMSpec
+
+Cache partition for the state-invariant prologue
+"""
+struct SICMSpec
+    key::TornCacheKey
+end
+
+struct TornIRSpec
+    key::TornCacheKey
+end
+
+function matching_for_key(result::DAEIPOResult, key::TornCacheKey, structure = make_structure_from_ipo(result))
+    (; diff_states, alg_states, var_schedule) = key
+    varwhitelist = diff_states === nothing ? trues(ndsts(structure.graph)) : StateSelection.computed_highest_diff_variables(structure)
+
+    allow_init_eqs = key.diff_states === nothing
+
+    may_use_var(var) = var > result.nexternalvars && varwhitelist[var] && (diff_states === nothing || !(var in diff_states)) && !(var in alg_states) && result.varkinds[var] == Intrinsics.Continuous
+    may_use_eq(eq) = result.eqclassification[eq] != External && result.eqkinds[eq] in (allow_init_eqs ? (Intrinsics.Initial, Intrinsics.Always) : (Intrinsics.Always,))
 
     # Max match is the (unique) tearing result given the choice of states
     var_eq_matching = StateSelection.complete(StateSelection.maximal_matching(structure.graph, Union{Unassigned, SelectedState, StateInvariant, InOut};
-        dstfilter = var->(var > result.nexternalvars && varwhitelist[var] && !(var in diff_states) && !(var in alg_states)),
-        srcfilter = eq -> result.eqclassification[eq] != External), nsrcs(structure.graph))
+        dstfilter = may_use_var, srcfilter = may_use_eq), nsrcs(structure.graph))
 
-    for var in diff_states
-        var_eq_matching[var] = SelectedState()
+    if diff_states !== nothing
+        for var in diff_states
+            var_eq_matching[var] = SelectedState()
+        end
     end
 
     for var in key.param_vars
@@ -426,7 +483,6 @@ function tearing_schedule!(result::DAEIPOResult, ci::CodeInstance, key::TornCach
     end
 
     for (ordinal, (in_vars, out_eqs)) in enumerate(key.var_schedule)
-        @show (ordinal, (in_vars, out_eqs))
         for in_var in in_vars
             isa(var_eq_matching[in_var], InOut) && continue
             var_eq_matching[in_var] = InOut(ordinal)
@@ -437,14 +493,26 @@ function tearing_schedule!(result::DAEIPOResult, ci::CodeInstance, key::TornCach
         end
     end
 
+    return var_eq_matching
+end
+
+function tearing_schedule!(result::DAEIPOResult, ci::CodeInstance, key::TornCacheKey, world::UInt)
+    result_ci = find_matching_ci(ci->isa(ci.owner, SICMSpec) && ci.owner.key == key, ci.def, world)
+    if result_ci !== nothing
+        return result_ci
+    end
+
+    (; diff_states, alg_states, var_schedule) = key
+    structure = make_structure_from_ipo(result)
+    StateSelection.complete!(structure)
+
+    var_eq_matching = matching_for_key(result, key, structure)
+
     mss = StateSelection.MatchedSystemStructure(structure, var_eq_matching)
     (eq_orders, callee_schedules) = compute_eq_schedule(key, result, mss)
-    display(mss)
 
     # TODO: This should be the post-AD IR
     ir = copy(result.ir)
-
-    display(ir)
 
     # First, schedule any statements that do not have state dependence
     sicm_rename = Vector{Any}(undef, length(ir.stmts))
@@ -493,38 +561,8 @@ function tearing_schedule!(result::DAEIPOResult, ci::CodeInstance, key::TornCach
 
     callee_eq_mapping = invert_eq_callee_mapping(result.eq_callee_mapping)
 
-    var_assignment = Vector{Union{Nothing, Pair{StateKind, Int}}}(nothing, length(result.var_to_diff))
-    eq_assignment = Vector{Union{Nothing, Pair{EquationStateKind, Int}}}(nothing, length(result.total_incidence))
     diff_states_in_callee = BitSet()
     processed_variables = Set{Int}()
-
-    function assign_slot!(kind, varnum)
-        @assert kind != AlgebraicDerivative # Always the same assignment as the UnassignedDiff of the vint
-        @assert kind != StateDiff # Always the same as the assignment as the AssignedDiff of the var
-        iseq = kind in (StateDiff, Explicit)
-        arr = (iseq ? eq_assignment : var_assignment)
-        if arr[varnum] === nothing
-            slot_assignments[kind] += 1
-            arr[varnum] = kind => slot_assignments[kind]
-        end
-        (skind, slot) = arr[varnum]
-        @assert skind == kind
-        return slot
-    end
-
-    function get_var_slot_assignment(varnum::Int)
-        kind = classify_var(result.var_to_diff, key, varnum)
-        kind === nothing && return nothing
-
-        cache_kind = kind
-        if kind == AlgebraicDerivative
-            cache_kind = UnassignedDiff
-            varnum = invview(result.var_to_diff)[varnum]::Int
-        end
-
-        slot = assign_slot!(cache_kind, varnum)
-        return (slot, kind)
-    end
 
     # Generate SICM partition
     for i = 1:length(ir.stmts)
@@ -558,25 +596,14 @@ function tearing_schedule!(result::DAEIPOResult, ci::CodeInstance, key::TornCach
                     throw(UnsupportedIRException("Duplicate variable ($(varnum))", ir))
                 end
                 push!(processed_variables, varnum)
-
-                assgn = get_var_slot_assignment(varnum)
-
-                if assgn !== nothing
-                    resize!(stmt.args, 4)
-                    stmt.args[1] = nothing
-                    stmt.args[2] = InternalIntrinsics.state
-                    stmt.args[3] = assgn[1]
-                    stmt.args[4] = assgn[2]
-                end
             elseif isexpr(stmt, :invoke)
                 # Project the state mapping
-                callee_diff_states = BitSet()
-                callee_alg_states = BitSet()
+                callee_diff_vars = BitSet()
+                callee_alg_vars = BitSet()
                 callee_param_vars = BitSet()
                 externally_solved_vars = BitSet()
 
                 info = inst[:info]
-                @show (stmt, typeof(info))
                 isa(info, MappingInfo) || continue
 
                 callee_result = (info::MappingInfo).result
@@ -595,9 +622,9 @@ function tearing_schedule!(result::DAEIPOResult, ci::CodeInstance, key::TornCach
                     else
                         caller_var = only(rowvals(caller_map.row))-1
                         if caller_var in diff_states && callee_var > callee_result.nexternalvars
-                            push!(callee_diff_states, callee_var)
+                            push!(callee_diff_vars, callee_var)
                         elseif caller_var in alg_states && callee_var > callee_result.nexternalvars
-                            push!(callee_alg_states, callee_var)
+                            push!(callee_alg_vars, callee_var)
                         elseif caller_var in key.param_vars
                             push!(callee_param_vars, callee_var)
                         end
@@ -611,8 +638,7 @@ function tearing_schedule!(result::DAEIPOResult, ci::CodeInstance, key::TornCach
                 callee_final_available = union!(BitSet(1:callee_result.nexternalvars), externally_solved_vars)
                 if !haskey(callee_schedules, SSAValue(i))
                     # This call may not be needed
-                    @show callee_final_available
-                    if isempty(callee_diff_states) && isempty(callee_alg_states) && length(callee_result.total_incidence) == 0
+                    if isempty(callee_diff_vars) && isempty(callee_alg_vars) && length(callee_result.total_incidence) == 0
                         continue
                     end
                     callee_schedules[SSAValue(i)] = Pair{BitSet,BitSet}[callee_final_available => BitSet()]
@@ -626,51 +652,20 @@ function tearing_schedule!(result::DAEIPOResult, ci::CodeInstance, key::TornCach
                 end
 
                 callee_var_schedule = callee_schedules[SSAValue(i)]
-                callee_key = TornCacheKey(callee_diff_states, callee_alg_states, callee_param_vars, callee_var_schedule)
-
-                # Allocate state/equation indices
-                slot_starts = copy(slot_assignments) .+ 1
-
-                # States
-                for callee_var = 1:length(info.result.var_to_diff)
-                    caller_map = info.mapping.var_coeffs[callee_var]
-                    isa(caller_map, Const) && continue
-                    caller_var = only(rowvals(caller_map.row))-1
-
-                    kind = classify_var(info.result.var_to_diff, callee_key, callee_var)
-                    kind === nothing && continue
-                    if kind == AlgebraicDerivative
-                        assign_slot!(UnassignedDiff, invview(result.var_to_diff)[caller_var])
-                    else
-                        assign_slot!(kind, caller_var)
-                    end
-                    callee_var in callee_key.diff_states && push!(diff_states_in_callee, caller_var)
-                end
-
-                # Explicit equations
-                if haskey(callee_eq_mapping, SSAValue(i))
-                    for eq in callee_eq_mapping[SSAValue(i)]
-                        if invview(var_eq_matching)[eq] === unassigned
-                            assign_slot!(Explicit, eq)
-                        end
-                    end
-                end
+                callee_key = TornCacheKey(callee_diff_vars, callee_alg_vars, callee_param_vars, callee_var_schedule)
 
                 callee_codeinst = stmt.args[1]
                 if isa(callee_codeinst, MethodInstance)
                     callee_codeinst = Compiler.get(Compiler.code_cache(interp), callee_codeinst, nothing)
                 end
                 callee_result = structural_analysis!(callee_codeinst, world)
-                @show (callee_codeinst.def, callee_key)
                 callee_sicm_ci = tearing_schedule!(callee_result, callee_codeinst, callee_key, world)
 
                 inst[:type] = Any
                 inst[:flag] = UInt32(0)
                 new_stmt = copy(stmt)
 
-                stmt.args[1] = (stmt.args[1], callee_key,
-                    (slot_starts[i]:slot_assignments[i] for i in
-                        (AssignedDiff, UnassignedDiff, Algebraic, Explicit))...)
+                stmt.args[1] = (stmt.args[1], callee_key)
                 resize!(stmt.args, 1)
 
                 if !isdefined(callee_sicm_ci, :rettype_const)
@@ -729,7 +724,7 @@ function tearing_schedule!(result::DAEIPOResult, ci::CodeInstance, key::TornCach
     end
 
     for eq in 1:nsrcs(structure.graph)
-        if !(eq in scheduled_eqs) && result.eq_callee_mapping[eq] === nothing && result.eqclassification[eq] != External
+        if !(eq in scheduled_eqs) && result.eq_callee_mapping[eq] === nothing && result.eqclassification[eq] != External && result.eqkinds[eq] == Intrinsics.Always
             push!(eq_orders[end], eq)
         end
     end
@@ -821,10 +816,9 @@ function tearing_schedule!(result::DAEIPOResult, ci::CodeInstance, key::TornCach
             error()
         else
             @assert lin_var > result.nexternalvars
-            assgn = get_var_slot_assignment(lin_var)::Tuple
             var_sols[lin_var] = insert_node_here!(compact1,
                 NewInstruction(
-                    Expr(:invoke, nothing, InternalIntrinsics.state, assgn...),
+                    Expr(:invoke, nothing, Intrinsics.variable),
                     Incidence(lin_var),
                     line))
         end
@@ -835,11 +829,6 @@ function tearing_schedule!(result::DAEIPOResult, ci::CodeInstance, key::TornCach
             return
         end
         insert_node_here!(compact1, NewInstruction(Expr(:call, solved_variable, var, curval), Nothing, line))
-        vint = invview(result.var_to_diff)[var]
-        if vint !== nothing && (vint in key.diff_states) && !(var in diff_states_in_callee)
-            (eqnum, _) = get_var_slot_assignment(vint)
-            insert_node_here!(compact1, NewInstruction(Expr(:call, InternalIntrinsics.contribution!, eqnum, StateDiff, curval), Nothing, line))
-        end
     end
 
     isempty(var_schedule) && (var_schedule = Pair{BitSet, BitSet}[BitSet()=>BitSet()])
@@ -889,7 +878,7 @@ function tearing_schedule!(result::DAEIPOResult, ci::CodeInstance, key::TornCach
 
                 new_stmt = copy(eqinst[:stmt])
                 spec = new_stmt.args[1]
-                @assert isa(spec, NTuple{6, Any})
+                @assert isa(spec, NTuple{2, Any})
                 new_stmt.args[1] = (spec..., callee_ordinal)
                 push!(new_stmt.args, in_vars_ssa)
 
@@ -918,8 +907,7 @@ function tearing_schedule!(result::DAEIPOResult, ci::CodeInstance, key::TornCach
                 var = invview(var_eq_matching)[eq]
 
                 incT = result.total_incidence[eq]
-                @show incT
-                anynonlinear = !is_fully_state_linear(incT, key.param_vars)
+                anynonlinear = !is_const_plus_state_linear(incT, key.param_vars)
                 nonlinearssa = nothing
                 if anynonlinear
                     if isa(var, Int) && isa(vars[var], SolvedVariable)
@@ -953,7 +941,7 @@ function tearing_schedule!(result::DAEIPOResult, ci::CodeInstance, key::TornCach
                 else
                     curval = nonlinearssa
                     (curval, thiscoeff) = schedule_incidence!(compact1, var_eq_matching, curval, incT, -1, line; vars=var_sols, schedule_missing_var!)
-                    insert_node_here!(compact1, NewInstruction(Expr(:call, InterinalIntrinsics.contribution!, eq, Explicit, curval), Nothing, line))
+                    insert_node_here!(compact1, NewInstruction(Expr(:call, InternalIntrinsics.contribution!, eq, Explicit, curval), Nothing, line))
                 end
             end
         end
@@ -999,8 +987,7 @@ function tearing_schedule!(result::DAEIPOResult, ci::CodeInstance, key::TornCach
     sicm_ci = cache_dae_ci!(ci, src, debuginfo, sig, SICMSpec(key))
     ccall(:jl_add_codeinst_to_jit, Cvoid, (Any, Any), sicm_ci, src)
 
-    result.sicm_cache[key] = sicm_ci
-    result.tearing_cache[key] = TornIR(ir_sicm, irs)
+    torn_ci = cache_dae_ci!(ci, TornIR(ir_sicm, irs), nothing, sig, TornIRSpec(key))
 
     return sicm_ci
 end

@@ -1,21 +1,26 @@
 using .Intrinsics: Scope
 using Compiler: bbidxiter, isexpr, is_known_call
 
-
-function structural_analysis!(ci::CodeInstance, world::UInt)
-    # Check if we have aleady done this work - if so return the cached result
-    mi = ci.def
+function find_matching_ci(predicate, mi::MethodInstance, world::UInt)
     if isdefined(mi, :cache)
         result_ci = mi.cache
         while true
-            @show typeof(result_ci.owner)
-            if result_ci.min_world <= world && world <= result_ci.max_world &&
-               result_ci.owner === StructureCache()
-                return result_ci.inferred
+            if result_ci.min_world <= world && world <= result_ci.max_world && predicate(result_ci)
+                return result_ci
             end
             isdefined(result_ci, :next) || break
             result_ci = result_ci.next
         end
+    end
+
+    return nothing
+end
+
+function structural_analysis!(ci::CodeInstance, world::UInt)
+    # Check if we have aleady done this work - if so return the cached result
+    result_ci = find_matching_ci(ci->ci.owner == StructureCache(), ci.def, world)
+    if result_ci !== nothing
+        return result_ci.inferred
     end
 
     result = _structural_analysis!(ci, world)
@@ -24,7 +29,6 @@ function structural_analysis!(ci::CodeInstance, world::UInt)
 
     return result
 end
-
 
 function _structural_analysis!(ci::CodeInstance, world::UInt)
     # Variables
@@ -62,7 +66,7 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
     ir = copy(ci.inferred.ir)
 
     # Allocate variable and equation numbers of any incoming arguments
-    refiner = StructuralRefiner(world, var_to_diff, varclassification, eqclassification)
+    refiner = StructuralRefiner(world, var_to_diff, varkinds, varclassification)
     argtypes = Any[make_argument_lattice_elem(Compiler.typeinf_lattice(refiner), Argument(i), argt, add_variable!, add_equation!, add_scope!) for (i, argt) in enumerate(ir.argtypes)]
     nexternalvars = length(var_to_diff)
     nexternaleqs = length(eqssas)
@@ -235,7 +239,6 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
 
     # Now record the association of (::equation)() calls with the equations that they originate from
     total_incidence = Vector{Any}(undef, length(eqssas))
-    @show eqcallssas
     for ssa in eqcallssas
         eqcall = ir[ssa][:inst]
         eqcall === nothing && continue # equation call was on a dead branch - deleted
@@ -271,7 +274,6 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
     # Now go through and incorporate the structural information from any interior calls
     eq_callee_mapping = Vector{Union{Nothing, Vector{Pair{SSAValue, Int}}}}(nothing, length(eqssas))
     handler_info = Compiler.compute_trycatch(ir)
-    display(ir)
     ncallees = 0
     for i = 1:length(ir.stmts)
         inst = ir[SSAValue(i)]
@@ -301,7 +303,7 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
             inst[:info] = MappingInfo(info, result, mapping)
         end
 
-        err = add_internal_equations_to_structure!(refiner, total_incidence, eq_callee_mapping, SSAValue(i),
+        err = add_internal_equations_to_structure!(refiner, eqkinds, eqclassification, total_incidence, eq_callee_mapping, SSAValue(i),
             result, mapping)
         if err !== true
             return UncompilableIPOResult(warnings, UnsupportedIRException(err, ir))
@@ -313,7 +315,6 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
     ultimate_rt, nimplicitoutpairs = process_ipo_return!(Compiler.typeinf_lattice(refiner), ultimate_rt, eqclassification, varclassification,
         var_to_diff, total_incidence, eq_callee_mapping)
 
-    @show total_incidence
     names = OrderedDict{Any, ScopeDictEntry}()
     return DAEIPOResult(ir, ultimate_rt, argtypes,
         nexternalvars,
@@ -325,10 +326,9 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
         varclassification,
         total_incidence, eqclassification, eq_callee_mapping,
         names,
-        warnings,
-        Dict{TornCacheKey, IRCode}(),
-        Dict{TornCacheKey, CodeInstance}(),
-        Dict{TornCacheKey, CodeInstance}())
+        varkinds,
+        eqkinds,
+        warnings)
 end
 
 function process_ipo_return!(𝕃, ultimate_rt::Incidence, eqclassification, varclassification, var_to_diff, total_incidence, eq_callee_mapping)
@@ -338,6 +338,7 @@ function process_ipo_return!(𝕃, ultimate_rt::Incidence, eqclassification, var
         if nonlinrepl === nothing
             nonlinrepl = add_vertex!(var_to_diff)
             push!(varclassification, External)
+            push!(varkinds, Intrinsics.RemovedVar)
             nimplicitoutpairs += 1
         end
         return nonlinrepl
@@ -370,17 +371,17 @@ function process_ipo_return!(𝕃, ultimate_rt::Incidence, eqclassification, var
         push!(total_incidence, Incidence(ultimate_rt.typ, new_eq_row, BitSet()))
         push!(eq_callee_mapping, nothing)
         push!(eqclassification, Owned)
+        push!(eqkinds, Intrinsics.Always)
     end
 
     return ultimate_rt, nimplicitoutpairs
 end
 
-function add_internal_equations_to_structure!(refiner::StructuralRefiner, total_incidence,
+function add_internal_equations_to_structure!(refiner::StructuralRefiner, eqkinds::Vector{Intrinsics.EqKind}, eqclassification::Vector{VarEqClassification}, total_incidence,
         eq_callee_mapping::Vector{Union{Nothing, Vector{Pair{SSAValue, Int}}}}, thisssa::SSAValue, callee_result::DAEIPOResult, callee_mapping::CalleeMapping)
-    (; var_to_diff, varclassification, eqclassification) = refiner
     for i in (callee_result.nexternalvars+1):length(callee_mapping.var_coeffs)
         if !isassigned(callee_mapping.var_coeffs, i)
-            compute_missing_coeff!(callee_mapping.var_coeffs, callee_result, var_to_diff, varclassification, i)
+            compute_missing_coeff!(callee_mapping.var_coeffs, callee_result, refiner.var_to_diff, refiner.varclassification, refiner.varkinds, i)
         end
     end
 
@@ -392,7 +393,7 @@ function add_internal_equations_to_structure!(refiner::StructuralRefiner, total_
     for eq = 1:length(callee_result.eqclassification)
         mapped_eq = callee_mapping.eqs[eq]
         mapped_eq == 0 && continue
-        mapped_inc = apply_linear_incidence(Compiler.typeinf_lattice(refiner), callee_result.total_incidence[eq], callee_result, var_to_diff, varclassification, eqclassification, callee_mapping)
+        mapped_inc = apply_linear_incidence(Compiler.typeinf_lattice(refiner), callee_result.total_incidence[eq], callee_result, refiner.var_to_diff, refiner.varclassification, eqclassification, callee_mapping)
         if isassigned(total_incidence, mapped_eq)
             total_incidence[mapped_eq] = tfunc(Val(Core.Intrinsics.add_float),
                 total_incidence[mapped_eq],
@@ -408,13 +409,14 @@ function add_internal_equations_to_structure!(refiner::StructuralRefiner, total_
 
     for (ieq, inc) in enumerate(callee_result.total_incidence[(callee_result.nexternaleqs+1):end])
         callee_mapping.eqs[ieq] == 0 || continue
-        extinc = apply_linear_incidence(Compiler.typeinf_lattice(refiner), inc, callee_result, var_to_diff, varclassification, eqclassification, callee_mapping)
+        extinc = apply_linear_incidence(Compiler.typeinf_lattice(refiner), inc, callee_result, refiner.var_to_diff, refiner.varclassification, eqclassification, callee_mapping)
         if !isa(extinc, Incidence) && !isa(extinc, Const)
             return "Failed to map internal incidence for equation $ieq (internal result $inc) - got $extinc while processing $thisssa"
         end
         push!(total_incidence, extinc)
         push!(eq_callee_mapping, [thisssa=>ieq])
         push!(eqclassification, CalleeInternal)
+        push!(eqkinds, callee_result.eqkinds[ieq])
         callee_mapping.eqs[ieq] = length(total_incidence)
     end
 

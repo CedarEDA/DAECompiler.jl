@@ -55,7 +55,9 @@ end
 function apply_linear_incidence(𝕃, ret::Eq, result::DAEIPOResult, caller_var_to_diff::DiffGraph, caller_varclassification::Vector{VarEqClassification}, caller_eqclassification::Vector{VarEqClassification}, mapping::CalleeMapping)
     eq_mapping = mapping.eqs[ret.id]
     if eq_mapping == 0
-        push!(caller_eqclassification, Owned)
+        error("I removed these from StructuralRefiner for conceptual reasons - if we hit these, lets revisit")
+        #push!(caller_eqclassification, Owned)
+        #push!(caller_eqkinds, result.eqkinds[ret.id])
         mapping.eqs[ret.id] = eq_mapping = length(caller_eqclassification)
     end
     return Eq(eq_mapping)
@@ -118,7 +120,7 @@ function CalleeMapping(𝕃, argtypes::Vector{Any}, callee_result::DAEIPOResult)
     return CalleeMapping(coeffs, eq_mapping, applied_scopes)
 end
 
-function compute_missing_coeff!(coeffs, result, caller_var_to_diff, caller_varclassification, v)
+function compute_missing_coeff!(coeffs, result, caller_var_to_diff, caller_varclassification, caller_varkind, v)
     # First find the rootvar, and if we already have a coeff for it
     # apply the derivatives.
     ndiffs = 0
@@ -134,12 +136,13 @@ function compute_missing_coeff!(coeffs, result, caller_var_to_diff, caller_varcl
         # it in the caller now
         coeffs[v] = Incidence(add_vertex!(caller_var_to_diff))
         push!(caller_varclassification, result.varclassification[v] == External ? Owned : CalleeInternal)
+        push!(caller_varkind, result.varkinds[v])
     end
     thisinc = coeffs[v]
 
     for _ = 1:ndiffs
         dv = result.var_to_diff[v]
-        coeffs[dv] = structural_inc_ddt(caller_var_to_diff, caller_varclassification, thisinc)
+        coeffs[dv] = structural_inc_ddt(caller_var_to_diff, caller_varclassification, caller_varkind, thisinc)
         v = dv
     end
 
