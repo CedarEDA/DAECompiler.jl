@@ -292,7 +292,9 @@ weakdeps = ["Dates", "LinearAlgebra"]
     CompatLinearAlgebraExt = "LinearAlgebra"
 
 [[deps.Compiler]]
-path = "/home/keno/julia-clean/Compiler/"
+git-tree-sha1 = "aefbd79c2b165891301a254a1a7a5125616e78d0"
+repo-rev = "master"
+repo-url = "https://github.com/CedarEDA/Compiler.jl"
 uuid = "807dbc54-b67e-4c79-8afb-eafe4df6f2e1"
 version = "0.0.3"
 
