@@ -47,7 +47,7 @@ sol = solve(DAECProblem(pantelides, (1,) .=> 0.), DFBDF(autodiff=false))
 @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol.u[:, 1], sol.t))
 
 #= Structural Singularity Removal =#
-function ssm()
+function ssrm()
     a = continuous()
     b = continuous()
     abdot = ddt(a +ᵢ b)
@@ -55,8 +55,8 @@ function ssm()
     always!(b -ᵢ abdot)
 end
 
-ssm()
-sol = solve(DAECProblem(ssm, (1,) .=> 1.), DFBDF(autodiff=false))
+ssrm()
+sol = solve(DAECProblem(ssrm, (1,) .=> 1.), DFBDF(autodiff=false))
 @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol.u[:, 1], exp.(0.5sol.t)))
 
 #= Pantelides from init =#

@@ -235,23 +235,27 @@ function compute_eq_schedule(key::TornCacheKey, result, mss::StateSelection.Matc
     frontier = BitSet()
 
     isempty(var_schedule) && (var_schedule = Pair{BitSet, BitSet}[available=>BitSet()])
+    vargraph = DiCMOBiGraph{true}(structure.graph, var_eq_matching)
+
+    function may_enqueue_frontier_var!(var)
+        isa(var_eq_matching[var], Int) || return
+        (var in available) && return # Already processed
+        (var in frontier) && return # Already queued
+        # Check if this neighbor is ready
+        if all(inn->(inn in available), inneighbors(vargraph, var))
+            push!(frontier, var)
+        end
+    end
 
     for sched in var_schedule
         eq_order = Union{Int, SSAValue}[]
         push!(eq_orders, eq_order)
-        vargraph = DiCMOBiGraph{true}(structure.graph, var_eq_matching)
 
         (in_vars, _) = sched
         union!(available, in_vars)
 
         for neighbor in 1:ndsts(structure.graph)
-            isa(var_eq_matching[neighbor], Int) || continue
-            (neighbor in available) && continue # Already processed
-            (neighbor in frontier) && continue # Already queued
-            # Check if this neighbor is ready
-            if all(inn->(inn in available), inneighbors(vargraph, neighbor))
-                push!(frontier, neighbor)
-            end
+            may_enqueue_frontier_var!(neighbor)
         end
 
         new_available = BitSet()
@@ -347,6 +351,11 @@ function compute_eq_schedule(key::TornCacheKey, result, mss::StateSelection.Matc
 
             if !isempty(new_available)
                 union!(available, new_available)
+                for var in new_available
+                    for neighbor in outneighbors(vargraph, var)
+                        may_enqueue_frontier_var!(neighbor)
+                    end
+                end
                 setdiff!(frontier, new_available)
                 empty!(new_available)
                 continue
@@ -443,7 +452,10 @@ function assign_slots(state::TransformationState, key::TornCacheKey, var_eq_matc
         if kind == AlgebraicDerivative
             var_assignment[i] = kind => slot
         elseif kind == AssignedDiff && var_eq_matching !== nothing
-            eq_assignment[var_eq_matching[state.structure.var_to_diff[i]]] = StateDiff => slot
+            eq = var_eq_matching[state.structure.var_to_diff[i]]
+            if isa(eq, Int)
+                eq_assignment[eq] = StateDiff => slot
+            end
         end
     end
 
@@ -475,7 +487,7 @@ function matching_for_key(result::DAEIPOResult, key::TornCacheKey, structure = m
 
     allow_init_eqs = key.diff_states === nothing
 
-    may_use_var(var) = var > result.nexternalvars && (diff_states === nothing || !(var in diff_states)) && !(var in alg_states) && result.varkinds[var] == Intrinsics.Continuous
+    may_use_var(var) = var > result.nexternalvars && (diff_states === nothing || !(var in diff_states)) && !(var in alg_states) && varkind(result, structure, var) == Intrinsics.Continuous
     may_use_eq(eq) = !(eq in explicit_eqs) && eqclassification(result, structure, eq) != External && eqkind(result, structure, eq) in (allow_init_eqs ? (Intrinsics.Initial, Intrinsics.Always) : (Intrinsics.Always,))
 
     # Max match is the (unique) tearing result given the choice of states
@@ -825,7 +837,7 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
         ir_sicm = Compiler.finish(compact)
     end
 
-    var_sols = Vector{Any}(undef, length(result.var_to_diff))
+    var_sols = Vector{Any}(undef, length(structure.var_to_diff))
 
     for var in key.param_vars
         var_sols[var] = 0.0
@@ -847,7 +859,7 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
     end
 
     function insert_solved_var_here!(compact1, var, curval, line)
-        if result.varclassification[var] != Owned
+        if result.varclassification[basevar(result, structure, var)] != Owned
             return
         end
         insert_node_here!(compact1, NewInstruction(Expr(:call, solved_variable, var, curval), Nothing, line))

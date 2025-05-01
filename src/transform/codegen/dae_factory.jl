@@ -138,7 +138,31 @@ function dae_factory_gen(state::TransformationState, ci::CodeInstance, key::Torn
     insert_node_here!(oc_compact,
         NewInstruction(Expr(:invoke, daef_ci, oc_sicm, (), in_u_mm, in_u_unassgn, in_du_unassgn, in_alg, out_du_mm, out_eq, Argument(6)), Nothing, line))
 
-    # Manually apply mass matrix
+    # TODO: We should not have to recompute this here
+    var_eq_matching = matching_for_key(result, key, state.structure)
+    (slot_assignments, var_assignment, eq_assignment) = assign_slots(state, key, var_eq_matching)
+
+    # Manually apply mass matrix and implicit equations between selected states
+    for v = 1:ndsts(state.structure.graph)
+        vdiff = state.structure.var_to_diff[v]
+        vdiff === nothing && continue
+
+        if var_eq_matching[v] !== SelectedState() || var_eq_matching[vdiff] !== SelectedState()
+            # Solved variables were already handled above
+            continue
+        end
+
+        (kind, slot) = var_assignment[v]
+        (dkind, dslot) = var_assignment[vdiff]
+        @assert kind == AssignedDiff
+        @assert dkind in (AssignedDiff, UnassignedDiff)
+
+        v_val = insert_node_here!(oc_compact,
+            NewInstruction(Expr(:call, Base.getindex, dkind == AssignedDiff ? in_u_mm : in_u_unassgn, dslot), Any, line))
+        insert_node_here!(oc_compact,
+            NewInstruction(Expr(:call, Base.setindex!, out_du_mm, v_val, slot), Any, line))
+    end
+
     bc = insert_node_here!(oc_compact,
         NewInstruction(Expr(:call, Base.Broadcast.broadcasted, -, out_du_mm, du_assgn), Any, line))
     insert_node_here!(oc_compact,

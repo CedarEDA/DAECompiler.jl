@@ -195,7 +195,7 @@ function rhs_finish!(
                 ir[SSAValue(i)][:inst] = Intrinsics.placeholder_equation
             elseif is_solved_variable(stmt)
                 var = stmt.args[end-1]
-                vint = invview(result.var_to_diff)[var]
+                vint = invview(structure.var_to_diff)[var]
                 if vint !== nothing && key.diff_states !== nothing && (vint in key.diff_states) && !(var in diff_states_in_callee)
                     handle_contribution!(ir, inst, StateDiff, var_assignment[vint][2], arg_range, stmt.args[end])
                 else

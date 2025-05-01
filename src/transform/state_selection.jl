@@ -12,7 +12,7 @@ function StateSelection.linear_subsys_adjmat!(state::TransformationState)
     eadj = Vector{Int}[]
     cadj = Vector{Int}[]
     linear_equations = Vector{Int}()
-    for (i, inc) in enumerate(state.result.total_incidence)
+    for (i, inc) in enumerate(state.total_incidence)
         isa(inc, Const) && continue
         any(x->x === nonlinear || !isinteger(x), nonzeros(inc.row)) && continue
         (isa(inc.typ, Const) && iszero(inc.typ.val)) || continue
@@ -56,11 +56,22 @@ function StateSelection.eq_derivative!(state::TransformationState, eq)
     push!(state.total_incidence, structural_inc_ddt(s.var_to_diff, nothing, nothing, state.total_incidence[eq]))
 end
 
+function StateSelection.var_derivative!(state::TransformationState, var)
+    return StateSelection.var_derivative_graph!(state.structure, var)
+end
+
 function baseeq(result, structure, eq)
     while eq > length(result.eqkinds)
         eq = invview(structure.eq_to_diff)[eq]
     end
     return eq
+end
+
+function basevar(result, structure, var)
+    while var > length(result.varkinds)
+        var = invview(structure.var_to_diff)[var]
+    end
+    return var
 end
 
 function eqkind(result, structure, eq)
@@ -72,7 +83,7 @@ function eqclassification(result, structure, eq)
     return result.eqclassification[baseeq(result, structure, eq)]
 end
 
-function structural_transformation!(state::TransformationState)
+function ssrm!(state::TransformationState)
     ils = StateSelection.structural_singularity_removal!(state)
 
     s = state.structure
@@ -82,11 +93,35 @@ function structural_transformation!(state::TransformationState)
         end
         state.total_incidence[e] = Incidence(Const(0.), IncidenceVector(MAX_EQS, map(x->x+1, ils.row_cols[ei]), Union{Float64, NonLinear}[Float64(x) for x in ils.row_vals[ei]]))
     end
+end
 
-    var_eq_matching = StateSelection.pantelides!(state;
-        varfilter = var->state.result.varkinds[var] == Intrinsics.Continuous && !(var <= state.result.nexternalvars),
-        eqfilter  = eq->eqkind(state, eq) == Intrinsics.Always)
-    return StateSelection.complete(var_eq_matching, nsrcs(state.structure.graph))
+function varkind(result, structure, var)
+    while var > length(result.varkinds)
+        var = invview(structure.var_to_diff)[var]
+    end
+    return result.varkinds[var]
+end
+varkind(state, var) = varkind(state.result, state.structure, var)
+
+function structural_transformation!(state::TransformationState)
+    first = true
+    # This loop is required to handle situations where additional structural signularities arise in the differentiated
+    # equations. We could probably do lot better here by not constantly recomputing the datastructures.
+    while true
+        neq_before = length(state.structure.eq_to_diff)
+        var_eq_matching = StateSelection.pantelides!(state;
+            varfilter = var->varkind(state, var) == Intrinsics.Continuous && !(var <= state.result.nexternalvars),
+            eqfilter  = eq->eqkind(state, eq) == Intrinsics.Always)
+
+        differentiated_any = neq_before != length(state.structure.eq_to_diff)
+        if differentiated_any || first
+            ssrm!(state)
+            first = false
+            continue
+        end
+        
+        return StateSelection.complete(var_eq_matching, nsrcs(state.structure.graph))
+    end
 end
 
 using StateSelection: Unassigned, SelectedState, unassigned
@@ -98,14 +133,6 @@ function top_level_state_selection!(tstate)
     highest_diff_max_match = structural_transformation!(tstate)
 
     StateSelection.complete!(structure)
-
-    diffvars = result.varkinds .== Intrinsics.Continuous
-    for param in param_vars
-        diffvars[param] = false
-    end
-
-    @assert length(diffvars) == ndsts(structure.graph) == length(structure.var_to_diff)
-    varwhitelist = StateSelection.computed_highest_diff_variables(structure, diffvars)
 
     ## Part 1: Perform the selection of differential states and subsequent tearing of the
     #          non-linear problem at every time step. 
@@ -134,16 +161,18 @@ function top_level_state_selection!(tstate)
     diff_key = TornCacheKey(diff_vars, alg_vars, param_vars, explicit_eqs, Vector{Pair{BitSet, BitSet}}())
     @assert matching_for_key(result, diff_key, structure) == var_eq_matching
 
+    varfilter(var) = varkind(result, structure, var) == Intrinsics.Continuous && !(var <= result.nexternalvars)
+
     ## Part 2: Perform the selection of differential states and subsequent tearing of the
     #          non-linear problem at every time step. 
     init_var_eq_matching = StateSelection.complete(StateSelection.maximal_matching(structure.graph;
-        dstfilter = var->diffvars[var], srcfilter = eq->eqkind(result, structure, eq) in (Intrinsics.Always, Intrinsics.Initial)), nsrcs(structure.graph))
+        dstfilter = varfilter, srcfilter = eq->eqkind(result, structure, eq) in (Intrinsics.Always, Intrinsics.Initial)), nsrcs(structure.graph))
     init_var_eq_matching = StateSelection.pss_graph_modia!(structure, init_var_eq_matching)
 
     init_state_vars = BitSet()
     init_explicit_eqs = BitSet()
     for (v, match) in enumerate(init_var_eq_matching)
-        diffvars[v] || continue
+        varfilter(v) || continue
         if match === unassigned
             push!(init_state_vars, v)
         end
