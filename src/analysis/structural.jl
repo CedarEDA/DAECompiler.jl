@@ -134,10 +134,10 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
             continue
         elseif isexpr(stmt, :boundscheck)
             ir.stmts[i][:type] = Incidence(Bool)
-            ir.stmts[i][:flag] |= CC.IR_FLAG_REFINED
+            ir.stmts[i][:flag] |= Compiler.IR_FLAG_REFINED
         elseif isa(stmt, PhiNode)
             # Take into account control-dependent taint
-            ir.stmts[i][:flag] |= CC.IR_FLAG_REFINED
+            ir.stmts[i][:flag] |= Compiler.IR_FLAG_REFINED
         elseif isa(stmt, PiNode)
             continue
         elseif isa(stmt, GotoIfNot) || isa(stmt, GotoNode)

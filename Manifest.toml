@@ -2034,7 +2034,7 @@ weakdeps = ["ChainRulesCore"]
 
 [[deps.StateSelection]]
 deps = ["DocStringExtensions", "FindFirstFunctions", "Graphs", "LinearAlgebra", "Setfield", "SparseArrays", "UnPack"]
-git-tree-sha1 = "2a0ed1aab2c5bea031e863da4668dfcffdb7b80d"
+git-tree-sha1 = "18ee9661431e6a2b486444a2ecf8fa161676feb3"
 repo-rev = "main"
 repo-url = "git@github.com:JuliaComputing/StateSelection.jl.git"
 uuid = "64909d44-ed92-46a8-bbd9-f047dfbdc84b"

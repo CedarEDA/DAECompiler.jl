@@ -17,6 +17,7 @@ end
     diff_states::Union{BitSet, Nothing}
     alg_states::BitSet
     param_vars::BitSet
+    explicit_eqs::BitSet
     var_schedule::Vector{Pair{BitSet, BitSet}}
 end
 

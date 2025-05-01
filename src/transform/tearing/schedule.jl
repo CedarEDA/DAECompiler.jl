@@ -91,12 +91,20 @@ function schedule_incidence!(compact, var_eq_matching, curval, incT::Incidence, 
 
         coeff == nonlinear && continue
 
-        if !isassigned(vars, lin_var)
-            schedule_missing_var!(lin_var)
-        end
-        lin_var_ssa = vars[lin_var]
-        if lin_var_ssa === 0.0
-            continue
+        if lin_var == 0
+            lin_var_ssa = insert_node_here!(compact,
+                    NewInstruction(
+                        Expr(:invoke, nothing, Intrinsics.sim_time),
+                        Incidence(0),
+                        line))
+        else
+            if !isassigned(vars, lin_var)
+                schedule_missing_var!(lin_var)
+            end
+            lin_var_ssa = vars[lin_var]
+            if lin_var_ssa === 0.0
+                continue
+            end
         end
 
         acc = ir_mul_const!(compact, line, coeff, lin_var_ssa)
@@ -227,36 +235,42 @@ function compute_eq_schedule(key::TornCacheKey, result, mss::StateSelection.Matc
     frontier = BitSet()
 
     isempty(var_schedule) && (var_schedule = Pair{BitSet, BitSet}[available=>BitSet()])
+    vargraph = DiCMOBiGraph{true}(structure.graph, var_eq_matching)
+
+    function may_enqueue_frontier_var!(var)
+        isa(var_eq_matching[var], Int) || return
+        (var in available) && return # Already processed
+        (var in frontier) && return # Already queued
+        # Check if this neighbor is ready
+        if all(inn->(inn in available), inneighbors(vargraph, var))
+            push!(frontier, var)
+        end
+    end
 
     for sched in var_schedule
         eq_order = Union{Int, SSAValue}[]
         push!(eq_orders, eq_order)
-        vargraph = DiCMOBiGraph{true}(structure.graph, var_eq_matching)
 
         (in_vars, _) = sched
         union!(available, in_vars)
 
         for neighbor in 1:ndsts(structure.graph)
-            isa(var_eq_matching[neighbor], Int) || continue
-            (neighbor in available) && continue # Already processed
-            (neighbor in frontier) && continue # Already queued
-            # Check if this neighbor is ready
-            if all(inn->(inn in available), inneighbors(vargraph, neighbor))
-                push!(frontier, neighbor)
-            end
+            may_enqueue_frontier_var!(neighbor)
         end
 
         new_available = BitSet()
         function schedule_frontier_var!(var; force=false)
             # Find all frontier variables that in a callee that is fully available
             eq = var_eq_matching[var]::Int
-            mapping = result.eq_callee_mapping[eq]
+            eb = baseeq(result, structure, eq)
+            mapping = result.eq_callee_mapping[eb]
             if mapping === nothing
                 # Eq is toplevel, can be scheduled now
                 push!(eq_order, eq)
                 push!(new_available, var)
                 return
             end
+            @assert eq == eb # TODO
 
             # Check if this callee has all its external vars available
             all_callee_vars_available = all(mapping) do (ssa, callee_eq)
@@ -337,6 +351,11 @@ function compute_eq_schedule(key::TornCacheKey, result, mss::StateSelection.Matc
 
             if !isempty(new_available)
                 union!(available, new_available)
+                for var in new_available
+                    for neighbor in outneighbors(vargraph, var)
+                        may_enqueue_frontier_var!(neighbor)
+                    end
+                end
                 setdiff!(frontier, new_available)
                 empty!(new_available)
                 continue
@@ -400,10 +419,11 @@ function classify_var(var_to_diff, key::TornCacheKey, var)
     return kind
 end
 
-function assign_slots(result::DAEIPOResult, key::TornCacheKey, var_eq_matching::Union{StateSelection.Matching, Nothing})
+function assign_slots(state::TransformationState, key::TornCacheKey, var_eq_matching::Union{StateSelection.Matching, Nothing})
+    (; result, structure) = state
     slot_assignments = zeros(Int, Int(LastEquationStateKind))
-    var_assignment = Vector{Union{Nothing, Pair{StateKind, Int}}}(nothing, length(result.var_to_diff))
-    eq_assignment = var_eq_matching === nothing ? nothing : Vector{Union{Nothing, Pair{EquationStateKind, Int}}}(nothing, length(result.total_incidence))
+    var_assignment = Vector{Union{Nothing, Pair{StateKind, Int}}}(nothing, length(structure.var_to_diff))
+    eq_assignment = var_eq_matching === nothing ? nothing : Vector{Union{Nothing, Pair{EquationStateKind, Int}}}(nothing, length(state.total_incidence))
 
     function assign_slot!(kind, varnum)
         @assert kind != AlgebraicDerivative # Always the same assignment as the UnassignedDiff of the vint
@@ -420,24 +440,27 @@ function assign_slots(result::DAEIPOResult, key::TornCacheKey, var_eq_matching::
     end
 
     for i = 1:length(var_assignment)
-        kind = classify_var(result.var_to_diff, key, i)
+        kind = classify_var(state.structure.var_to_diff, key, i)
         kind === nothing && continue
         cache_kind = kind
         varnum = i
         if kind == AlgebraicDerivative
             cache_kind = UnassignedDiff
-            varnum = invview(result.var_to_diff)[varnum]::Int
+            varnum = invview(state.structure.var_to_diff)[varnum]::Int
         end
         slot = assign_slot!(cache_kind, varnum)
         if kind == AlgebraicDerivative
             var_assignment[i] = kind => slot
         elseif kind == AssignedDiff && var_eq_matching !== nothing
-            eq_assignment[var_eq_matching[result.var_to_diff[i]]] = StateDiff => slot
+            eq = var_eq_matching[state.structure.var_to_diff[i]]
+            if isa(eq, Int)
+                eq_assignment[eq] = StateDiff => slot
+            end
         end
     end
 
     if var_eq_matching !== nothing
-        for eq = 1:length(result.total_incidence)
+        for eq = 1:length(state.total_incidence)
             (invview(var_eq_matching)[eq] === unassigned) || continue
             assign_slot!(Explicit, eq)
         end
@@ -460,13 +483,12 @@ struct TornIRSpec
 end
 
 function matching_for_key(result::DAEIPOResult, key::TornCacheKey, structure = make_structure_from_ipo(result))
-    (; diff_states, alg_states, var_schedule) = key
-    varwhitelist = diff_states === nothing ? trues(ndsts(structure.graph)) : StateSelection.computed_highest_diff_variables(structure)
+    (; diff_states, alg_states, explicit_eqs, var_schedule) = key
 
     allow_init_eqs = key.diff_states === nothing
 
-    may_use_var(var) = var > result.nexternalvars && varwhitelist[var] && (diff_states === nothing || !(var in diff_states)) && !(var in alg_states) && result.varkinds[var] == Intrinsics.Continuous
-    may_use_eq(eq) = result.eqclassification[eq] != External && result.eqkinds[eq] in (allow_init_eqs ? (Intrinsics.Initial, Intrinsics.Always) : (Intrinsics.Always,))
+    may_use_var(var) = var > result.nexternalvars && (diff_states === nothing || !(var in diff_states)) && !(var in alg_states) && varkind(result, structure, var) == Intrinsics.Continuous
+    may_use_eq(eq) = !(eq in explicit_eqs) && eqclassification(result, structure, eq) != External && eqkind(result, structure, eq) in (allow_init_eqs ? (Intrinsics.Initial, Intrinsics.Always) : (Intrinsics.Always,))
 
     # Max match is the (unique) tearing result given the choice of states
     var_eq_matching = StateSelection.complete(StateSelection.maximal_matching(structure.graph, Union{Unassigned, SelectedState, StateInvariant, InOut};
@@ -497,14 +519,19 @@ function matching_for_key(result::DAEIPOResult, key::TornCacheKey, structure = m
 end
 
 function tearing_schedule!(result::DAEIPOResult, ci::CodeInstance, key::TornCacheKey, world::UInt)
+    structure = make_structure_from_ipo(result)
+    tstate = TransformationState(result, structure, copy(result.total_incidence))
+    return tearing_schedule!(tstate, ci, key, world)
+end
+
+function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::TornCacheKey, world::UInt)
     result_ci = find_matching_ci(ci->isa(ci.owner, SICMSpec) && ci.owner.key == key, ci.def, world)
     if result_ci !== nothing
         return result_ci
     end
 
     (; diff_states, alg_states, var_schedule) = key
-    structure = make_structure_from_ipo(result)
-    StateSelection.complete!(structure)
+    (; result, structure ) = state
 
     var_eq_matching = matching_for_key(result, key, structure)
 
@@ -601,6 +628,7 @@ function tearing_schedule!(result::DAEIPOResult, ci::CodeInstance, key::TornCach
                 callee_diff_vars = BitSet()
                 callee_alg_vars = BitSet()
                 callee_param_vars = BitSet()
+                callee_explicit_eqs = BitSet()
                 externally_solved_vars = BitSet()
 
                 info = inst[:info]
@@ -635,6 +663,12 @@ function tearing_schedule!(result::DAEIPOResult, ci::CodeInstance, key::TornCach
                     end
                 end
 
+                for (callee_eq, caller_eq) in enumerate(info.mapping.eqs)
+                    if caller_eq in key.explicit_eqs
+                        push!(callee_explicit_eqs, callee_Eq)
+                    end
+                end
+
                 callee_final_available = union!(BitSet(1:callee_result.nexternalvars), externally_solved_vars)
                 if !haskey(callee_schedules, SSAValue(i))
                     # This call may not be needed
@@ -652,7 +686,7 @@ function tearing_schedule!(result::DAEIPOResult, ci::CodeInstance, key::TornCach
                 end
 
                 callee_var_schedule = callee_schedules[SSAValue(i)]
-                callee_key = TornCacheKey(callee_diff_vars, callee_alg_vars, callee_param_vars, callee_var_schedule)
+                callee_key = TornCacheKey(callee_diff_vars, callee_alg_vars, callee_param_vars, callee_explicit_eqs, callee_var_schedule)
 
                 callee_codeinst = stmt.args[1]
                 if isa(callee_codeinst, MethodInstance)
@@ -724,7 +758,7 @@ function tearing_schedule!(result::DAEIPOResult, ci::CodeInstance, key::TornCach
     end
 
     for eq in 1:nsrcs(structure.graph)
-        if !(eq in scheduled_eqs) && result.eq_callee_mapping[eq] === nothing && result.eqclassification[eq] != External && result.eqkinds[eq] == Intrinsics.Always
+        if !(eq in scheduled_eqs) && result.eq_callee_mapping[baseeq(result, structure, eq)] === nothing && eqclassification(result, structure, eq) != External && eqkind(result, structure, eq) == Intrinsics.Always
             push!(eq_orders[end], eq)
         end
     end
@@ -803,7 +837,7 @@ function tearing_schedule!(result::DAEIPOResult, ci::CodeInstance, key::TornCach
         ir_sicm = Compiler.finish(compact)
     end
 
-    var_sols = Vector{Any}(undef, length(result.var_to_diff))
+    var_sols = Vector{Any}(undef, length(structure.var_to_diff))
 
     for var in key.param_vars
         var_sols[var] = 0.0
@@ -825,7 +859,7 @@ function tearing_schedule!(result::DAEIPOResult, ci::CodeInstance, key::TornCach
     end
 
     function insert_solved_var_here!(compact1, var, curval, line)
-        if result.varclassification[var] != Owned
+        if result.varclassification[basevar(result, structure, var)] != Owned
             return
         end
         insert_node_here!(compact1, NewInstruction(Expr(:call, solved_variable, var, curval), Nothing, line))
@@ -898,7 +932,7 @@ function tearing_schedule!(result::DAEIPOResult, ci::CodeInstance, key::TornCach
 
                 for (idx, this_callee_eq) in enumerate(callee_out_eqs)
                     this_eq = callee_eq_mapping[eq][this_callee_eq]
-                    incT = result.total_incidence[this_eq]
+                    incT = state.total_incidence[this_eq]
                     var = invview(var_eq_matching)[this_eq]
                     curval = insert_node_here!(compact1, NewInstruction(eqinst; stmt=Expr(:call, getfield, this_call, idx), type=Any))
                     push!(eqs[this_eq][2], NewSSAValue(curval.id))
@@ -906,7 +940,7 @@ function tearing_schedule!(result::DAEIPOResult, ci::CodeInstance, key::TornCach
             else
                 var = invview(var_eq_matching)[eq]
 
-                incT = result.total_incidence[eq]
+                incT = state.total_incidence[eq]
                 anynonlinear = !is_const_plus_state_linear(incT, key.param_vars)
                 nonlinearssa = nothing
                 if anynonlinear
@@ -970,7 +1004,8 @@ function tearing_schedule!(result::DAEIPOResult, ci::CodeInstance, key::TornCach
         insert_node_here!(compact1, NewInstruction(ReturnNode(eq_resid_ssa), Union{},
             ir[SSAValue(length(ir.stmts))][:line]))
 
-        push!(irs, Compiler.finish(compact1))
+        this_ir = Compiler.finish(compact1)
+        push!(irs, this_ir)
     end
 
     if ir_sicm === nothing

@@ -9,14 +9,22 @@ struct InitUncompressSpec
     ordinal::Int
 end
 
+function gen_init_uncompress!(result::DAEIPOResult, ci::CodeInstance, init_key::TornCacheKey, diff_key::TornCacheKey, world::UInt, ordinal::Int, indexT=Int)
+    structure = make_structure_from_ipo(result)
+    tstate = TransformationState(result, structure, copy(result.total_incidence))
+    return gen_init_uncompress!(tstate, ci, init_key, diff_key, world, ordinal, indexT)
+end
+
 function gen_init_uncompress!(
-        result::DAEIPOResult,
+        state::TransformationState,
         ci::CodeInstance,
         init_key::TornCacheKey,
         diff_key::TornCacheKey,
         world::UInt,
         ordinal::Int,
         indexT=Int)
+
+    (; result, structure) = state
 
     result_ci = find_matching_ci(ci->isa(ci.owner, InitUncompressSpec) && ci.owner.init_key == init_key && ci.owner.diff_key == diff_key && ci.owner.ordinal == ordinal, ci.def, world)
     if result_ci !== nothing
@@ -31,7 +39,7 @@ function gen_init_uncompress!(
     old_daef_mi = nothing
     assigned_slots = falses(length(result.total_incidence))
 
-    (_, diff_slots, _) = assign_slots(result, diff_key, nothing)
+    (_, diff_slots, _) = assign_slots(state, diff_key, nothing)
 
     cis = Vector{CodeInstance}()
     for (ir_ordinal, ir) in enumerate(torn.ir_seq)

@@ -73,19 +73,35 @@ end
 
 #==================== DAECompiler Intrinsic Refinement Models ===========================#
 
-function structural_inc_ddt(var_to_diff::DiffGraph, varclassification::Vector{VarEqClassification}, varkinds::Vector{Intrinsics.VarKind}, inc::Union{Incidence, Const})
+function structural_inc_ddt(var_to_diff::DiffGraph, varclassification::Union{Vector{VarEqClassification}, Nothing}, varkinds::Union{Vector{Intrinsics.VarKind}, Nothing}, inc::Union{Incidence, Const})
     isa(inc, Const) && return Const(zero(inc.val))
     r = _zero_row()
     function get_or_make_diff(v_offset::Int)
         v = v_offset - 1
         var_to_diff[v] !== nothing && return var_to_diff[v] + 1
         dv = add_vertex!(var_to_diff)
-        push!(varclassification, varclassification[v])
-        push!(varkinds, Intrinsics.Continuous)
+        if varclassification !== nothing
+            push!(varclassification, varclassification[v])
+        end
+        if varkinds !== nothing
+            push!(varkinds, Intrinsics.Continuous)
+        end
         add_edge!(var_to_diff, v, dv)
         return dv + 1
     end
+    base = isa(inc.typ, Const) ? Const(zero(inc.typ.val)) : inc.typ
     for (v_offset, coeff) in zip(rowvals(inc.row), nonzeros(inc.row))
+        if v_offset == 1
+            # t
+            if isa(base, Const)
+                if isa(coeff, Float64)
+                    base = Const(base.val + coeff)
+                else
+                    base = widenconst(base)
+                end
+            end
+            continue
+        end
         if isa(coeff, Float64)
             # Linear, just add to the derivative
             r[get_or_make_diff(v_offset)] += coeff
@@ -95,7 +111,7 @@ function structural_inc_ddt(var_to_diff::DiffGraph, varclassification::Vector{Va
             r[get_or_make_diff(v_offset)] = nonlinear
         end
     end
-    return Incidence(isa(inc.typ, Const) ? Const(zero(inc.typ.val)) : inc.typ, r)
+    return Incidence(base, r)
 end
 
 #==================== Base Math Intrinsic Refinement Models ===========================#

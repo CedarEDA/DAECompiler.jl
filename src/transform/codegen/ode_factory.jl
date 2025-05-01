@@ -108,12 +108,6 @@ function ode_factory_gen(result::DAEIPOResult, ci::CodeInstance, key::TornCacheK
     # N.B: The ordering of arguments should match the ordering in the StateKind enum
     @insert_node_here oc_compact line (:invoke)(odef_ci, oc_sicm, (), in_u_mm, in_u_unassgn, in_alg, out_du_mm, out_eq, _5)::Nothing
 
-    # Manually apply mass matrix
-    # bc = insert_node_here!(oc_compact,
-    #     NewInstruction(Expr(:call, Base.Broadcast.broadcasted, -, out_du_mm, du_assgn), Any, line))
-    # insert_node_here!(oc_compact,
-    #     NewInstruction(Expr(:call, Base.Broadcast.materialize!, out_du_mm, bc), Nothing, line))
-
     # Return
     @insert_node_here oc_compact line (return)::Union{}
 
