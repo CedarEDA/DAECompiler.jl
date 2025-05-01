@@ -129,7 +129,7 @@ Base.setindex!(rno::RenameOverlayVector, @nospecialize(val), i::Int) =
 Base.size(rno::RenameOverlayVector) = Base.size(rno.base)
 
 is_state_part_linear(incT::Const, param_vars) = true
-is_state_part_linear(incT, param_vars) = !(any(==(nonlinear), incT.row) || any(x->((x-1) in param_vars), rowvals(incT.row)))
+is_state_part_linear(incT::Incidence, param_vars) = !(any(==(nonlinear), incT.row) || any(x->((x-1) in param_vars), rowvals(incT.row)))
 is_const_plus_state_linear(incT, param_vars) = is_state_part_linear(incT, param_vars) && isa(incT.typ, Const)
 
 is_fully_state_linear(incT, param_vars) = is_const_plus_state_linear(incT, param_vars) && is_fully_state_linear(incT.typ, param_vars)
@@ -155,16 +155,24 @@ function schedule_nonlinear!(compact, param_vars, var_eq_matching, ir, val::Unio
 
     stmt = inst[:stmt]
     info = inst[:info]
+    incT = inst[:type]::Incidence
     if isa(info, Diffractor.FRuleCallInfo)
         info = info.info
     end
-    info::MappingInfo
-    result = info.result
-    extended_rt = result.extended_rt
-    incT = inst[:type]::Incidence
+    call_is_linear = false
+    if isa(info, MappingInfo)
+        result = info.result
+        extended_rt = result.extended_rt
+    else
+        @assert isexpr(stmt, :call)
+        f = argextype(stmt.args[1], ir)
+        @assert isa(f, Const)
+        f = f.val
+        @assert f in (Core.Intrinsics.sub_float, Core.Intrinsics.add_float, Core.Intrinsics.mul_float)
+        call_is_linear = f in (Core.Intrinsics.sub_float, Core.Intrinsics.add_float)
+    end
 
-
-    args = map(zip(Iterators.drop(userefs(stmt), 1), result.argtypes)) do (ur, template_argtype)
+    args = map(enumerate(Iterators.drop(userefs(stmt), 1))) do (i, ur)
         arg = ur[]
         typ = argextype(arg, ir)
         if isa(typ, Const)
@@ -176,11 +184,18 @@ function schedule_nonlinear!(compact, param_vars, var_eq_matching, ir, val::Unio
         if !is_fully_state_linear(typ::Incidence, param_vars)
             this_nonlinear = schedule_nonlinear!(compact, param_vars, var_eq_matching, ir, arg, ssa_rename; vars, schedule_missing_var!)
         else
-            template_v = only(rowvals(template_argtype.row))-1
-            if (extended_rt::Incidence).row[template_v+1] !== nonlinear
-                return nothing
+            if @isdefined(result)
+                template_argtype = result.argtypes[i]
+                template_v = only(rowvals(template_argtype.row))-1
+                if (extended_rt::Incidence).row[template_v+1] !== nonlinear
+                    return nothing
+                end
             end
             this_nonlinear = nothing
+        end
+
+        if call_is_linear
+            return this_nonlinear
         end
 
         return schedule_incidence!(compact, var_eq_matching, this_nonlinear, typ, -1, inst[:line]; vars, schedule_missing_var!)[1]
@@ -538,8 +553,7 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
     mss = StateSelection.MatchedSystemStructure(structure, var_eq_matching)
     (eq_orders, callee_schedules) = compute_eq_schedule(key, result, mss)
 
-    # TODO: This should be the post-AD IR
-    ir = copy(result.ir)
+    ir = index_lowering_ad!(state, key)
 
     # First, schedule any statements that do not have state dependence
     sicm_rename = Vector{Any}(undef, length(ir.stmts))
@@ -723,15 +737,8 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
             elseif stmt === nothing || isa(stmt, ReturnNode)
                 continue
             elseif isexpr(stmt, :call)
-                urs = userefs(stmt)
-                for ur in urs
-                    isa(ur[], SSAValue) || continue
-                    if !isassigned(sicm_rename, ur[].id)
-                        ur[] = 0.
-                        continue
-                    end
-                    ur[] = sicm_rename[ur[].id]
-                end
+                # TODO: Pull this up, if arguments are state-independent
+                continue
             else
                 @show stmt
                 error()
@@ -950,7 +957,7 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
                         for eqcallssa in eqs[eq][2]
                             if !isa(eqcallssa, NewSSAValue)
                                 inst = ir[eqcallssa]
-                                this_nonlinearssa = schedule_nonlinear!(compact1, key.param_vars, var_eq_matching, ir, inst[:stmt].args[3], ssa_rename; vars=var_sols, schedule_missing_var!)
+                                this_nonlinearssa = schedule_nonlinear!(compact1, key.param_vars, var_eq_matching, ir, inst[:stmt].args[end], ssa_rename; vars=var_sols, schedule_missing_var!)
                                 line = ir[eqcallssa][:line]
                             else
                                 # From getfield from a callee

@@ -96,9 +96,12 @@ function structural_inc_ddt(var_to_diff::DiffGraph, varclassification::Union{Vec
             if isa(base, Const)
                 if isa(coeff, Float64)
                     base = Const(base.val + coeff)
+                    # Do not set r[v_offset]; d/dt t = 1
                 else
-                    base = widenconst(base)
+                    r[v_offset] = nonlinear
                 end
+            elseif !isa(coeff, Const)
+                r[v_offset] = nonlinear
             end
             continue
         end
