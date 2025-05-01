@@ -6,7 +6,7 @@ the DAECompiler internal ABI.
 """
 function sciml_ode_split_u!(compact, line, arg, numstates)
     nassgn = numstates[AssignedDiff]
-    ntotalstates = numstates[AssignedDiff] + numstates[UnassignedDiff] + numstates[Algebraic]
+    ntotalstates = numstates[AssignedDiff] + numstates[UnassignedDiff] + numstates[Algebraic] + numstates[AlgebraicDerivative]
 
     u_mm = @insert_node_here compact line view(arg, 1:nassgn)::VectorViewType
     u_unassgn = @insert_node_here compact line view(arg, (nassgn+1):(nassgn+numstates[UnassignedDiff]))::VectorViewType
