@@ -50,7 +50,7 @@ struct ODECProblem{F, I, G, T, K} <: SciMLBase.AbstractODEProblem{Nothing, T, tr
     guesses::G
     tspan::T
     kwargs::K
-    # TODO: `f` and parameters are the same thing, and we derive du0 and u0 from
+    # TODO: `f` and parameters are the same thing, and we derive u0 from
     # `init`, but DiffEqBase accesses this before hitting get_concrete_problem.
     # Can we adjust upstream do make this nicer?
     p::Missing

@@ -70,18 +70,14 @@ function ode_factory_gen(state::TransformationState, ci::CodeInstance, key::Torn
         @assert sicm_ci !== nothing
 
         line = result.ir[SSAValue(1)][:line]
-        #insert_node_here!(compact, NewInstruction(Expr(:call, println, "Trace: A"), Cvoid, line))
-        sicm = insert_node_here!(compact,
-            NewInstruction(Expr(:call, invoke, Argument(3), sicm_ci, (Argument(i+1) for i = 2:length(result.ir.argtypes))...), Tuple, line))
-        #insert_node_here!(compact, NewInstruction(Expr(:call, println, "Trace: B"), Cvoid, line))
+        sicm = @insert_node_here compact line invoke(Argument(3), sicm_ci, (Argument(i+1) for i = 2:length(result.ir.argtypes))...)::Tuple
     else
         sicm = ()
     end
 
     odef_ci = rhs_finish!(state, ci, key, world, 1)
 
-    # Create a small opaque closure to adapt from SciML ABI to our own internal
-    # ABI
+    # Create a small opaque closure to adapt from SciML ABI to our own internal ABI
 
     numstates = zeros(Int, Int(LastEquationStateKind))
 
@@ -106,12 +102,12 @@ function ode_factory_gen(state::TransformationState, ci::CodeInstance, key::Torn
     p = Argument(4)
     t = Argument(5)
 
-    # Zero the output
     line = ir_oc[SSAValue(1)][:line]
 
+    # Zero the output
     @insert_node_here oc_compact line zero!(du)::VectorViewType
 
-    # out_du_mm, out_eq, in_u_mm, in_u_unassgn, in_alg
+    # out_du_mm, out_eq, in_u_mm, in_u_unassgn, in_alg, in_alg_derv
     nassgn = numstates[AssignedDiff]
     ntotalstates = numstates[AssignedDiff] + numstates[UnassignedDiff] + numstates[Algebraic] + numstates[AlgebraicDerivative]
     out_du_mm = @insert_node_here oc_compact line view(du, 1:nassgn)::VectorViewType
