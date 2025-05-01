@@ -88,25 +88,30 @@ function ode_factory_gen(result::DAEIPOResult, ci::CodeInstance, key::TornCacheK
     append!(ir_oc.argtypes, fieldtypes(argt))
 
     oc_compact = IncrementalCompact(ir_oc)
+    self = Argument(1)
+    du = Argument(2)
+    u = Argument(3)
+    p = Argument(4)
+    t = Argument(5)
 
     # Zero the output
     line = ir_oc[SSAValue(1)][:line]
 
-    @insert_node_here oc_compact line zero!(_2)::VectorViewType
+    @insert_node_here oc_compact line zero!(du)::VectorViewType
 
     # out_du_mm, out_eq, in_u_mm, in_u_unassgn, in_alg
     nassgn = numstates[AssignedDiff]
     ntotalstates = numstates[AssignedDiff] + numstates[UnassignedDiff] + numstates[Algebraic]
-    out_du_mm = @insert_node_here oc_compact line view(_2, 1:nassgn)::VectorViewType
-    out_eq = @insert_node_here oc_compact line view(_2, (nassgn+1):ntotalstates)::VectorViewType
+    out_du_mm = @insert_node_here oc_compact line view(du, 1:nassgn)::VectorViewType
+    out_eq = @insert_node_here oc_compact line view(du, (nassgn+1):ntotalstates)::VectorViewType
 
-    (in_u_mm, in_u_unassgn, in_alg) = sciml_ode_split_u!(oc_compact, line, Argument(3), numstates)
+    (in_u_mm, in_u_unassgn, in_alg) = sciml_ode_split_u!(oc_compact, line, u, numstates)
 
     # Call DAECompiler-generated RHS with internal ABI
-    oc_sicm = @insert_node_here oc_compact line getfield(_1, 1)::Tuple
+    oc_sicm = @insert_node_here oc_compact line getfield(self, 1)::Tuple
 
     # N.B: The ordering of arguments should match the ordering in the StateKind enum
-    @insert_node_here oc_compact line (:invoke)(odef_ci, oc_sicm, (), in_u_mm, in_u_unassgn, in_alg, out_du_mm, out_eq, _5)::Nothing
+    @insert_node_here oc_compact line (:invoke)(odef_ci, oc_sicm, (), in_u_mm, in_u_unassgn, in_alg, out_du_mm, out_eq, t)::Nothing
 
     # Return
     @insert_node_here oc_compact line (return)::Union{}

@@ -117,16 +117,10 @@ macro insert_node_here(compact, line, ex, reverse_affinity = false)
     compact = esc(compact)
     line = esc(line)
     type = esc(type)
-    args = map(ex.args) do arg
-        !isa(arg, Symbol) && return arg
-        m = match(r"^_(\d+)$", string(arg))
-        !isnothing(m) && return :(Argument($(parse(Int, m[1]))))
-        return arg
-    end
     if isexpr(ex, :return)
-        inst_ex = :(ReturnNode($(args...)))
+        inst_ex = :(ReturnNode($(ex.args...)))
     else
-        inst_ex = :(Expr($(QuoteNode(ex.head)), $(args...)))
+        inst_ex = :(Expr($(QuoteNode(ex.head)), $(ex.args...)))
     end
     quote
         inst = NewInstruction($(esc(inst_ex)), $type, $line)
