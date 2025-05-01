@@ -47,7 +47,7 @@ end
 """
     dae_factory_gen(ci, key)
 
-Generate the `factory` funciton for CodeInstance `ci`, returning a DAEFunction.
+Generate the `factory` function for CodeInstance `ci`, returning a DAEFunction.
 The resulting function is roughly:
 
 ```

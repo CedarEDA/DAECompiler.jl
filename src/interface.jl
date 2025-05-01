@@ -98,16 +98,18 @@ function factory_gen(world::UInt, source::Method, @nospecialize(_gen), settings,
     # Select differential and algebraic states
     (diff_key, init_key) = top_level_state_selection(result)
 
-    if settings.mode in (DAE, DAENoInit)
+    if settings.mode in (DAE, DAENoInit, ODE, ODENoInit)
         tearing_schedule!(result, ci, diff_key, world)
     end
-    if settings.mode in (InitUncompress, DAE)
+    if settings.mode in (InitUncompress, DAE, ODE)
         tearing_schedule!(result, ci, init_key, world)
     end
 
-    # Generate the IR implementation of `factory`, returning the DAEFunction
+    # Generate the IR implementation of `factory`, returning the DAEFunction/ODEFunction
     if settings.mode in (DAE, DAENoInit)
         ir_factory = dae_factory_gen(result, ci, diff_key, world, settings.mode == DAE ? init_key : nothing)
+    elseif settings.mode in (ODE, ODENoInit)
+        ir_factory = ode_factory_gen(result, ci, diff_key, world, settings.mode == ODE ? init_key : nothing)
     elseif settings.mode == InitUncompress
         ir_factory = init_uncompress_gen(result, ci, init_key, diff_key, world)
     else
@@ -132,6 +134,9 @@ settings.
 
 For `dae`, return a `DAEFunction` suitable for use with DAEProblem.
 The DAEFunction will be specific to the parameterization of `f`.
+
+For `ode`, return an `ODEFunction` suitable for use with ODEProblem.
+The ODEFunction will be specific to the parameterization of `f`.
 
 To obtain a new parameterization, re-run this function. The runtime complexity of this function is
 at most equivalent to one ordinary evaluation of `f`, but this function may have significant
