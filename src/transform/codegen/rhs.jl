@@ -63,14 +63,21 @@ function compute_slot_ranges(info::MappingInfo, callee_key, var_assignment, eq_a
     return state_ranges
 end
 
+function rhs_finish!(result::DAEIPOResult, ci::CodeInstance, key::TornCacheKey, world::UInt, ordinal::Int, indexT=Int)
+    structure = make_structure_from_ipo(result)
+    tstate = TransformationState(result, structure, copy(result.total_incidence))
+    return rhs_finish!(tstate, ci, key, world, ordinal, indexT)
+end
+
 function rhs_finish!(
-    result::DAEIPOResult,
+    state::TransformationState,
     ci::CodeInstance,
     key::TornCacheKey,
     world::UInt,
     ordinal::Int,
     indexT=Int)
 
+    (; result, structure) = state
     result_ci = find_matching_ci(ci->isa(ci.inferred, RHSSpec) && ci.inferred.key == key && ci.inferred.ordinal == ordinal, ci.def, world)
     if result_ci !== nothing
         return result_ci
@@ -78,8 +85,8 @@ function rhs_finish!(
 
     allow_unassigned = false
 
-    var_eq_matching = matching_for_key(result, key)
-    (slot_assignments, var_assignment, eq_assignment) = assign_slots(result, key, var_eq_matching)
+    var_eq_matching = matching_for_key(result, key, state.structure)
+    (slot_assignments, var_assignment, eq_assignment) = assign_slots(state, key, var_eq_matching)
 
     torn_ci = find_matching_ci(ci->isa(ci.owner, TornIRSpec) && ci.owner.key == key, ci.def, world)
     torn = torn_ci.inferred
@@ -175,8 +182,10 @@ function rhs_finish!(
                 which = Argument(arg_range[Int(kind)])
                 replace_call!(ir, SSAValue(i), Expr(:call, Base.getindex, which, slot))
             elseif is_known_invoke_or_call(stmt, InternalIntrinsics.contribution!, ir)
-                slot = stmt.args[end-2]::Int
+                eq = stmt.args[end-2]::Int
                 kind = stmt.args[end-1]::EquationStateKind
+                (eqkind, slot) = eq_assignment[eq]
+                @assert eqkind == kind
                 red = stmt.args[end]
                 handle_contribution!(ir, inst, kind, slot, arg_range, red)
             elseif is_known_invoke(stmt, equation, ir)

@@ -15,63 +15,6 @@ struct Settings
 end
 Settings(; mode::GenerationMode=DAE, force_inline_all::Bool=false) = Settings(mode, force_inline_all)
 
-using StateSelection: Unassigned, SelectedState, unassigned
-function top_level_state_selection(result)
-    # For the top-level problem, all external vars are state-invariant, and we do no other fissioning
-    param_vars = BitSet(1:result.nexternalvars)
-
-    structure = make_structure_from_ipo(result)
-    StateSelection.complete!(structure)
-
-    diffvars = result.varkinds .== Intrinsics.Continuous
-    for param in param_vars
-        diffvars[param] = false
-    end
-
-    @assert length(diffvars) == ndsts(structure.graph)
-    varwhitelist = StateSelection.computed_highest_diff_variables(structure, diffvars)
-
-    ## Part 1: Perform the selection of differential states and subsequent tearing of the
-    #          non-linear problem at every time step. 
-
-    # Max match is the (unique) tearing result given the choice of states
-    var_eq_matching = StateSelection.complete(StateSelection.maximal_matching(structure.graph, Union{Unassigned, SelectedState};
-        dstfilter = var->varwhitelist[var], srcfilter = eq->result.eqkinds[eq] == Intrinsics.Always), nsrcs(structure.graph))
-
-    var_eq_matching = StateSelection.partial_state_selection_graph!(structure, var_eq_matching)
-
-    diff_vars = BitSet()
-    alg_vars = BitSet()
-
-    for (v, match) in enumerate(var_eq_matching)
-        v in param_vars && continue
-        if match === SelectedState()
-            push!(diff_vars, v)
-        elseif match === unassigned
-            push!(alg_vars, v)
-        end
-    end
-
-    diff_key = TornCacheKey(diff_vars, alg_vars, param_vars, Vector{Pair{BitSet, BitSet}}())
-
-    ## Part 2: Perform the selection of differential states and subsequent tearing of the
-    #          non-linear problem at every time step. 
-    init_var_eq_matching = StateSelection.complete(StateSelection.maximal_matching(structure.graph;
-        dstfilter = var->diffvars[var], srcfilter = eq->result.eqkinds[eq] in (Intrinsics.Always, Intrinsics.Initial)))
-    init_var_eq_matching = StateSelection.pss_graph_modia!(structure, init_var_eq_matching)
-
-    init_state_vars = BitSet()
-    for (v, match) in enumerate(init_var_eq_matching)
-        diffvars[v] || continue
-        if match === unassigned
-            push!(init_state_vars, v)
-        end
-    end
-    init_key = TornCacheKey(nothing, init_state_vars, param_vars, Vector{Pair{BitSet, BitSet}}())
-
-    (diff_key, init_key)
-end
-
 """
     factory_gen(world, source, _gen, settings, f)
 
@@ -93,21 +36,23 @@ function factory_gen(world::UInt, source::Method, @nospecialize(_gen), settings,
             @__MODULE__, false)
     end
 
-    # TODO: Pantelides here
-
     # Select differential and algebraic states
-    (diff_key, init_key) = top_level_state_selection(result)
+    structure = make_structure_from_ipo(result)
+    tstate = TransformationState(result, structure, copy(result.total_incidence))
+    (diff_key, init_key) = top_level_state_selection!(tstate)
+
+    # TODO: Index lowering AD here
 
     if settings.mode in (DAE, DAENoInit)
-        tearing_schedule!(result, ci, diff_key, world)
+        tearing_schedule!(tstate, ci, diff_key, world)
     end
     if settings.mode in (InitUncompress, DAE)
-        tearing_schedule!(result, ci, init_key, world)
+        tearing_schedule!(tstate, ci, init_key, world)
     end
 
     # Generate the IR implementation of `factory`, returning the DAEFunction
     if settings.mode in (DAE, DAENoInit)
-        ir_factory = dae_factory_gen(result, ci, diff_key, world, settings.mode == DAE ? init_key : nothing)
+        ir_factory = dae_factory_gen(tstate, ci, diff_key, world, settings.mode == DAE ? init_key : nothing)
     elseif settings.mode == InitUncompress
         ir_factory = init_uncompress_gen(result, ci, init_key, diff_key, world)
     else

@@ -60,7 +60,8 @@ end
 ```
 
 """
-function dae_factory_gen(result::DAEIPOResult, ci::CodeInstance, key::TornCacheKey, world::UInt, init_key::Union{TornCacheKey, Nothing})
+function dae_factory_gen(state::TransformationState, ci::CodeInstance, key::TornCacheKey, world::UInt, init_key::Union{TornCacheKey, Nothing})
+    result = state.result
     torn_ci = find_matching_ci(ci->isa(ci.owner, TornIRSpec) && ci.owner.key == key, ci.def, world)
     torn_ir = torn_ci.inferred
 
@@ -87,7 +88,7 @@ function dae_factory_gen(result::DAEIPOResult, ci::CodeInstance, key::TornCacheK
 
     argt = Tuple{Vector{Float64}, Vector{Float64}, Vector{Float64}, SciMLBase.NullParameters, Float64}
 
-    daef_ci = rhs_finish!(result, ci, key, world, 1)
+    daef_ci = rhs_finish!(state, ci, key, world, 1)
 
     # Create a small opaque closure to adapt from SciML ABI to our own internal
     # ABI

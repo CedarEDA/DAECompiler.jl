@@ -21,6 +21,7 @@ module DAECompiler
     include("analysis/refiner.jl")
     include("analysis/ipoincidence.jl")
     include("analysis/structural.jl")
+    include("transform/state_selection.jl")
     include("transform/common.jl")
     include("transform/runtime.jl")
     include("transform/tearing/schedule.jl")

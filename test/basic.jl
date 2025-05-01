@@ -8,6 +8,7 @@ using SciMLBase
 using OrdinaryDiffEq
 
 # We don't want to test IPO here, so directly call the intrinsic that DAECompiler models
+const +ᵢ = Core.Intrinsics.add_float
 const -ᵢ = Core.Intrinsics.sub_float
 
 #= Simplest possible smoke test; one variable, one equation =#
@@ -20,7 +21,7 @@ oneeq!()
 sol = solve(DAECProblem(oneeq!, (1,) .=> 1.), IDA())
 @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol.u[:, 1], exp.(sol.t)))
 
-#= + Initial Condition =#
+#= Initial Condition =#
 @noinline function oneeq_ic!()
     x = continuous()
     always!(ddt(x) -ᵢ x)
@@ -32,5 +33,37 @@ oneeq_ic!()
 # TODO: Sundials is broken and doesn't respect the custom initialization (https://github.com/SciML/Sundials.jl/issues/469)
 sol = solve(DAECProblem(oneeq_ic!), DFBDF(autodiff=false))
 @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol.u[:, 1], exp.(sol.t)))
+
+#= Pantelides =#
+function pantelides()
+    a = continuous()
+    b = continuous()
+    always!(a -ᵢ sim_time())
+    always!(ddt(a) -ᵢ ddt(b))
+end
+
+pantelides()
+sol = solve(DAECProblem(pantelides, (1,) .=> 0.), DFBDF(autodiff=false))
+@test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol.u[:, 1], sol.t))
+
+#= Structural Singularity Removal =#
+function ssm()
+    a = continuous()
+    b = continuous()
+    abdot = ddt(a +ᵢ b)
+    always!(a -ᵢ abdot)
+    always!(b -ᵢ abdot)
+end
+
+ssm()
+sol = solve(DAECProblem(ssm, (1,) .=> 1.), DFBDF(autodiff=false))
+@test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol.u[:, 1], exp.(0.5sol.t)))
+
+#= Pantelides from init =#
+function pantelides_from_init()
+    always!(y -ᵢ sin(t))
+    always!(ddt(x) -ᵢ y)
+    initial!(x -ᵢ ddt(ddt(y)))
+end
 
 end
