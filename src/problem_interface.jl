@@ -19,20 +19,24 @@ struct DAECProblem{F, I, G, T, K} <: SciMLBase.AbstractDAEProblem{Nothing, Nothi
     du0::Nothing
 end
 
-function DAECProblem(f, init, tspan = (0., 1.); guesses = nothing, kwargs...)
+function DAECProblem(f, init::Union{Vector, Tuple{Vararg{Pair}}}, tspan::Tuple{Real, Real} = (0., 1.); guesses = nothing, kwargs...)
     DAECProblem(f, init, guesses, tspan, kwargs, missing, nothing, nothing)
 end
 
-function DiffEqBase.get_concrete_problem(prob::DAECProblem, isadaptive; kwargs...)
-    # TODO: Refactor all this to use (generated functions?) instead
+function DAECProblem(f, tspan::Tuple{Real, Real} = (0., 1.); guesses = nothing, kwargs...)
+    DAECProblem(f, nothing, guesses, tspan, kwargs, missing, nothing, nothing)
+end
 
-    (daef, differential_vars) = dae_factory(prob.f)
+function DiffEqBase.get_concrete_problem(prob::DAECProblem, isadaptive; kwargs...)
+    (daef, differential_vars) = factory(Val(Settings(mode=prob.init === nothing ? DAE : DAENoInit)), prob.f)
 
     u0 = zeros(length(differential_vars))
     du0 = zeros(length(differential_vars))
 
-    for (which, val) in prob.init
-        u0[which] = val
+    if prob.init !== nothing
+        for (which, val) in prob.init
+            u0[which] = val
+        end
     end
 
     return DiffEqBase.get_concrete_problem(

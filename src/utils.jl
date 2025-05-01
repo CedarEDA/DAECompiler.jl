@@ -1,4 +1,7 @@
-struct StaledOverrideError
+using ExprTools: splitdef
+using Base.Meta: isexpr
+
+struct StaledOverrideError <: Exception
     func
     sig
     loc::LineNumberNode
@@ -9,7 +12,7 @@ function Base.showerror(io::IO, err::StaledOverrideError)
     Base.show_tuple_as_call(io, Symbol(""), tt)
     print(io, " at ", err.loc.file, ":", err.loc.line)
 end
-struct UnexpectedOverloadError
+struct UnexpectedOverloadError <: Exception
     func
     sig
     loc::LineNumberNode
@@ -89,6 +92,11 @@ function extract_type(@nospecialize arg)
     error(lazy"Unknown AST: $arg")
 end
 
-get_params(prob::SciMLBase.AbstractDEProblem) = prob.p
-make_params(prob::SciMLBase.AbstractDEProblem, p) = p
-export get_params, make_params
+macro defintrmethod(name, fdef)
+	esc(quote
+        global $name
+        const $name = begin
+            @Base.__doc__ @Base.Experimental.overlay $(nothing) $fdef
+        end
+    end)
+end

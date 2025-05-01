@@ -2,14 +2,14 @@
 
 using SparseArrays
 
-########################## DAELattice ####################################
+########################## EqStructureLattice ####################################
 """
-    struct DAELattice <: CC.AbstractLattice
+    struct EqStructureLattice <: Compiler.AbstractLattice
 
 This lattice implements the `AbstractLattice` interface. It adjoins `Incidence` and `Eq`.
 
-The DAELattice is one of the key places where DAECompiler extends `Compiler`.
-In compiler parlance, the DAELattice type system can be
+The EqStructureLattice is one of the key places where DAECompiler extends `Compiler`.
+In compiler parlance, the EqStructureLattice type system can be
 thought of as a taint analysis sourced at `variable` (with sinks at `variable`,
 `equation`, etc.). In dynamical systems parlance, one might consider this
 analysis to compute a structural jacobian.
@@ -34,10 +34,10 @@ the taint of %phi depends not only on `%a` and `%b`, but also on the taint of
 the branch condition `%cond`. This is a common feature of taint analysis, but
 is somewhat unusual from the perspective of other Julia type lattices.
 """
-struct DAELattice <: CC.AbstractLattice; end
-CC.widenlattice(::DAELattice) = CC.ConstsLattice()
-CC.is_valid_lattice_norec(::DAELattice, @nospecialize(v)) = isa(v, Incidence) || isa(v, Eq) || isa(v, PartialScope) || isa(v, PartialKeyValue)
-CC.has_extended_unionsplit(::DAELattice) = true
+struct EqStructureLattice <: Compiler.AbstractLattice; end
+Compiler.widenlattice(::EqStructureLattice) = Compiler.ConstsLattice()
+Compiler.is_valid_lattice_norec(::EqStructureLattice, @nospecialize(v)) = isa(v, Incidence) || isa(v, Eq) || isa(v, PartialScope) || isa(v, PartialKeyValue)
+Compiler.has_extended_unionsplit(::EqStructureLattice) = true
 
 ############################## NonLinear #######################################
 
@@ -95,7 +95,7 @@ is_non_incidence_type(@nospecialize(type)) = type === Union{} || Base.issingleto
 """
     struct Incidence
 
-An element of the `DAELattice` that sits between `Const` and `Type` in the
+An element of the `EqStructureLattice` that sits between `Const` and `Type` in the
 lattice hierarchy. In particular, `Const(::T) ⊑ Incidence(T, {...}) ⊑ T`, where
 `{...}` is a set of incidence variables. Lattice operations among the `Incidence`
 elements are defined by subset inclusion. Note that in particular this implies
@@ -108,16 +108,15 @@ struct Incidence
     # the linear combination in `row` will be inhomogeneous.
     typ::Union{Type, Const}
     row::IncidenceVector
-    eps::BitSet
 
-    function Incidence(@nospecialize(type), row, eps::BitSet)
+    function Incidence(@nospecialize(type), row)
         if is_non_incidence_type(type)
             throw(DomainError(type, "Invalid type for Incidence"))
         end
-        return new(type, row, eps)
+        return new(type, row)
     end
 end
-Incidence(row::IncidenceVector, eps::BitSet) = Incidence(Float64, row, eps)
+Incidence(row::IncidenceVector) = Incidence(Float64, row)
 
 function subscript(n::Integer)
     @assert n >= 0
@@ -172,21 +171,15 @@ function Base.show(io::IO, inc::Incidence)
     if !first_nonlinear
         print(io, ")")
     end
-    if !isempty(inc.eps)
-        for (i, var) in enumerate(inc.eps)
-            print_plusminus(io)
-            print(io, "c", subscript(i), "ε", subscript(i))
-        end
-    end
     print(io, ")")
 end
 
 _zero_row() = IncidenceVector(MAX_EQS, Int[], Union{Float64, NonLinear}[])
 const _ZERO_ROW = _zero_row()
 const _ZERO_CONST = Const(0.0)
-Base.zero(::Type{Incidence}) = Incidence(_ZERO_CONST, _zero_row(), BitSet())
-function Incidence(T::Union{Type, CC.Const} = Float64)
-    vec = Incidence(T, _zero_row(), BitSet())
+Base.zero(::Type{Incidence}) = Incidence(_ZERO_CONST, _zero_row())
+function Incidence(T::Union{Type, Compiler.Const} = Float64)
+    vec = Incidence(T, _zero_row())
     vec
 end
 
@@ -203,7 +196,7 @@ Base.:(+)(a::Incidence, b::Const) = tfunc(Val{Core.Intrinsics.add_float}(), a, b
 function Incidence(v::Int)
     row = _zero_row()
     row[v+1] = 1.0
-    return Incidence(_ZERO_CONST, row, BitSet())
+    return Incidence(_ZERO_CONST, row)
 end
 
 "Identify the id number of an equation or variable"
@@ -330,58 +323,58 @@ struct PartialKeyValue
 end
 PartialKeyValue(typ) = PartialKeyValue(typ, typ, IdDict{Any, Any}())
 
-function getkeyvalue_tfunc(𝕃::CC.AbstractLattice,
+function getkeyvalue_tfunc(𝕃::Compiler.AbstractLattice,
         @nospecialize(collection), @nospecialize(key))
     isa(key, Const) || return Tuple{Any}
     if haskey(collection.vals, key.val)
-        return CC.tuple_tfunc(𝕃, Any[collection.vals[key.val]])
+        return Compiler.tuple_tfunc(𝕃, Any[collection.vals[key.val]])
     end
     error()
 end
 
 ######################### AbstractLattice interface ############################
 
-CC.widenconst(inc::Incidence) = widenconst(inc.typ)
-CC.widenconst(::Eq) = equation
-CC.widenconst(::PartialScope) = Scope
-CC.widenconst(pkv::PartialKeyValue) = widenconst(pkv.typ)
-CC.:⊑(inc::Incidence, inc2) = CC.:⊑(inc2, Float64) && !isa(inc2, Const)
+Compiler.widenconst(inc::Incidence) = widenconst(inc.typ)
+Compiler.widenconst(::Eq) = equation
+Compiler.widenconst(::PartialScope) = Scope
+Compiler.widenconst(pkv::PartialKeyValue) = widenconst(pkv.typ)
+Compiler.:⊑(inc::Incidence, inc2) = Compiler.:⊑(inc2, Float64) && !isa(inc2, Const)
 
-function CC._uniontypes(x::Incidence, ts::Vector{Any})
+function Compiler._uniontypes(x::Incidence, ts::Vector{Any})
     u = x.typ
     if isa(u, Union)
-        CC.push!(ts, is_non_incidence_type(u.a) ? u.a : Incidence(u.a, x.row, x.eps))
-        CC.push!(ts, is_non_incidence_type(u.b) ? u.b : Incidence(u.b, x.row, x.eps))
+        Compiler.push!(ts, is_non_incidence_type(u.a) ? u.a : Incidence(u.a, x.row, x.eps))
+        Compiler.push!(ts, is_non_incidence_type(u.b) ? u.b : Incidence(u.b, x.row, x.eps))
         return ts
     else
-        CC.push!(ts, x)
+        Compiler.push!(ts, x)
         return ts
     end
 end
 
-function CC.widenlattice(🥬::DAELattice, ps::CC.PartialStruct)
+function Compiler.widenlattice(🥬::EqStructureLattice, ps::Compiler.PartialStruct)
     wc = widenconst(ps)
     if is_all_inc_or_const(ps.fields)
         widened = aggressive_incidence_join(wc, ps.fields)
         wc !== widened && return widened
     end
-    return CC.widenlattice(CC.widenlattice(🥬), ps)
+    return Compiler.widenlattice(Compiler.widenlattice(🥬), ps)
 end
 
-function CC.:⊑(🥬::CC.PartialsLattice{DAELattice}, @nospecialize(a), @nospecialize(b))
+function Compiler.:⊑(🥬::Compiler.PartialsLattice{EqStructureLattice}, @nospecialize(a), @nospecialize(b))
     if isa(a, PartialStruct)
         if isa(b, Incidence)
             isempty(b) || return false
             bjoin = aggressive_incidence_join(a.typ, a.fields)
             isa(bjoin, Incidence) || return false
             isempty(bjoin) || return false
-            return CC.:⊑(🥬, a, b.typ)
+            return Compiler.:⊑(🥬, a, b.typ)
         end
     end
-    return @invoke CC.:⊑(🥬::CC.PartialsLattice, a::Any, b::Any)
+    return @invoke Compiler.:⊑(🥬::Compiler.PartialsLattice, a::Any, b::Any)
 end
 
-function CC.:⊑(🥬::DAELattice, @nospecialize(a), @nospecialize(b))
+function Compiler.:⊑(🥬::EqStructureLattice, @nospecialize(a), @nospecialize(b))
     if isa(a, PartialKeyValue)
         if isa(b, PartialKeyValue)
             return a.vals === b.vals
@@ -395,7 +388,7 @@ function CC.:⊑(🥬::DAELattice, @nospecialize(a), @nospecialize(b))
         elseif isa(b, Eq)
             return false
         end
-        return CC.:⊑(CC.widenlattice(🥬), widenconst(a), b)
+        return Compiler.:⊑(Compiler.widenlattice(🥬), widenconst(a), b)
     elseif isa(b, Incidence)
         return isa(a, Eq) || a === Union{}
     end
@@ -403,20 +396,20 @@ function CC.:⊑(🥬::DAELattice, @nospecialize(a), @nospecialize(b))
         if isa(b, Eq)
             return a === b
         end
-        return CC.:⊑(CC.widenlattice(🥬), widenconst(a), b)
+        return Compiler.:⊑(Compiler.widenlattice(🥬), widenconst(a), b)
     end
     isa(b, Eq) && return a === Union{}
     if isa(a, PartialScope)
         if isa(b, PartialScope)
             return a === b
         end
-        return CC.:⊑(CC.widenlattice(🥬), widenconst(a), b)
+        return Compiler.:⊑(Compiler.widenlattice(🥬), widenconst(a), b)
     end
     isa(b, PartialScope) && return a === Union{}
-    CC.:⊑(CC.widenlattice(🥬), a, b)
+    Compiler.:⊑(Compiler.widenlattice(🥬), a, b)
 end
 
-function CC.is_lattice_equal(🥬::DAELattice, @nospecialize(a), @nospecialize(b))
+function Compiler.is_lattice_equal(🥬::EqStructureLattice, @nospecialize(a), @nospecialize(b))
     if isa(a, Incidence)
         isa(b, Incidence) || return false
         return a == b
@@ -429,31 +422,31 @@ function CC.is_lattice_equal(🥬::DAELattice, @nospecialize(a), @nospecialize(b
     if isa(a, PartialKeyValue) || isa(b, PartialKeyValue)
         return a === b
     end
-    CC.is_lattice_equal(CC.widenlattice(🥬), a, b)
+    Compiler.is_lattice_equal(Compiler.widenlattice(🥬), a, b)
 end
 
-function CC.tmeet(🥬::DAELattice, @nospecialize(a), @nospecialize(b::Type))
+function Compiler.tmeet(🥬::EqStructureLattice, @nospecialize(a), @nospecialize(b::Type))
     if isa(a, Incidence)
-        meet = CC.tmeet(CC.widenlattice(🥬), a.typ, b)
+        meet = Compiler.tmeet(Compiler.widenlattice(🥬), a.typ, b)
         meet == Union{} && return Union{}
         Base.issingletontype(meet) && return meet
         return Incidence(meet, copy(a.row), copy(a.eps))
     elseif isa(a, Eq)
-        meet = CC.tmeet(CC.widenlattice(🥬), equation, b)
+        meet = Compiler.tmeet(Compiler.widenlattice(🥬), equation, b)
         meet == Union{} && return Union{}
         return a
     elseif isa(a, PartialKeyValue)
-        return PartialKeyValue(CC.tmeet(CC.widenlattice(🥬), a.typ, b),
+        return PartialKeyValue(Compiler.tmeet(Compiler.widenlattice(🥬), a.typ, b),
             a.parent, a.vals)
     elseif isa(a, PartialScope)
-        meet = CC.tmeet(CC.widenlattice(🥬), Scope, b)
+        meet = Compiler.tmeet(Compiler.widenlattice(🥬), Scope, b)
         meet === Union{} && return Union{}
         return a
     end
-    return CC.tmeet(CC.widenlattice(🥬), a, b)
+    return Compiler.tmeet(Compiler.widenlattice(🥬), a, b)
 end
 
-function CC._getfield_tfunc(🥬::DAELattice, @nospecialize(s00), @nospecialize(name), setfield::Bool)
+function Compiler._getfield_tfunc(🥬::EqStructureLattice, @nospecialize(s00), @nospecialize(name), setfield::Bool)
     if isa(name, Incidence)
         name = name.typ
     end
@@ -461,7 +454,7 @@ function CC._getfield_tfunc(🥬::DAELattice, @nospecialize(s00), @nospecialize(
         if s00.typ == Union{}
             return Union{}
         end
-        rt = CC._getfield_tfunc(CC.widenlattice(🥬), s00.typ, name, setfield)
+        rt = Compiler._getfield_tfunc(Compiler.widenlattice(🥬), s00.typ, name, setfield)
         if rt == Union{}
             return Union{}
         end
@@ -470,49 +463,49 @@ function CC._getfield_tfunc(🥬::DAELattice, @nospecialize(s00), @nospecialize(
         end
         return Incidence(rt, copy(s00.row), copy(s00.eps))
     end
-    return CC._getfield_tfunc(CC.widenlattice(🥬), s00, name, setfield)
+    return Compiler._getfield_tfunc(Compiler.widenlattice(🥬), s00, name, setfield)
 end
 
-function CC.has_nontrivial_extended_info(🥬::DAELattice, @nospecialize(a))
+function Compiler.has_nontrivial_extended_info(🥬::EqStructureLattice, @nospecialize(a))
     isa(a, Incidence) && return true
     isa(a, Eq) && return true
     isa(a, PartialScope) && return true
     isa(a, PartialKeyValue) && return true
-    return CC.has_nontrivial_extended_info(CC.widenlattice(🥬), a)
+    return Compiler.has_nontrivial_extended_info(Compiler.widenlattice(🥬), a)
 end
 
-function CC.is_const_prop_profitable_arg(🥬::DAELattice, @nospecialize(a))
+function Compiler.is_const_prop_profitable_arg(🥬::EqStructureLattice, @nospecialize(a))
     isa(a, Incidence) && return true
     isa(a, Eq) && return true
-    return CC.has_nontrivial_extended_info(CC.widenlattice(🥬), a)
+    return Compiler.has_nontrivial_extended_info(Compiler.widenlattice(🥬), a)
 end
 
 # TODO: We really shouldn't propagate Incidence interprocedurally, but ok for now
-function CC.is_forwardable_argtype(🥬::DAELattice, @nospecialize(a))
+function Compiler.is_forwardable_argtype(🥬::EqStructureLattice, @nospecialize(a))
     isa(a, Incidence) && return true
     isa(a, Eq) && return true
-    return CC.is_forwardable_argtype(CC.widenlattice(🥬), a)
+    return Compiler.is_forwardable_argtype(Compiler.widenlattice(🥬), a)
 end
 
-function CC.widenreturn(🥬::DAELattice, @nospecialize(a), info::CC.BestguessInfo)
+function Compiler.widenreturn(🥬::EqStructureLattice, @nospecialize(a), info::Compiler.BestguessInfo)
     isa(a, Incidence) && return a
     isa(a, Eq) && return a
-    return CC.widenreturn(CC.widenlattice(🥬), a, info)
+    return Compiler.widenreturn(Compiler.widenlattice(🥬), a, info)
 end
 
-function CC.widenreturn_noslotwrapper(🥬::DAELattice, @nospecialize(a), info::CC.BestguessInfo)
+function Compiler.widenreturn_noslotwrapper(🥬::EqStructureLattice, @nospecialize(a), info::Compiler.BestguessInfo)
     isa(a, Incidence) && return a
     isa(a, Eq) && return a
-    return CC.widenreturn_noslotwrapper(CC.widenlattice(🥬), a, info)
+    return Compiler.widenreturn_noslotwrapper(Compiler.widenlattice(🥬), a, info)
 end
 
-function CC.tmerge(🥬::DAELattice, @nospecialize(a), @nospecialize(b))
+function Compiler.tmerge(🥬::EqStructureLattice, @nospecialize(a), @nospecialize(b))
     if isa(b, Incidence) && !isa(a, Incidence)
         (a, b) = (b, a)
     end
     if isa(a, Incidence)
         if isa(b, Incidence)
-            merged_typ = CC.tmerge(CC.widenlattice(🥬), a.typ, b.typ)
+            merged_typ = Compiler.tmerge(Compiler.widenlattice(🥬), a.typ, b.typ)
             row = _zero_row()
             for i in union(rowvals(a.row), rowvals(b.row))
                 if a.row[i] == b.row[i]
@@ -524,7 +517,7 @@ function CC.tmerge(🥬::DAELattice, @nospecialize(a), @nospecialize(b))
             return Incidence(merged_typ, row, union(a.eps, b.eps))
         elseif isa(b, Const)
             # Const has no incidence taint
-            typ = CC.tmerge(CC.widenlattice(🥬), a.typ, b)
+            typ = Compiler.tmerge(Compiler.widenlattice(🥬), a.typ, b)
             r = copy(a)
             for i in rowvals(r.row)
                 r.row[i] = nonlinear
@@ -538,7 +531,7 @@ function CC.tmerge(🥬::DAELattice, @nospecialize(a), @nospecialize(b))
         if isa(b, PartialKeyValue)
             if a.vals === b.vals && a.parent === b.parent
                 return PartialKeyValue(
-                    CC.tmerge(CC.widenlattice(🥬), a.typ, b.typ),
+                    Compiler.tmerge(Compiler.widenlattice(🥬), a.typ, b.typ),
                     a.parent, a.vals)
             end
         end
@@ -548,21 +541,21 @@ function CC.tmerge(🥬::DAELattice, @nospecialize(a), @nospecialize(b))
         b = widenconst(b)
     end
     if isa(a, Const) && isa(b, Const)
-        return Incidence(CC.tmerge(CC.widenlattice(🥬), a, b))
+        return Incidence(Compiler.tmerge(Compiler.widenlattice(🥬), a, b))
     end
-    return CC.tmerge(CC.widenlattice(🥬), a, b)
+    return Compiler.tmerge(Compiler.widenlattice(🥬), a, b)
 end
 
-function CC.tmerge_field(🥬::DAELattice, @nospecialize(a), @nospecialize(b))
+function Compiler.tmerge_field(🥬::EqStructureLattice, @nospecialize(a), @nospecialize(b))
     if isa(a, PartialStruct) || isa(b, PartialStruct)
         # TODO: This is non-convergent in general, but we do need to merge any
         #       PartialStructs that have Incidences in them in order to keep our
         #       tracking precise, so let's leave this for the time being until it
         #       causes problems.
         a === b && return a
-        return CC.tmerge_partial_struct(CC.PartialsLattice(🥬), a, b)
+        return Compiler.tmerge_partial_struct(Compiler.PartialsLattice(🥬), a, b)
     else
-        return CC.tmerge(🥬, a, b)
+        return Compiler.tmerge(🥬, a, b)
     end
 end
 
