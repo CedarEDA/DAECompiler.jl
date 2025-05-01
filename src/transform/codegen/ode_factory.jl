@@ -5,22 +5,35 @@ Given an IR value `arg` that corresponds to `u` in SciML's ODE ABI, split it int
 the DAECompiler internal ABI.
 """
 function sciml_ode_split_u!(compact, line, arg, numstates)
-    nassgn = numstates[AssignedDiff]
     ntotalstates = numstates[AssignedDiff] + numstates[UnassignedDiff] + numstates[Algebraic] + numstates[AlgebraicDerivative]
 
-    u_mm = @insert_node_here compact line view(arg, 1:nassgn)::VectorViewType
-    u_unassgn = @insert_node_here compact line view(arg, (nassgn+1):(nassgn+numstates[UnassignedDiff]))::VectorViewType
-    alg = @insert_node_here compact line view(arg, (nassgn+numstates[UnassignedDiff]+1):ntotalstates)::VectorViewType
+    u_mm = @insert_node_here compact line view(arg,
+        1:numstates[AssignedDiff])::VectorViewType
+    u_unassgn = @insert_node_here compact line view(arg,
+        (numstates[AssignedDiff] + 1):(numstates[AssignedDiff] + numstates[UnassignedDiff]))::VectorViewType
+    alg = @insert_node_here compact line view(arg,
+        (numstates[AssignedDiff] + numstates[UnassignedDiff] + 1):(numstates[AssignedDiff] + numstates[UnassignedDiff] + numstates[Algebraic]))::VectorViewType
+    alg_derv = @insert_node_here compact line view(arg,
+        (numstates[AssignedDiff] + numstates[UnassignedDiff] + numstates[Algebraic] + 1):ntotalstates)::VectorViewType
 
-    return (u_mm, u_unassgn, alg)
+    return (u_mm, u_unassgn, alg, alg_derv)
 end
 
-function make_odefunction(f)
-    ODEFunction(f)
+function generate_ode_mass_matrix(nd, na)
+    n = nd + na
+    mass_matrix = zeros(Float64, n, n)
+    for i in 1:nd
+        mass_matrix[i, i] = 1.0
+    end
+    return mass_matrix
 end
 
-function make_odefunction(f, initf)
-    ODEFunction(f; initialization_data = SciMLBase.OverrideInitData(NonlinearProblem((args...)->nothing, nothing, nothing), nothing, initf, nothing, nothing))
+function make_odefunction(f, mass_matrix = LinearAlgebra.I, initf = nothing)
+    ODEFunction(f; mass_matrix, initialization_data = (initf === nothing ? nothing : initialization_data_ode(initf)))
+end
+
+function initialization_data_ode(initf)
+    return SciMLBase.OverrideInitData(NonlinearProblem((args...)->nothing, nothing, nothing), nothing, initf, nothing, nothing)
 end
 
 """
@@ -39,8 +52,8 @@ end
 ```
 
 """
-function ode_factory_gen(result::DAEIPOResult, ci::CodeInstance, key::TornCacheKey, world::UInt, init_key::Union{TornCacheKey, Nothing})
-    @ccall jl_safe_printf("$key\n"::Cstring)::Cvoid
+function ode_factory_gen(state::TransformationState, ci::CodeInstance, key::TornCacheKey, world::UInt, init_key::Union{TornCacheKey, Nothing})
+    result = state.result
     torn_ci = find_matching_ci(ci->isa(ci.owner, TornIRSpec) && ci.owner.key == key, ci.def, world)
     torn_ir = torn_ci.inferred
 
@@ -65,7 +78,7 @@ function ode_factory_gen(result::DAEIPOResult, ci::CodeInstance, key::TornCacheK
         sicm = ()
     end
 
-    odef_ci = rhs_finish!(result, ci, key, world, 1)
+    odef_ci = rhs_finish!(state, ci, key, world, 1)
 
     # Create a small opaque closure to adapt from SciML ABI to our own internal
     # ABI
@@ -76,7 +89,6 @@ function ode_factory_gen(result::DAEIPOResult, ci::CodeInstance, key::TornCacheK
     for var = 1:length(result.var_to_diff)
         kind = classify_var(result.var_to_diff, key, var)
         kind == nothing && continue
-        @ccall jl_safe_printf("$kind\n"::Cstring)::Cvoid
         numstates[kind] += 1
         (kind != AlgebraicDerivative) && push!(all_states, var)
     end
@@ -101,17 +113,17 @@ function ode_factory_gen(result::DAEIPOResult, ci::CodeInstance, key::TornCacheK
 
     # out_du_mm, out_eq, in_u_mm, in_u_unassgn, in_alg
     nassgn = numstates[AssignedDiff]
-    ntotalstates = numstates[AssignedDiff] + numstates[UnassignedDiff] + numstates[Algebraic]
+    ntotalstates = numstates[AssignedDiff] + numstates[UnassignedDiff] + numstates[Algebraic] + numstates[AlgebraicDerivative]
     out_du_mm = @insert_node_here oc_compact line view(du, 1:nassgn)::VectorViewType
     out_eq = @insert_node_here oc_compact line view(du, (nassgn+1):ntotalstates)::VectorViewType
 
-    (in_u_mm, in_u_unassgn, in_alg) = sciml_ode_split_u!(oc_compact, line, u, numstates)
+    (in_u_mm, in_u_unassgn, in_alg, in_alg_derv) = sciml_ode_split_u!(oc_compact, line, u, numstates)
 
     # Call DAECompiler-generated RHS with internal ABI
     oc_sicm = @insert_node_here oc_compact line getfield(self, 1)::Tuple
 
     # N.B: The ordering of arguments should match the ordering in the StateKind enum
-    @insert_node_here oc_compact line (:invoke)(odef_ci, oc_sicm, (), in_u_mm, in_u_unassgn, in_alg, out_du_mm, out_eq, t)::Nothing
+    @insert_node_here oc_compact line (:invoke)(odef_ci, oc_sicm, (), in_u_mm, in_u_unassgn, in_alg, in_alg_derv, out_du_mm, out_eq, t)::Nothing
 
     # Return
     @insert_node_here oc_compact line (return)::Union{}
@@ -129,14 +141,14 @@ function ode_factory_gen(result::DAEIPOResult, ci::CodeInstance, key::TornCacheK
 
     new_oc = @insert_node_here compact line (:new_opaque_closure)(argt, Union{}, Nothing, true, oc_source_method, sicm)::Core.OpaqueClosure true
 
-    if init_key !== nothing
-        initf = init_uncompress_gen!(compact, result, ci, init_key, key, world)
-        odef = @insert_node_here compact line make_odefunction(new_oc, initf)::ODEFunction true
-    else
-        odef = @insert_node_here compact line make_odefunction(new_oc)::ODEFunction true
-    end
+    nd = numstates[AssignedDiff] + numstates[UnassignedDiff]
+    na = numstates[Algebraic] + numstates[AlgebraicDerivative]
+    mass_matrix = na == 0 ? GlobalRef(LinearAlgebra, :I) : @insert_node_here compact line generate_ode_mass_matrix(nd, na)::Matrix{Float64}
+    initf = init_key !== nothing ? init_uncompress_gen!(compact, result, ci, init_key, key, world) : nothing
+    odef = @insert_node_here compact line make_odefunction(new_oc, mass_matrix, initf)::ODEFunction true
 
-    @insert_node_here compact line (return odef)::Core.OpaqueClosure true
+    odef_and_n = @insert_node_here compact line tuple(odef, nd + na)::Tuple true
+    @insert_node_here compact line (return odef_and_n)::Core.OpaqueClosure true
 
     ir_factory = Compiler.finish(compact)
 

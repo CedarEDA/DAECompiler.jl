@@ -66,9 +66,9 @@ function ODECProblem(f, tspan::Tuple{Real, Real} = (0., 1.); guesses = nothing, 
 end
 
 function DiffEqBase.get_concrete_problem(prob::ODECProblem, isadaptive; kwargs...)
-    odef = factory(Val(Settings(mode=prob.init === nothing ? ODE : ODENoInit)), prob.f)
+    (odef, n) = factory(Val(Settings(mode=prob.init === nothing ? ODE : ODENoInit)), prob.f)
 
-    u0 = zeros(length(prob.init))
+    u0 = zeros(n)
 
     if prob.init !== nothing
         for (which, val) in prob.init

@@ -10,6 +10,7 @@ module DAECompiler
     using Core.IR
     using SciMLBase
     using AutoHashEquals
+    using LinearAlgebra: LinearAlgebra
 
     include("utils.jl")
     include("intrinsics.jl")
