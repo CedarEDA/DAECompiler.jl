@@ -29,6 +29,9 @@ module DAECompiler
     include("transform/codegen/init_factory.jl")
     include("transform/codegen/rhs.jl")
     include("transform/codegen/init_uncompress.jl")
+    include("transform/autodiff/ad_common.jl")
+    include("transform/autodiff/ad_runtime.jl")
+    include("transform/autodiff/index_lowering.jl")
     include("interface.jl")
     include("problem_interface.jl")
 end

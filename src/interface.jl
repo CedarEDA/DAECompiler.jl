@@ -41,8 +41,6 @@ function factory_gen(world::UInt, source::Method, @nospecialize(_gen), settings,
     tstate = TransformationState(result, structure, copy(result.total_incidence))
     (diff_key, init_key) = top_level_state_selection!(tstate)
 
-    # TODO: Index lowering AD here
-
     if settings.mode in (DAE, DAENoInit)
         tearing_schedule!(tstate, ci, diff_key, world)
     end

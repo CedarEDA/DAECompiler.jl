@@ -8,6 +8,7 @@ using SciMLBase
 using OrdinaryDiffEq
 
 # We don't want to test IPO here, so directly call the intrinsic that DAECompiler models
+const *ᵢ = Core.Intrinsics.mul_float
 const +ᵢ = Core.Intrinsics.add_float
 const -ᵢ = Core.Intrinsics.sub_float
 
@@ -20,6 +21,17 @@ end
 oneeq!()
 sol = solve(DAECProblem(oneeq!, (1,) .=> 1.), IDA())
 @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol.u[:, 1], exp.(sol.t)))
+
+#= + non-linear =#
+@noinline function oneeq_nl!()
+    x = continuous()
+    t = sim_time()
+    always!(ddt(x) -ᵢ t *ᵢ t)
+end
+
+oneeq_nl!()
+sol = solve(DAECProblem(oneeq_nl!, (1,) .=> 0.), IDA())
+@test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol.u[:, 1], (t->1/3*t^3).(sol.t)))
 
 #= Initial Condition =#
 @noinline function oneeq_ic!()
@@ -61,9 +73,16 @@ sol = solve(DAECProblem(ssrm, (1,) .=> 1.), DFBDF(autodiff=false))
 
 #= Pantelides from init =#
 function pantelides_from_init()
-    always!(y -ᵢ sin(t))
+    x = continuous()
+    y = continuous()
+    t = sim_time()
+    always!(y -ᵢ t *ᵢ t)
     always!(ddt(x) -ᵢ y)
     initial!(x -ᵢ ddt(ddt(y)))
 end
+
+pantelides_from_init()
+# Incompletely implemented
+@test_broken solve(DAECProblem(pantelides_from_init, (1,) .=> 1.), DFBDF(autodiff=false))
 
 end
