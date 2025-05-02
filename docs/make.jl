@@ -36,4 +36,5 @@ deploydocs(
     repo = "github.com/CedarEDA/DAECompiler.jl.git",
     branch = "docs",
     target = "build",
+    push_preview = true,
 )
