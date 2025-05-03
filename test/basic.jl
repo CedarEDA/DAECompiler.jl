@@ -21,6 +21,8 @@ end
 oneeq!()
 sol = solve(DAECProblem(oneeq!, (1,) .=> 1.), IDA())
 @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol.u[:, 1], exp.(sol.t)))
+sol = solve(ODECProblem(oneeq!, (1,) .=> 1.), Rodas5(autodiff=false))
+@test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol.u[:, 1], exp.(sol.t)))
 
 #= + non-linear =#
 @noinline function oneeq_nl!()
@@ -45,6 +47,8 @@ oneeq_ic!()
 # TODO: Sundials is broken and doesn't respect the custom initialization (https://github.com/SciML/Sundials.jl/issues/469)
 sol = solve(DAECProblem(oneeq_ic!), DFBDF(autodiff=false))
 @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol.u[:, 1], exp.(sol.t)))
+sol = solve(ODECProblem(oneeq_ic!), Rodas5(autodiff=false))
+@test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol.u[:, 1], exp.(sol.t)))
 
 #= Pantelides =#
 function pantelides()
@@ -56,6 +60,8 @@ end
 
 pantelides()
 sol = solve(DAECProblem(pantelides, (1,) .=> 0.), DFBDF(autodiff=false))
+@test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol.u[:, 1], sol.t))
+sol = solve(ODECProblem(pantelides, (1,) .=> 0.), Rodas5(autodiff=false))
 @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol.u[:, 1], sol.t))
 
 #= Structural Singularity Removal =#
@@ -69,6 +75,8 @@ end
 
 ssrm()
 sol = solve(DAECProblem(ssrm, (1,) .=> 1.), DFBDF(autodiff=false))
+@test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol.u[:, 1], exp.(0.5sol.t)))
+sol = solve(ODECProblem(ssrm, (1,) .=> 1.), Rodas5(autodiff=false))
 @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol.u[:, 1], exp.(0.5sol.t)))
 
 #= Pantelides from init =#

@@ -100,3 +100,30 @@ macro defintrmethod(name, fdef)
         end
     end)
 end
+
+"""
+    @insert_node_here compact line make_odefunction(f)::ODEFunction
+    @insert_node_here compact line make_odefunction(f)::ODEFunction true
+    @insert_node_here compact line (:invoke)(ci, args...)::Int true
+    @insert_node_here compact line (return x)::Int true
+"""
+macro insert_node_here(compact, line, ex, reverse_affinity = false)
+    isexpr(ex, :(::), 2) || throw(ArgumentError("Expected type-annotated expression, got $ex"))
+    ex, type = ex.args
+    if isexpr(ex, :call) && isa(ex.args[1], QuoteNode)
+        # The called "function" is a non-call `Expr` head
+        ex = Expr(ex.args[1].value, ex.args[2:end]...)
+    end
+    compact = esc(compact)
+    line = esc(line)
+    type = esc(type)
+    if isexpr(ex, :return)
+        inst_ex = :(ReturnNode($(ex.args...)))
+    else
+        inst_ex = :(Expr($(QuoteNode(ex.head)), $(ex.args...)))
+    end
+    quote
+        inst = NewInstruction($(esc(inst_ex)), $type, $line)
+        insert_node_here!($compact, inst, $reverse_affinity)
+    end
+end

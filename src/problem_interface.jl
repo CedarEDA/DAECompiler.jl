@@ -1,6 +1,6 @@
 using SciMLBase, DiffEqBase
 
-export DAECProblem
+export DAECProblem, ODECProblem
 export ▫
 
 const ▫ = Scope()
@@ -41,5 +41,42 @@ function DiffEqBase.get_concrete_problem(prob::DAECProblem, isadaptive; kwargs..
 
     return DiffEqBase.get_concrete_problem(
         DAEProblem(daef, du0, u0, prob.tspan; differential_vars, prob.kwargs...),
+        isadaptive)
+end
+
+struct ODECProblem{F, I, G, T, K} <: SciMLBase.AbstractODEProblem{Nothing, T, true}
+    f::F
+    init::I
+    guesses::G
+    tspan::T
+    kwargs::K
+    # TODO: `f` and parameters are the same thing, and we derive u0 from
+    # `init`, but DiffEqBase accesses this before hitting get_concrete_problem.
+    # Can we adjust upstream do make this nicer?
+    p::Missing
+    u0::Nothing
+end
+
+function ODECProblem(f, init::Union{Vector, Tuple{Vararg{Pair}}}, tspan::Tuple{Real, Real} = (0., 1.); guesses = nothing, kwargs...)
+    ODECProblem(f, init, guesses, tspan, kwargs, missing, nothing)
+end
+
+function ODECProblem(f, tspan::Tuple{Real, Real} = (0., 1.); guesses = nothing, kwargs...)
+    ODECProblem(f, nothing, guesses, tspan, kwargs, missing, nothing)
+end
+
+function DiffEqBase.get_concrete_problem(prob::ODECProblem, isadaptive; kwargs...)
+    (odef, n) = factory(Val(Settings(mode=prob.init === nothing ? ODE : ODENoInit)), prob.f)
+
+    u0 = zeros(n)
+
+    if prob.init !== nothing
+        for (which, val) in prob.init
+            u0[which] = val
+        end
+    end
+
+    return DiffEqBase.get_concrete_problem(
+        ODEProblem(odef, u0, prob.tspan; prob.kwargs...),
         isadaptive)
 end
