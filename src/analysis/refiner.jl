@@ -124,12 +124,10 @@ function tfunc(::Val{Core.Intrinsics.neg_float}, @nospecialize(a::Union{Const, I
         for (i, v) in zip(rowvals(a.row), nonzeros(a.row))
             arow[i] = -v
         end
-        eps = copy(a.eps)
     else
         arow = _zero_row()
-        eps = BitSet()
     end
-    return Incidence(builtin_math_tfunc(Core.Intrinsics.neg_float, isa(a, Incidence) ? a.typ : a), arow, eps)
+    return Incidence(builtin_math_tfunc(Core.Intrinsics.neg_float, isa(a, Incidence) ? a.typ : a), arow)
 end
 
 get_eps(inc::Incidence) = inc.eps
@@ -220,6 +218,38 @@ function tfunc(::Val{Core.Intrinsics.div_float}, @nospecialize(a::Union{Const, T
     return Incidence(builtin_math_tfunc(Core.Intrinsics.div_float, isa(a, Incidence) ? a.typ : a, widenconst(b.typ)), rrow)
 end
 
+function tfunc(::Val{Core.Intrinsics.or_int}, @nospecialize(a::Union{Const, Type, Incidence}), @nospecialize(b::Union{Const, Type, Incidence}))
+    if isa(a, Const) && isa(b, Const)
+        return builtin_math_tfunc(Core.Intrinsics.or_int, a, b)
+    end
+    if !isa(a, Incidence) && !isa(b, Incidence)
+        return builtin_math_tfunc(Core.Intrinsics.or_int, a, b)
+    end
+    rrow = _zero_row()
+    arow = isa(a, Incidence) ? a.row : _ZERO_ROW
+    brow = isa(b, Incidence) ? b.row : _ZERO_ROW
+    for i in Iterators.flatten((rowvals(arow), rowvals(brow)))
+        rrow[i] = nonlinear
+    end
+    return Incidence(builtin_math_tfunc(Core.Intrinsics.or_int, widenconst(a), widenconst(b)), rrow)
+end
+
+function tfunc(::Val{Core.Intrinsics.and_int}, @nospecialize(a::Union{Const, Type, Incidence}), @nospecialize(b::Union{Const, Type, Incidence}))
+    if isa(a, Const) && isa(b, Const)
+        return builtin_math_tfunc(Core.Intrinsics.and_int, a, b)
+    end
+    if !isa(a, Incidence) && !isa(b, Incidence)
+        return builtin_math_tfunc(Core.Intrinsics.and_int, a, b)
+    end
+    rrow = _zero_row()
+    arow = isa(a, Incidence) ? a.row : _ZERO_ROW
+    brow = isa(b, Incidence) ? b.row : _ZERO_ROW
+    for i in Iterators.flatten((rowvals(arow), rowvals(brow)))
+        rrow[i] = nonlinear
+    end
+    return Incidence(builtin_math_tfunc(Core.Intrinsics.and_int, widenconst(a), widenconst(b)), rrow)
+end
+
 function builtin_math_tfunc(@nospecialize(f), @nospecialize(a), @nospecialize(b), @nospecialize(c))
     if isa(a, Const) && isa(b, Const) && isa(c, Const)
         return Const(f(a.val::Float64, b.val::Float64, c.val::Float64))
@@ -277,7 +307,14 @@ is_any_incidence(@nospecialize args...) = any(@nospecialize(x)->isa(x, Incidence
                 (f == Core.Intrinsics.mul_float || f == Core.Intrinsics.div_float) ||
                 f == Core.Intrinsics.copysign_float
                 return tfunc(Val(f), a, b)
-            elseif f == Core.Intrinsics.lt_float
+            elseif f == Core.Intrinsics.or_int
+                return tfunc(Val(f), a, b)
+            elseif f == Core.Intrinsics.and_int
+                return tfunc(Val(f), a, b)
+            elseif f == Core.Intrinsics.fptosi || f == Core.Intrinsics.sitofp
+                # We keep the linearity structure here and absorb the rounding error into be base Int64
+                return Incidence(Compiler.conversion_tfunc(Compiler.typeinf_lattice(interp), widenconst(a), widenconst(b)), b.row)
+            elseif f == Core.Intrinsics.lt_float || f == Core.Intrinsics.eq_float || f == Core.Intrinsics.slt_int
                 r = Compiler.tmerge(Compiler.typeinf_lattice(interp), argtypes[1], argtypes[2])
                 @assert isa(r, Incidence)
                 return Incidence(Bool, r.row)

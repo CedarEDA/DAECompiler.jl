@@ -100,11 +100,11 @@ function process_template!(𝕃, coeffs, eq_mapping, applied_scopes, argtypes, t
             if isa(arg, PartialStruct)
                 fields = arg.fields
             else
-                fields = Any[getfield_tfunc(𝕃, arg, Const(i)) for i = 1:length(template.fields)]
+                fields = Any[Compiler.getfield_tfunc(𝕃, arg, Const(i)) for i = 1:length(template.fields)]
             end
             process_template!(𝕃, coeffs, eq_mapping, applied_scopes, fields, template.fields)
         else
-            @show (arg, template)
+            @show (arg, template, template_argtypes)
             error()
         end
     end

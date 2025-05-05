@@ -170,7 +170,8 @@ function schedule_nonlinear!(compact, param_vars, var_eq_matching, ir, val::Unio
         f = f.val
         @assert f in (Core.Intrinsics.sub_float, Core.Intrinsics.add_float,
                       Core.Intrinsics.mul_float, Core.Intrinsics.copysign_float,
-                      Core.ifelse)
+                      Core.ifelse, Core.Intrinsics.or_int, Core.Intrinsics.and_int)
+        # TODO: or_int is linear in Bool
         call_is_linear = f in (Core.Intrinsics.sub_float, Core.Intrinsics.add_float)
     end
 

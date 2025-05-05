@@ -298,8 +298,8 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
                 return result
             end
 
-            argtypes = Compiler.collect_argtypes(refiner, stmt.args, Compiler.StatementState(nothing, false), irsv)[2:end]
-            mapping = CalleeMapping(Compiler.optimizer_lattice(refiner), argtypes, result)
+            callee_argtypes = Compiler.collect_argtypes(refiner, stmt.args, Compiler.StatementState(nothing, false), irsv)[2:end]
+            mapping = CalleeMapping(Compiler.optimizer_lattice(refiner), callee_argtypes, result)
             inst[:info] = MappingInfo(info, result, mapping)
         end
 

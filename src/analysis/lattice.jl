@@ -188,7 +188,7 @@ function Incidence(T::PartialStruct)
 end
 
 Base.:(==)(a::Incidence, b::Incidence) = a.typ === b.typ &&
-    a.row.nzind == b.row.nzind && a.row.nzval == b.row.nzval && a.eps == b.eps
+    a.row.nzind == b.row.nzind && a.row.nzval == b.row.nzval
 Base.:(+)(a::Incidence, b::Incidence) = tfunc(Val{Core.Intrinsics.add_float}(), a, b)
 Base.:(+)(a::Const, b::Incidence) = tfunc(Val{Core.Intrinsics.add_float}(), a, b)
 Base.:(+)(a::Incidence, b::Const) = tfunc(Val{Core.Intrinsics.add_float}(), a, b)
@@ -210,8 +210,8 @@ function epsnum(a::Incidence)
     return only(a.eps)
 end
 
-Base.copy(inc::Incidence) = Incidence(inc.typ, copy(inc.row), copy(inc.eps))
-Base.isempty(inc::Incidence) = iszero(inc.row) && isempty(inc.eps)  # slightly weaker than iszero as that also requires it to be Const(0.0)
+Base.copy(inc::Incidence) = Incidence(inc.typ, copy(inc.row))
+Base.isempty(inc::Incidence) = iszero(inc.row) # slightly weaker than iszero as that also requires it to be Const(0.0)
 
 #################################### Eq ########################################
 struct Eq
