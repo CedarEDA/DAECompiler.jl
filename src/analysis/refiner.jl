@@ -118,7 +118,7 @@ function structural_inc_ddt(var_to_diff::DiffGraph, varclassification::Union{Vec
 end
 
 #==================== Base Math Intrinsic Refinement Models ===========================#
-function tfunc(::Val{Core.Intrinsics.neg_float}, @nospecialize(a::Union{Const, Incidence}))
+function tfunc(F::Union{Val{Core.Intrinsics.neg_float}, Val{Core.Intrinsics.neg_int}}, @nospecialize(a::Union{Const, Incidence}))
     if isa(a, Incidence)
         arow = copy(a.row)
         for (i, v) in zip(rowvals(a.row), nonzeros(a.row))
@@ -127,36 +127,36 @@ function tfunc(::Val{Core.Intrinsics.neg_float}, @nospecialize(a::Union{Const, I
     else
         arow = _zero_row()
     end
-    return Incidence(builtin_math_tfunc(Core.Intrinsics.neg_float, isa(a, Incidence) ? a.typ : a), arow)
+    return Incidence(builtin_math_tfunc(typeof(F).parameters[1], isa(a, Incidence) ? a.typ : a), arow)
 end
 
 get_eps(inc::Incidence) = inc.eps
 get_eps(c::Const) = BitSet()
 get_eps(::Type) = error()
 
-function tfunc(::Val{Core.Intrinsics.add_float}, @nospecialize(a::Union{Const, Type{Float64}, Incidence}), @nospecialize(b::Union{Const, Type{Float64}, Incidence}))
+function tfunc(F::Union{Val{Core.Intrinsics.add_float}, Val{Core.Intrinsics.add_int}}, @nospecialize(a::Union{Const, Type{Float64}, Incidence}), @nospecialize(b::Union{Const, Type{Float64}, Incidence}))
     if a === Float64 || b === Float64
         return Float64
     end
-    isa(a, Const) && isa(b, Const) && return builtin_math_tfunc(Core.Intrinsics.add_float, a, b)
+    isa(a, Const) && isa(b, Const) && return builtin_math_tfunc(typeof(F).parameters[1], a, b)
     arow = isa(a, Incidence) ? a.row : _ZERO_ROW
     brow = isa(b, Incidence) ? b.row : _ZERO_ROW
     rrow = copy(arow) .+= brow
-    const_val = builtin_math_tfunc(Core.Intrinsics.add_float, isa(a, Incidence) ? a.typ : a, isa(b, Incidence) ? b.typ : b)
+    const_val = builtin_math_tfunc(typeof(F).parameters[1], isa(a, Incidence) ? a.typ : a, isa(b, Incidence) ? b.typ : b)
     if isa(const_val, Const) && !any(!iszero, rrow)
         return const_val
     end
     return Incidence(const_val, rrow)
 end
 
-function tfunc(::Val{Core.Intrinsics.sub_float}, @nospecialize(a::Union{Const, Incidence}), @nospecialize(b::Union{Const, Incidence}))
-    isa(a, Const) && isa(b, Const) && return builtin_math_tfunc(Core.Intrinsics.sub_float, a, b)
+function tfunc(F::Union{Val{Core.Intrinsics.sub_float}, Val{Core.Intrinsics.sub_int}}, @nospecialize(a::Union{Const, Incidence}), @nospecialize(b::Union{Const, Incidence}))
+    isa(a, Const) && isa(b, Const) && return builtin_math_tfunc(typeof(F).parameters[1], a, b)
     arow = isa(a, Incidence) ? a.row : _ZERO_ROW
     brow = isa(b, Incidence) ? b.row : _ZERO_ROW
     # return Incidence(a.row + b.row), but see https://github.com/JuliaArrays/OffsetArrays.jl/issues/299
     # and https://github.com/JuliaSparse/SparseArrays.jl/issues/101
     rrow = copy(arow) .-= brow
-    const_val = builtin_math_tfunc(Core.Intrinsics.sub_float, isa(a, Incidence) ? a.typ : a, isa(b, Incidence) ? b.typ : b)
+    const_val = builtin_math_tfunc(typeof(F).parameters[1], isa(a, Incidence) ? a.typ : a, isa(b, Incidence) ? b.typ : b)
     if isa(const_val, Const) && !any(!iszero, rrow)
         return const_val
     end
@@ -218,12 +218,12 @@ function tfunc(::Val{Core.Intrinsics.div_float}, @nospecialize(a::Union{Const, T
     return Incidence(builtin_math_tfunc(Core.Intrinsics.div_float, isa(a, Incidence) ? a.typ : a, widenconst(b.typ)), rrow)
 end
 
-function tfunc(::Val{Core.Intrinsics.or_int}, @nospecialize(a::Union{Const, Type, Incidence}), @nospecialize(b::Union{Const, Type, Incidence}))
+function generic_math_twoarg(f, @nospecialize(a::Union{Const, Type, Incidence}), @nospecialize(b::Union{Const, Type, Incidence}))
     if isa(a, Const) && isa(b, Const)
-        return builtin_math_tfunc(Core.Intrinsics.or_int, a, b)
+        return builtin_math_tfunc(f, a, b)
     end
     if !isa(a, Incidence) && !isa(b, Incidence)
-        return builtin_math_tfunc(Core.Intrinsics.or_int, a, b)
+        return builtin_math_tfunc(f, a, b)
     end
     rrow = _zero_row()
     arow = isa(a, Incidence) ? a.row : _ZERO_ROW
@@ -231,7 +231,19 @@ function tfunc(::Val{Core.Intrinsics.or_int}, @nospecialize(a::Union{Const, Type
     for i in Iterators.flatten((rowvals(arow), rowvals(brow)))
         rrow[i] = nonlinear
     end
-    return Incidence(builtin_math_tfunc(Core.Intrinsics.or_int, widenconst(a), widenconst(b)), rrow)
+    return Incidence(builtin_math_tfunc(f, widenconst(a), widenconst(b)), rrow)
+end
+
+
+function generic_math_onearg(f, @nospecialize(a::Union{Const, Type, Incidence}))
+    if isa(a, Const) || !isa(a, Incidence)
+        return builtin_math_tfunc(f, a)
+    end
+    rrow = _zero_row()
+    for i in rowvals(a.row)
+        rrow[i] = nonlinear
+    end
+    return Incidence(builtin_math_tfunc(f, widenconst(a)), rrow)
 end
 
 function tfunc(::Val{Core.Intrinsics.and_int}, @nospecialize(a::Union{Const, Type, Incidence}), @nospecialize(b::Union{Const, Type, Incidence}))
@@ -292,11 +304,44 @@ is_any_incidence(@nospecialize args...) = any(@nospecialize(x)->isa(x, Incidence
         @nospecialize(f), argtypes::Vector{Any}, sv::Union{Compiler.AbsIntState,Nothing})
 
     bargtypes = argtypes
+
+    if f === Core.getfield
+        if length(argtypes) == 1 || length(argtypes) > 4
+            return Union{}
+        end
+    
+        a = argtypes[1]
+        b = argtypes[2]
+
+        if isa(a, Const)
+            if isa(b, Const)
+                return Compiler.getfield_tfunc(Compiler.typeinf_lattice(interp), a, b)
+            elseif isa(b, Incidence)
+                fT = Compiler.getfield_tfunc(Compiler.typeinf_lattice(interp), a, widenconst(b))
+                fT === Union{} && return Union{}
+                Base.issingletontype(fT) && return fT
+                return Incidence(fT, copy(b.row))
+            end
+            return Compiler.getfield_tfunc(Compiler.typeinf_lattice(interp), a, b)
+        elseif isa(a, Incidence)
+            fT = Compiler.getfield_tfunc(Compiler.typeinf_lattice(interp), widenconst(a), b)
+            fT === Union{} && return Union{}
+            Base.issingletontype(fT) && return fT
+            return Incidence(fT, copy(a.row))
+        end
+        return Compiler.getfield_tfunc(Compiler.typeinf_lattice(interp), a, b)
+    end
+    
     if length(argtypes) == 1
+        if f === Core.Intrinsics.have_fma
+            return Incidence(Bool)
+        end
         a = argtypes[1]
         if is_any_incidence(a)
-            if f == Core.Intrinsics.neg_float
+            if f == Core.Intrinsics.neg_float || f === Core.Intrinsics.neg_int
                 return tfunc(Val(f), a)
+            elseif f === Core.Intrinsics.ctlz_int || f === Core.Intrinsics.not_int || f === Core.Intrinsics.abs_float
+                return generic_math_onearg(f, a)
             end
         end
     elseif length(argtypes) == 2
@@ -304,26 +349,19 @@ is_any_incidence(@nospecialize args...) = any(@nospecialize(x)->isa(x, Incidence
         b = argtypes[2]
         if is_any_incidence(a, b)
             if (f == Core.Intrinsics.add_float || f == Core.Intrinsics.sub_float) ||
+                (f == Core.Intrinsics.add_int || f == Core.Intrinsics.sub_int) ||
                 (f == Core.Intrinsics.mul_float || f == Core.Intrinsics.div_float) ||
                 f == Core.Intrinsics.copysign_float
                 return tfunc(Val(f), a, b)
-            elseif f == Core.Intrinsics.or_int
-                return tfunc(Val(f), a, b)
-            elseif f == Core.Intrinsics.and_int
-                return tfunc(Val(f), a, b)
-            elseif f == Core.Intrinsics.fptosi || f == Core.Intrinsics.sitofp
+            elseif f in (Core.Intrinsics.or_int, Core.Intrinsics.and_int, Core.Intrinsics.xor_int, Core.Intrinsics.shl_int, Core.Intrinsics.lshr_int, Core.Intrinsics.flipsign_int)
+                return generic_math_twoarg(f, a, b)
+            elseif f == Core.Intrinsics.fptosi || f == Core.Intrinsics.sitofp || f == Core.Intrinsics.bitcast || f == Core.Intrinsics.trunc_int || f == Core.Intrinsics.zext_int || f == Core.Intrinsics.sext_int
                 # We keep the linearity structure here and absorb the rounding error into be base Int64
                 return Incidence(Compiler.conversion_tfunc(Compiler.typeinf_lattice(interp), widenconst(a), widenconst(b)), b.row)
-            elseif f == Core.Intrinsics.lt_float || f == Core.Intrinsics.eq_float || f == Core.Intrinsics.slt_int
+            elseif f == Core.Intrinsics.lt_float || f == Core.Intrinsics.ne_float || f == Core.Intrinsics.eq_float || f == Core.Intrinsics.slt_int || f == Core.Intrinsics.sle_int || f == Core.Intrinsics.ult_int || f == Core.Intrinsics.ule_int || f == Core.Intrinsics.eq_int || f == Base.:(===)
                 r = Compiler.tmerge(Compiler.typeinf_lattice(interp), argtypes[1], argtypes[2])
                 @assert isa(r, Incidence)
                 return Incidence(Bool, r.row)
-            elseif f === Core.getfield && isa(a, Incidence)
-                a = argtypes[1]
-                fT = Compiler.getfield_tfunc(Compiler.typeinf_lattice(interp), widenconst(a), argtypes[2])
-                fT === Union{} && return Union{}
-                Base.issingletontype(fT) && return fT
-                return Incidence(fT, copy(a.row))
             end
         end
     elseif length(argtypes) == 3
@@ -331,7 +369,7 @@ is_any_incidence(@nospecialize args...) = any(@nospecialize(x)->isa(x, Incidence
         b = argtypes[2]
         c = argtypes[3]
         if is_any_incidence(a, b, c)
-            if f === Core.Intrinsics.muladd_float
+            if f === Core.Intrinsics.muladd_float || f === Core.Intrinsics.fma_float
                 # TODO: muladd vs fma here?
                 if is_any_incidence(a, b)
                     x = tfunc(Val(Core.Intrinsics.mul_float), a, b)

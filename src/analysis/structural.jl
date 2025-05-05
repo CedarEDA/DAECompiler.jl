@@ -279,6 +279,9 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
         inst = ir[SSAValue(i)]
         stmt = inst[:stmt]
         stmt === nothing && continue
+        # No need to process error paths - even if they were to contain intrinsics, such intrinsics would have
+        # no effect.
+        inst[:type] === Union{} && continue
         isexpr(stmt, :invoke) || continue
         is_known_invoke(stmt, variable, ir) && continue
         is_known_invoke(stmt, equation, ir) && continue

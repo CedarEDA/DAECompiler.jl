@@ -106,7 +106,7 @@ function schedule_incidence!(compact, var_eq_matching, curval, incT::Incidence, 
                 continue
             end
         end
-
+\
         acc = ir_mul_const!(compact, line, coeff, lin_var_ssa)
         curval = curval === nothing ? acc : ir_add!(compact, line, curval, acc)
     end
@@ -170,8 +170,10 @@ function schedule_nonlinear!(compact, param_vars, var_eq_matching, ir, val::Unio
         f = f.val
         @assert f in (Core.Intrinsics.sub_float, Core.Intrinsics.add_float,
                       Core.Intrinsics.mul_float, Core.Intrinsics.copysign_float,
-                      Core.ifelse, Core.Intrinsics.or_int, Core.Intrinsics.and_int)
+                      Core.ifelse, Core.Intrinsics.or_int, Core.Intrinsics.and_int,
+                      Core.Intrinsics.fma_float, Core.Intrinsics.muladd_float)
         # TODO: or_int is linear in Bool
+        # TODO: {fma, muladd}_float is linear in one of its arguments
         call_is_linear = f in (Core.Intrinsics.sub_float, Core.Intrinsics.add_float)
     end
 
@@ -184,7 +186,7 @@ function schedule_nonlinear!(compact, param_vars, var_eq_matching, ir, val::Unio
 
         # TODO: SICM
 
-        if !is_fully_state_linear(typ::Incidence, param_vars)
+        if !is_const_plus_state_linear(typ::Incidence, param_vars)
             this_nonlinear = schedule_nonlinear!(compact, param_vars, var_eq_matching, ir, arg, ssa_rename; vars, schedule_missing_var!)
         else
             if @isdefined(result)
@@ -204,7 +206,7 @@ function schedule_nonlinear!(compact, param_vars, var_eq_matching, ir, val::Unio
         return schedule_incidence!(compact, var_eq_matching, this_nonlinear, typ, -1, inst[:line]; vars, schedule_missing_var!)[1]
     end
 
-    if is_fully_state_linear(incT, param_vars)
+    if is_const_plus_state_linear(incT, param_vars)
         # TODO: This needs to do a proper template match
         ret = schedule_incidence!(compact, var_eq_matching, nothing, info.result.extended_rt, -1, inst[:line]; vars=
             [arg === nothing ? 0.0 : arg for arg in args[2:end]])[1]
