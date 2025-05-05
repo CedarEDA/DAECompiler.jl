@@ -88,12 +88,23 @@ end
     error(lazy"Could not find single target method for `$sig`")
 end
 
-function ad_typeinf(world, tt; force_inline_all=false)
-    @assert !force_inline_all
-    interp = ADAnalyzer(;world)
+function get_method_instance(@nospecialize(tt), world)
     match = Base._methods_by_ftype(tt, 1, world)
     isempty(match) && single_match_error(tt)
     match = only(match)
     mi = Compiler.specialize_method(match)
+end
+
+function ad_typeinf(world, tt; force_inline_all=false, edges=nothing)
+    @assert !force_inline_all
+    interp = ADAnalyzer(;world)
+    mi = get_method_instance(tt, world)
     ci = Compiler.typeinf_ext(interp, mi, Compiler.SOURCE_MODE_ABI)
+    if edges !== nothing
+        prev = @atomic ci.edges
+        # XXX: Should we return the extended edges and use them in the other CodeInstances?
+        @atomic ci.edges = Core.svec(prev..., edges...)
+        Compiler.store_backedges(ci, edges)
+    end
+    ci
 end

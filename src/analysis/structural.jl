@@ -16,21 +16,21 @@ function find_matching_ci(predicate, mi::MethodInstance, world::UInt)
     return nothing
 end
 
-function structural_analysis!(ci::CodeInstance, world::UInt)
+function structural_analysis!(ci::CodeInstance, world::UInt, edges::SimpleVector)
     # Check if we have aleady done this work - if so return the cached result
     result_ci = find_matching_ci(ci->ci.owner == StructureCache(), ci.def, world)
     if result_ci !== nothing
         return result_ci.inferred
     end
 
-    result = _structural_analysis!(ci, world)
+    result = _structural_analysis!(ci, world, edges)
     # TODO: The world bounds might have been narrowed
-    cache_dae_ci!(ci, result, nothing, nothing, StructureCache())
+    cache_dae_ci!(ci, result, nothing, nothing, StructureCache(), edges)
 
     return result
 end
 
-function _structural_analysis!(ci::CodeInstance, world::UInt)
+function _structural_analysis!(ci::CodeInstance, world::UInt, edges::SimpleVector)
     # Variables
     var_to_diff = DiffGraph(0)
     varclassification = VarEqClassification[]
@@ -291,7 +291,7 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
             (; result, mapping) = info
         else
             callee_codeinst = stmt.args[1]
-            result = structural_analysis!(callee_codeinst, Compiler.get_inference_world(refiner))
+            result = structural_analysis!(callee_codeinst, Compiler.get_inference_world(refiner), edges)
 
             if isa(result, UncompilableIPOResult)
                 # TODO: Stack trace?

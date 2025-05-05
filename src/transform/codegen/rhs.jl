@@ -63,10 +63,10 @@ function compute_slot_ranges(info::MappingInfo, callee_key, var_assignment, eq_a
     return state_ranges
 end
 
-function rhs_finish!(result::DAEIPOResult, ci::CodeInstance, key::TornCacheKey, world::UInt, ordinal::Int, indexT=Int)
+function rhs_finish!(result::DAEIPOResult, ci::CodeInstance, key::TornCacheKey, world::UInt, ordinal::Int, edges::SimpleVector, indexT=Int)
     structure = make_structure_from_ipo(result)
     tstate = TransformationState(result, structure, copy(result.total_incidence))
-    return rhs_finish!(tstate, ci, key, world, ordinal, indexT)
+    return rhs_finish!(tstate, ci, key, world, ordinal, edges, indexT)
 end
 
 function rhs_finish!(
@@ -75,6 +75,7 @@ function rhs_finish!(
     key::TornCacheKey,
     world::UInt,
     ordinal::Int,
+    edges::SimpleVector,
     indexT=Int)
 
     (; result, structure) = state
@@ -145,8 +146,8 @@ function rhs_finish!(
                 spec_data = stmt.args[1]
                 callee_key = spec_data[2]
                 callee_ordinal = spec_data[end]::Int
-                callee_result = structural_analysis!(callee_ci, world)
-                callee_daef_ci = rhs_finish!(callee_result, callee_ci, callee_key, world, callee_ordinal)
+                callee_result = structural_analysis!(callee_ci, world, edges)
+                callee_daef_ci = rhs_finish!(callee_result, callee_ci, callee_key, world, callee_ordinal, edges)
                 # Allocate a continuous block of variables for all callee alg and diff states
 
                 empty!(stmt.args)
@@ -218,7 +219,7 @@ function rhs_finish!(
         src = ir_to_src(ir)
 
         abi = Tuple{Tuple, Tuple, (VectorViewType for _ in arg_range)..., Float64}
-        daef_ci = cache_dae_ci!(ci, src, src.debuginfo, abi, RHSSpec(key, ir_ordinal))
+        daef_ci = cache_dae_ci!(ci, src, src.debuginfo, abi, RHSSpec(key, ir_ordinal), edges)
         ccall(:jl_add_codeinst_to_jit, Cvoid, (Any, Any), daef_ci, src)
 
         push!(cis, daef_ci)

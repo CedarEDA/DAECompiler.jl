@@ -49,7 +49,9 @@ Compiler.cache_owner(::StructuralRefiner) = StructureCache()
     end
 
     callee_codeinst = invokee
-    callee_result = structural_analysis!(callee_codeinst, Compiler.get_inference_world(interp))
+    # XXX: We should propagate edges down here too.
+    edges = Core.svec()
+    callee_result = structural_analysis!(callee_codeinst, Compiler.get_inference_world(interp), edges)
 
     if isa(callee_result, UncompilableIPOResult) || isa(callee_result.extended_rt, Const) || isa(callee_result.extended_rt, Type)
         # If this is uncompilable, we will be notfiying the user in the outer loop - here we just ignore it

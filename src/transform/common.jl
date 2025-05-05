@@ -63,10 +63,11 @@ function ir_to_src(ir::IRCode)
     return src
 end
 
-function cache_dae_ci!(old_ci, src, debuginfo, abi, owner)
+function cache_dae_ci!(old_ci, src, debuginfo, abi, owner, edges::SimpleVector)
     daef_ci = CodeInstance(abi === nothing ? old_ci.def : Core.ABIOverride(abi, old_ci.def), owner, Tuple, Union{}, nothing, src, Int32(0),
         UInt(1)#=ci.min_world=#, old_ci.max_world, old_ci.ipo_purity_bits,
-        nothing, debuginfo, Compiler.empty_edges)
+        nothing, debuginfo, edges)
+    Compiler.store_backedges(daef_ci, edges)
     ccall(:jl_mi_cache_insert, Cvoid, (Any, Any), old_ci.def, daef_ci)
     return daef_ci
 end
