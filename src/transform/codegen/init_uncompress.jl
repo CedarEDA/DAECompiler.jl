@@ -120,6 +120,7 @@ function gen_init_uncompress!(
 
             if is_known_invoke(stmt, variable, ir) || is_equation_call(stmt, ir)
                 display(ir)
+                @show stmt
                 error()
             elseif is_known_invoke(stmt, equation, ir)
                 # Equation - used, but only as an arg to equation call, which will all get

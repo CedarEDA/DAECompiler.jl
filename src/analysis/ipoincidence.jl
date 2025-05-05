@@ -167,7 +167,7 @@ function _make_argument_lattice_elem(𝕃, which::Argument, @nospecialize(argt),
         return argt
     elseif Compiler.isprimitivetype(argt)
         inc = Incidence(add_variable!(which))
-        return argt === Float64 ? inc : Incidence(argt, inc.row, inc.eps)
+        return argt === Float64 ? inc : Incidence(argt, inc.row)
     elseif isa(argt, PartialStruct)
         return PartialStruct(𝕃, argt.typ, Any[make_argument_lattice_elem(𝕃, which, f, add_variable!, add_equation!, add_scope!) for f in argt.fields])
     elseif isabstracttype(argt) || ismutabletype(argt) || !isa(argt, DataType)

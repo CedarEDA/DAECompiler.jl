@@ -168,7 +168,9 @@ function schedule_nonlinear!(compact, param_vars, var_eq_matching, ir, val::Unio
         f = argextype(stmt.args[1], ir)
         @assert isa(f, Const)
         f = f.val
-        @assert f in (Core.Intrinsics.sub_float, Core.Intrinsics.add_float, Core.Intrinsics.mul_float)
+        @assert f in (Core.Intrinsics.sub_float, Core.Intrinsics.add_float,
+                      Core.Intrinsics.mul_float, Core.Intrinsics.copysign_float,
+                      Core.ifelse)
         call_is_linear = f in (Core.Intrinsics.sub_float, Core.Intrinsics.add_float)
     end
 

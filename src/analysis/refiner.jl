@@ -184,6 +184,22 @@ function tfunc(::Val{Core.Intrinsics.mul_float}, @nospecialize(a::Union{Const, T
     return Incidence(builtin_math_tfunc(Core.Intrinsics.mul_float, a.typ, b.typ), rrow)
 end
 
+function tfunc(::Val{Core.Intrinsics.copysign_float}, @nospecialize(a::Union{Const, Type{Float64}, Incidence}), @nospecialize(b::Union{Const, Type{Float64}, Incidence}))
+    if a === Float64 || b === Float64
+        return Float64
+    end
+    if isa(a, Const) && isa(b, Const)
+        return builtin_math_tfunc(Core.Intrinsics.copysign_float, a, b)
+    end
+    rrow = _zero_row()
+    arow = isa(a, Incidence) ? a.row : _ZERO_ROW
+    brow = isa(b, Incidence) ? b.row : _ZERO_ROW
+    for i in Iterators.flatten((rowvals(arow), rowvals(brow)))
+        rrow[i] = nonlinear
+    end
+    return Incidence(builtin_math_tfunc(Core.Intrinsics.copysign_float, widenconst(a), widenconst(b)), rrow)
+end
+
 function tfunc(::Val{Core.Intrinsics.div_float}, @nospecialize(a::Union{Const, Type{Float64}, Incidence}), @nospecialize(b::Union{Const, Type{Float64}, Incidence}))
     if isa(a, Const) && isa(b, Const)
         return builtin_math_tfunc(Core.Intrinsics.div_float, a, b)
@@ -258,18 +274,19 @@ is_any_incidence(@nospecialize args...) = any(@nospecialize(x)->isa(x, Incidence
         b = argtypes[2]
         if is_any_incidence(a, b)
             if (f == Core.Intrinsics.add_float || f == Core.Intrinsics.sub_float) ||
-                (f == Core.Intrinsics.mul_float || f == Core.Intrinsics.div_float)
+                (f == Core.Intrinsics.mul_float || f == Core.Intrinsics.div_float) ||
+                f == Core.Intrinsics.copysign_float
                 return tfunc(Val(f), a, b)
             elseif f == Core.Intrinsics.lt_float
-                r = tmerge(typeinf_lattice(interp), argtypes[1], argtypes[2])
+                r = Compiler.tmerge(Compiler.typeinf_lattice(interp), argtypes[1], argtypes[2])
                 @assert isa(r, Incidence)
-                return Incidence(Bool, r.row, r.eps)
+                return Incidence(Bool, r.row)
             elseif f === Core.getfield && isa(a, Incidence)
                 a = argtypes[1]
-                fT = getfield_tfunc(typeinf_lattice(interp), widenconst(a), argtypes[2])
+                fT = Compiler.getfield_tfunc(Compiler.typeinf_lattice(interp), widenconst(a), argtypes[2])
                 fT === Union{} && return Union{}
                 Base.issingletontype(fT) && return fT
-                return Incidence(fT, copy(a.row), copy(a.eps))
+                return Incidence(fT, copy(a.row))
             end
         end
     elseif length(argtypes) == 3
@@ -297,7 +314,19 @@ is_any_incidence(@nospecialize args...) = any(@nospecialize(x)->isa(x, Incidence
                         return c
                     end
                 end
-                # TODO: tmergea
+                rt = Compiler.tmerge(Compiler.typeinf_lattice(interp), b, c)
+                if isa(rt, Incidence)
+                    if isa(a, Incidence)
+                        rrow = copy(rt.row)
+                        for i in rowvals(a.row)
+                            rrow[i] = nonlinear
+                        end
+                        rt = Incidence(rt.typ, rrow)
+                    else
+                        rt = widenconst(rt)
+                    end
+                end
+                return rt
             end
         end
     end

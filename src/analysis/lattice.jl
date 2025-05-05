@@ -430,7 +430,7 @@ function Compiler.tmeet(🥬::EqStructureLattice, @nospecialize(a), @nospecializ
         meet = Compiler.tmeet(Compiler.widenlattice(🥬), a.typ, b)
         meet == Union{} && return Union{}
         Base.issingletontype(meet) && return meet
-        return Incidence(meet, copy(a.row), copy(a.eps))
+        return Incidence(meet, copy(a.row))
     elseif isa(a, Eq)
         meet = Compiler.tmeet(Compiler.widenlattice(🥬), equation, b)
         meet == Union{} && return Union{}
@@ -514,7 +514,7 @@ function Compiler.tmerge(🥬::EqStructureLattice, @nospecialize(a), @nospeciali
                     row[i] = nonlinear
                 end
             end
-            return Incidence(merged_typ, row, union(a.eps, b.eps))
+            return Incidence(merged_typ, row)
         elseif isa(b, Const)
             # Const has no incidence taint
             typ = Compiler.tmerge(Compiler.widenlattice(🥬), a.typ, b)
@@ -522,7 +522,7 @@ function Compiler.tmerge(🥬::EqStructureLattice, @nospecialize(a), @nospeciali
             for i in rowvals(r.row)
                 r.row[i] = nonlinear
             end
-            return Incidence(typ, r.row, copy(a.eps))
+            return Incidence(typ, r.row)
         else
             a = widenconst(a)
         end
