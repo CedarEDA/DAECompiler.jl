@@ -30,8 +30,8 @@ trivialeq!() = always!(ddt(continuous()))
   @test ci !== nothing
 
   cached = get_cached_code_instances(mi)
-  @test getproperty.(cached, :max_world) == fill(typemax(UInt), length(cached))
   world_before = Base.get_world_counter()
+  @test getproperty.(cached, :max_world) == fill(typemax(UInt), length(cached))
   refresh()
   @test getproperty.(cached, :max_world) == fill(world_before, length(cached))
 
@@ -43,4 +43,4 @@ trivialeq!() = always!(ddt(continuous()))
   @test ci !== nothing
 
   @test length(get_cached_code_instances(mi)) == 2 * length(cached)
-end
+end;

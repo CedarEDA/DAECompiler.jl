@@ -10,6 +10,7 @@ struct StructuralRefiner <: Compiler.AbstractInterpreter
     var_to_diff::DiffGraph
     varkinds::Vector{Intrinsics.VarKind}
     varclassification::Vector{VarEqClassification}
+    edges::SimpleVector
 end
 
 struct StructureCache; end
@@ -49,9 +50,7 @@ Compiler.cache_owner(::StructuralRefiner) = StructureCache()
     end
 
     callee_codeinst = invokee
-    # XXX: We should propagate edges down here too.
-    edges = Core.svec()
-    callee_result = structural_analysis!(callee_codeinst, Compiler.get_inference_world(interp), edges)
+    callee_result = structural_analysis!(callee_codeinst, Compiler.get_inference_world(interp), interp.edges)
 
     if isa(callee_result, UncompilableIPOResult) || isa(callee_result.extended_rt, Const) || isa(callee_result.extended_rt, Type)
         # If this is uncompilable, we will be notfiying the user in the outer loop - here we just ignore it

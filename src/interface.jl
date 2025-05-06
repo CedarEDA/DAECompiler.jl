@@ -23,11 +23,11 @@ This is the compile-time entry point for DAECompiler code generation. It drives 
 function factory_gen(world::UInt, source::Method, @nospecialize(_gen), settings, @nospecialize(fT))
     settings = settings.parameters[1]
     factory_mi = get_method_instance(Tuple{typeof(factory),Val{settings},typeof(fT)}, world)
-    edges = Core.svec(factory_mi)
 
     # First, perform ordinary type inference, under the assumption that we may need to AD
     # parts of the function later.
-    ci = ad_typeinf(world, Tuple{fT}; force_inline_all=settings.force_inline_all, edges)
+    ci = ad_typeinf(world, Tuple{fT}; force_inline_all=settings.force_inline_all, edges=Core.svec(factory_mi))
+    edges = Core.svec(ci)
 
     # Perform or lookup DAECompiler specific analysis for this system.
     result = structural_analysis!(ci, world, edges)

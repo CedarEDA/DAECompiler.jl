@@ -66,7 +66,7 @@ function _structural_analysis!(ci::CodeInstance, world::UInt, edges::SimpleVecto
     ir = copy(ci.inferred.ir)
 
     # Allocate variable and equation numbers of any incoming arguments
-    refiner = StructuralRefiner(world, var_to_diff, varkinds, varclassification)
+    refiner = StructuralRefiner(world, var_to_diff, varkinds, varclassification, Core.svec(ci))
     argtypes = Any[make_argument_lattice_elem(Compiler.typeinf_lattice(refiner), Argument(i), argt, add_variable!, add_equation!, add_scope!) for (i, argt) in enumerate(ir.argtypes)]
     nexternalvars = length(var_to_diff)
     nexternaleqs = length(eqssas)

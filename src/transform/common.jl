@@ -67,9 +67,17 @@ function cache_dae_ci!(old_ci, src, debuginfo, abi, owner, edges::SimpleVector)
     daef_ci = CodeInstance(abi === nothing ? old_ci.def : Core.ABIOverride(abi, old_ci.def), owner, Tuple, Union{}, nothing, src, Int32(0),
         UInt(1)#=ci.min_world=#, old_ci.max_world, old_ci.ipo_purity_bits,
         nothing, debuginfo, edges)
-    Compiler.store_backedges(daef_ci, edges)
+    add_backedges_to_callees(daef_ci, edges)
     ccall(:jl_mi_cache_insert, Cvoid, (Any, Any), old_ci.def, daef_ci)
     return daef_ci
+end
+
+# Equivalent to `Compiler.store_backedges` in our case, but we allow `caller.def.def` to not be a `Method`.
+function add_backedges_to_callees(caller::CodeInstance, edges::SimpleVector)
+    for edge in edges
+        isa(edge, CodeInstance) && (edge = edge.def)
+        ccall(:jl_method_instance_add_backedge, Cvoid, (Any, Any, Any), edge::MethodInstance, nothing, caller)
+    end
 end
 
 function replace_call!(ir::Union{IRCode,IncrementalCompact}, idx::SSAValue, new_call::Expr)
