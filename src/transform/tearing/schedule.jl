@@ -536,13 +536,13 @@ function matching_for_key(result::DAEIPOResult, key::TornCacheKey, structure = m
     return var_eq_matching
 end
 
-function tearing_schedule!(result::DAEIPOResult, ci::CodeInstance, key::TornCacheKey, world::UInt, edges::SimpleVector)
+function tearing_schedule!(result::DAEIPOResult, ci::CodeInstance, key::TornCacheKey, world::UInt)
     structure = make_structure_from_ipo(result)
     tstate = TransformationState(result, structure, copy(result.total_incidence))
-    return tearing_schedule!(tstate, ci, key, world, edges)
+    return tearing_schedule!(tstate, ci, key, world)
 end
 
-function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::TornCacheKey, world::UInt, edges::SimpleVector)
+function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::TornCacheKey, world::UInt)
     result_ci = find_matching_ci(ci->isa(ci.owner, SICMSpec) && ci.owner.key == key, ci.def, world)
     if result_ci !== nothing
         return result_ci
@@ -709,8 +709,8 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
                 if isa(callee_codeinst, MethodInstance)
                     callee_codeinst = Compiler.get(Compiler.code_cache(interp), callee_codeinst, nothing)
                 end
-                callee_result = structural_analysis!(callee_codeinst, world, edges)
-                callee_sicm_ci = tearing_schedule!(callee_result, callee_codeinst, callee_key, world, edges)
+                callee_result = structural_analysis!(callee_codeinst, world)
+                callee_sicm_ci = tearing_schedule!(callee_result, callee_codeinst, callee_key, world)
 
                 inst[:type] = Any
                 inst[:flag] = UInt32(0)
@@ -1029,10 +1029,10 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
         debuginfo = src.debuginfo
     end
 
-    sicm_ci = cache_dae_ci!(ci, src, debuginfo, sig, SICMSpec(key), edges)
+    sicm_ci = cache_dae_ci!(ci, src, debuginfo, sig, SICMSpec(key))
     ccall(:jl_add_codeinst_to_jit, Cvoid, (Any, Any), sicm_ci, src)
 
-    torn_ci = cache_dae_ci!(ci, TornIR(ir_sicm, irs), nothing, sig, TornIRSpec(key), edges)
+    torn_ci = cache_dae_ci!(ci, TornIR(ir_sicm, irs), nothing, sig, TornIRSpec(key))
 
     return sicm_ci
 end

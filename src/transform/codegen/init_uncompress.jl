@@ -9,10 +9,10 @@ struct InitUncompressSpec
     ordinal::Int
 end
 
-function gen_init_uncompress!(result::DAEIPOResult, ci::CodeInstance, init_key::TornCacheKey, diff_key::TornCacheKey, world::UInt, ordinal::Int, edges::SimpleVector, indexT=Int)
+function gen_init_uncompress!(result::DAEIPOResult, ci::CodeInstance, init_key::TornCacheKey, diff_key::TornCacheKey, world::UInt, ordinal::Int, indexT=Int)
     structure = make_structure_from_ipo(result)
     tstate = TransformationState(result, structure, copy(result.total_incidence))
-    return gen_init_uncompress!(tstate, ci, init_key, diff_key, world, ordinal, edges, indexT)
+    return gen_init_uncompress!(tstate, ci, init_key, diff_key, world, ordinal, indexT)
 end
 
 function gen_init_uncompress!(
@@ -22,7 +22,6 @@ function gen_init_uncompress!(
         diff_key::TornCacheKey,
         world::UInt,
         ordinal::Int,
-        edges::SimpleVector,
         indexT=Int)
 
     (; result, structure) = state
@@ -98,8 +97,8 @@ function gen_init_uncompress!(
                 spec_data = stmt.args[1]
                 callee_key = stmt.args[1][2]
                 callee_ordinal = stmt.args[1][end]::Int
-                callee_result = structural_analysis!(callee_ci, world, edges)
-                callee_daef_ci = rhs_finish!(callee_result, callee_ci, callee_key, world, callee_ordinal, edges)
+                callee_result = structural_analysis!(callee_ci, world)
+                callee_daef_ci = rhs_finish!(callee_result, callee_ci, callee_key, world, callee_ordinal)
                 # Allocate a continuous block of variables for all callee alg and diff states
 
                 empty!(stmt.args)
@@ -155,7 +154,7 @@ function gen_init_uncompress!(
         src = ir_to_src(ir)
 
         abi = Tuple{Tuple, Tuple, (VectorViewType for _ in arg_range)..., Vector{Float64}, Float64}
-        daef_ci = cache_dae_ci!(ci, src, src.debuginfo, abi, InitUncompressSpec(init_key, diff_key, ir_ordinal), edges)
+        daef_ci = cache_dae_ci!(ci, src, src.debuginfo, abi, InitUncompressSpec(init_key, diff_key, ir_ordinal))
         ccall(:jl_add_codeinst_to_jit, Cvoid, (Any, Any), daef_ci, src)
 
         push!(cis, daef_ci)

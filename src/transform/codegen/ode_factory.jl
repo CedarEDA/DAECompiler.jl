@@ -52,7 +52,7 @@ end
 ```
 
 """
-function ode_factory_gen(state::TransformationState, ci::CodeInstance, key::TornCacheKey, world::UInt, edges::SimpleVector, init_key::Union{TornCacheKey, Nothing})
+function ode_factory_gen(state::TransformationState, ci::CodeInstance, key::TornCacheKey, world::UInt, init_key::Union{TornCacheKey, Nothing})
     result = state.result
     torn_ci = find_matching_ci(ci->isa(ci.owner, TornIRSpec) && ci.owner.key == key, ci.def, world)
     torn_ir = torn_ci.inferred
@@ -75,7 +75,7 @@ function ode_factory_gen(state::TransformationState, ci::CodeInstance, key::Torn
         sicm = ()
     end
 
-    odef_ci = rhs_finish!(state, ci, key, world, 1, edges)
+    odef_ci = rhs_finish!(state, ci, key, world, 1)
 
     # Create a small opaque closure to adapt from SciML ABI to our own internal ABI
 
@@ -140,7 +140,7 @@ function ode_factory_gen(state::TransformationState, ci::CodeInstance, key::Torn
     nd = numstates[AssignedDiff] + numstates[UnassignedDiff]
     na = numstates[Algebraic] + numstates[AlgebraicDerivative]
     mass_matrix = na == 0 ? GlobalRef(LinearAlgebra, :I) : @insert_node_here compact line generate_ode_mass_matrix(nd, na)::Matrix{Float64}
-    initf = init_key !== nothing ? init_uncompress_gen!(compact, result, ci, init_key, key, world, edges) : nothing
+    initf = init_key !== nothing ? init_uncompress_gen!(compact, result, ci, init_key, key, world) : nothing
     odef = @insert_node_here compact line make_odefunction(new_oc, mass_matrix, initf)::ODEFunction true
 
     odef_and_n = @insert_node_here compact line tuple(odef, nd + na)::Tuple true

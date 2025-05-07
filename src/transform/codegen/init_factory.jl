@@ -1,11 +1,11 @@
 
-function init_uncompress_gen(result::DAEIPOResult, ci::CodeInstance, init_key::TornCacheKey, diff_key::TornCacheKey, world::UInt, edges::SimpleVector)
+function init_uncompress_gen(result::DAEIPOResult, ci::CodeInstance, init_key::TornCacheKey, diff_key::TornCacheKey, world::UInt)
     ir_factory = copy(result.ir)
     pushfirst!(ir_factory.argtypes, Settings)
     pushfirst!(ir_factory.argtypes, typeof(factory))
     compact = IncrementalCompact(ir_factory)
 
-    new_oc = init_uncompress_gen!(compact, result, ci, init_key, diff_key, world, edges)
+    new_oc = init_uncompress_gen!(compact, result, ci, init_key, diff_key, world)
     insert_node_here!(compact, NewInstruction(ReturnNode(new_oc), Core.OpaqueClosure, result.ir[SSAValue(1)][:line]), true)
 
     ir_factory = Compiler.finish(compact)
@@ -13,7 +13,7 @@ function init_uncompress_gen(result::DAEIPOResult, ci::CodeInstance, init_key::T
     return ir_factory
 end
 
-function init_uncompress_gen!(compact::Compiler.IncrementalCompact, result::DAEIPOResult, ci::CodeInstance, init_key::TornCacheKey, diff_key::TornCacheKey, world::UInt, edges::SimpleVector)
+function init_uncompress_gen!(compact::Compiler.IncrementalCompact, result::DAEIPOResult, ci::CodeInstance, init_key::TornCacheKey, diff_key::TornCacheKey, world::UInt)
     torn_ci = find_matching_ci(ci->isa(ci.owner, TornIRSpec) && ci.owner.key == init_key, ci.def, world)
     @assert torn_ci !== nothing
     torn_ir = torn_ci.inferred
@@ -35,7 +35,7 @@ function init_uncompress_gen!(compact::Compiler.IncrementalCompact, result::DAEI
 
     # (nlsol,)
     argt = Tuple{Any}
-    daef_ci = gen_init_uncompress!(result, ci, init_key, diff_key, world, 1, edges)
+    daef_ci = gen_init_uncompress!(result, ci, init_key, diff_key, world, 1)
 
     # Create a small opaque closure to adapt from SciML ABI to our own internal
     # ABI

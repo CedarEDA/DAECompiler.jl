@@ -16,21 +16,21 @@ function find_matching_ci(predicate, mi::MethodInstance, world::UInt)
     return nothing
 end
 
-function structural_analysis!(ci::CodeInstance, world::UInt, edges::SimpleVector)
+function structural_analysis!(ci::CodeInstance, world::UInt)
     # Check if we have aleady done this work - if so return the cached result
     result_ci = find_matching_ci(ci->ci.owner == StructureCache(), ci.def, world)
     if result_ci !== nothing
         return result_ci.inferred
     end
 
-    result = _structural_analysis!(ci, world, edges)
+    result = _structural_analysis!(ci, world)
     # TODO: The world bounds might have been narrowed
-    cache_dae_ci!(ci, result, nothing, nothing, StructureCache(), edges)
+    cache_dae_ci!(ci, result, nothing, nothing, StructureCache())
 
     return result
 end
 
-function _structural_analysis!(ci::CodeInstance, world::UInt, edges::SimpleVector)
+function _structural_analysis!(ci::CodeInstance, world::UInt)
     # Variables
     var_to_diff = DiffGraph(0)
     varclassification = VarEqClassification[]
@@ -66,7 +66,7 @@ function _structural_analysis!(ci::CodeInstance, world::UInt, edges::SimpleVecto
     ir = copy(ci.inferred.ir)
 
     # Allocate variable and equation numbers of any incoming arguments
-    refiner = StructuralRefiner(world, var_to_diff, varkinds, varclassification, Core.svec(ci))
+    refiner = StructuralRefiner(world, var_to_diff, varkinds, varclassification)
     argtypes = Any[make_argument_lattice_elem(Compiler.typeinf_lattice(refiner), Argument(i), argt, add_variable!, add_equation!, add_scope!) for (i, argt) in enumerate(ir.argtypes)]
     nexternalvars = length(var_to_diff)
     nexternaleqs = length(eqssas)
@@ -291,7 +291,7 @@ function _structural_analysis!(ci::CodeInstance, world::UInt, edges::SimpleVecto
             (; result, mapping) = info
         else
             callee_codeinst = stmt.args[1]
-            result = structural_analysis!(callee_codeinst, Compiler.get_inference_world(refiner), edges)
+            result = structural_analysis!(callee_codeinst, Compiler.get_inference_world(refiner))
 
             if isa(result, UncompilableIPOResult)
                 # TODO: Stack trace?
