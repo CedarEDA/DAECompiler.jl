@@ -4,7 +4,7 @@ using Compiler
 using Diffractor
 using Core: SimpleVector, CodeInstance, Const
 using Compiler: ArgInfo, StmtInfo, AbstractInterpreter, InferenceParams, OptimizationParams,
-    AbsIntState, CallInfo, InferenceResult
+    AbsIntState, CallInfo, InferenceResult, InferenceState
 
 struct ADCache; end
 
@@ -17,10 +17,12 @@ AD'd using Diffractor.
 struct ADAnalyzer <: Compiler.AbstractInterpreter
     world::UInt
     inf_cache::Vector{Compiler.InferenceResult}
+    edges::SimpleVector # additional edges
     function ADAnalyzer(;
             world::UInt = Base.get_world_counter(),
-            inf_cache::Vector{Compiler.InferenceResult} = Compiler.InferenceResult[])
-        new(world, inf_cache)
+            inf_cache::Vector{Compiler.InferenceResult} = Compiler.InferenceResult[],
+            edges = Compiler.empty_edges)
+        new(world, inf_cache, edges)
     end
 end
 
@@ -60,6 +62,11 @@ struct AnalyzedSource
     inline_cost::Compiler.InlineCostType
 end
 
+@override function Compiler.result_edges(interp::ADAnalyzer, caller::InferenceState)
+    edges = @invoke Compiler.result_edges(interp::AbstractInterpreter, caller::InferenceState)
+    Core.svec(edges..., interp.edges...)
+end
+
 @override function Compiler.transform_result_for_cache(interp::ADAnalyzer, result::InferenceResult, edges::SimpleVector)
     ir = result.src.optresult.ir
     params = Compiler.OptimizationParams(interp)
@@ -88,12 +95,16 @@ end
     error(lazy"Could not find single target method for `$sig`")
 end
 
-function ad_typeinf(world, tt; force_inline_all=false)
-    @assert !force_inline_all
-    interp = ADAnalyzer(;world)
+function get_method_instance(@nospecialize(tt), world)
     match = Base._methods_by_ftype(tt, 1, world)
     isempty(match) && single_match_error(tt)
     match = only(match)
     mi = Compiler.specialize_method(match)
+end
+
+function ad_typeinf(world, tt; force_inline_all=false, edges=Compiler.empty_edges)
+    @assert !force_inline_all
+    interp = ADAnalyzer(; world, edges)
+    mi = get_method_instance(tt, world)
     ci = Compiler.typeinf_ext(interp, mi, Compiler.SOURCE_MODE_ABI)
 end
