@@ -5,9 +5,9 @@ struct CalleeMapping
     applied_scopes::Vector{Any}
 end
 
-apply_linear_incidence(𝕃, ret::Type, result::DAEIPOResult, caller_var_to_diff::DiffGraph, caller_varclassification::Vector{VarEqClassification}, caller_eqclassification::Vector{VarEqClassification}, mapping::CalleeMapping) = ret
-apply_linear_incidence(𝕃, ret::Const, result::DAEIPOResult, caller_var_to_diff::DiffGraph, caller_varclassification::Vector{VarEqClassification}, caller_eqclassification::Vector{VarEqClassification}, mapping::CalleeMapping) = ret
-function apply_linear_incidence(𝕃, ret::Incidence, result::DAEIPOResult, caller_var_to_diff::DiffGraph, caller_varclassification::Vector{VarEqClassification}, caller_eqclassification::Vector{VarEqClassification}, mapping::CalleeMapping)
+apply_linear_incidence(𝕃, ret::Type, result::DAEIPOResult, caller_var_to_diff::DiffGraph, caller_varclassification::Vector{VarEqClassification}, caller_varkind::Union{Vector{Intrinsics.VarKind}, Nothing}, caller_eqclassification::Vector{VarEqClassification}, mapping::CalleeMapping) = ret
+apply_linear_incidence(𝕃, ret::Const, result::DAEIPOResult, caller_var_to_diff::DiffGraph, caller_varclassification::Vector{VarEqClassification}, caller_varkind::Union{Vector{Intrinsics.VarKind}, Nothing}, caller_eqclassification::Vector{VarEqClassification}, mapping::CalleeMapping) = ret
+function apply_linear_incidence(𝕃, ret::Incidence, result::DAEIPOResult, caller_var_to_diff::DiffGraph, caller_varclassification::Vector{VarEqClassification}, caller_varkind::Union{Vector{Intrinsics.VarKind}, Nothing}, caller_eqclassification::Vector{VarEqClassification}, mapping::CalleeMapping)
     coeffs = mapping.var_coeffs
 
     const_val = ret.typ
@@ -23,7 +23,7 @@ function apply_linear_incidence(𝕃, ret::Incidence, result::DAEIPOResult, call
         end
 
         if !isassigned(coeffs, v)
-            compute_missing_coeff!(coeffs, result, caller_var_to_diff, caller_varclassification, v)
+            compute_missing_coeff!(coeffs, result, caller_var_to_diff, caller_varclassification, caller_varkind, v)
         end
 
         replacement = coeffs[v]
@@ -52,7 +52,7 @@ function apply_linear_incidence(𝕃, ret::Incidence, result::DAEIPOResult, call
     return Incidence(const_val, new_row)
 end
 
-function apply_linear_incidence(𝕃, ret::Eq, result::DAEIPOResult, caller_var_to_diff::DiffGraph, caller_varclassification::Vector{VarEqClassification}, caller_eqclassification::Vector{VarEqClassification}, mapping::CalleeMapping)
+function apply_linear_incidence(𝕃, ret::Eq, result::DAEIPOResult, caller_var_to_diff::DiffGraph, caller_varclassification::Vector{VarEqClassification}, caller_varkind::Union{Vector{Intrinsics.VarKind}, Nothing}, caller_eqclassification::Vector{VarEqClassification}, mapping::CalleeMapping)
     eq_mapping = mapping.eqs[ret.id]
     if eq_mapping == 0
         error("I removed these from StructuralRefiner for conceptual reasons - if we hit these, lets revisit")
@@ -63,8 +63,8 @@ function apply_linear_incidence(𝕃, ret::Eq, result::DAEIPOResult, caller_var_
     return Eq(eq_mapping)
 end
 
-function apply_linear_incidence(𝕃, ret::PartialStruct, result::DAEIPOResult, caller_var_to_diff::DiffGraph, caller_varclassification::Vector{VarEqClassification}, caller_eqclassification::Vector{VarEqClassification}, mapping::CalleeMapping)
-    return PartialStruct(𝕃, ret.typ, Any[apply_linear_incidence(𝕃, f, result, caller_var_to_diff, caller_varclassification, caller_eqclassification, mapping) for f in ret.fields])
+function apply_linear_incidence(𝕃, ret::PartialStruct, result::DAEIPOResult, caller_var_to_diff::DiffGraph, caller_varclassification::Vector{VarEqClassification}, caller_varkind::Union{Vector{Intrinsics.VarKind}, Nothing}, caller_eqclassification::Vector{VarEqClassification}, mapping::CalleeMapping)
+    return PartialStruct(𝕃, ret.typ, Any[apply_linear_incidence(𝕃, f, result, caller_var_to_diff, caller_varclassification, caller_varkind, caller_eqclassification, mapping) for f in ret.fields])
 end
 
 

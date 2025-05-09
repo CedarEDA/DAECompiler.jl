@@ -451,6 +451,7 @@ function assign_slots(state::TransformationState, key::TornCacheKey, var_eq_matc
     end
 
     for i = 1:length(var_assignment)
+        varclassification(result, structure, i) == External && continue
         kind = classify_var(state.structure.var_to_diff, key, i)
         kind === nothing && continue
         cache_kind = kind
@@ -472,6 +473,7 @@ function assign_slots(state::TransformationState, key::TornCacheKey, var_eq_matc
 
     if var_eq_matching !== nothing
         for eq = 1:length(state.total_incidence)
+            eqclassification(result, structure, eq) == External && continue
             (invview(var_eq_matching)[eq] === unassigned) || continue
             assign_slot!(Explicit, eq)
         end
@@ -725,8 +727,8 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
                         ur[] = sicm_rename[ur[].id]
                     end
 
-                    state = insert_node_here!(compact, NewInstruction(inst; stmt=new_stmt, type=Tuple, flag=UInt32(0)))
-                    push!(stmt.args, SICMSSAValue(state.id))
+                    sstate = insert_node_here!(compact, NewInstruction(inst; stmt=new_stmt, type=Tuple, flag=UInt32(0)))
+                    push!(stmt.args, SICMSSAValue(sstate.id))
                 else
                     push!(stmt.args, callee_sicm_ci.rettype_const)
                 end

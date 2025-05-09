@@ -26,6 +26,16 @@ function compute_slot_ranges(info::MappingInfo, callee_key, var_assignment, eq_a
     # we go through explicitly and check.
     state_ranges = UnitRange{Int}[0:-1 for _ in 1:Int(LastEquationStateKind)]
 
+    function assign_slot!(kind, slotidx)
+        currange = state_ranges[kind]
+        if first(currange) == 0
+            state_ranges[kind] = slotidx:slotidx
+        else
+            @assert last(currange) == slotidx-1
+            state_ranges[kind] = first(currange):slotidx
+        end
+    end
+
     for callee_var = 1:length(info.result.var_to_diff)
         caller_map = info.mapping.var_coeffs[callee_var]
         isa(caller_map, Const) && continue
@@ -36,25 +46,19 @@ function compute_slot_ranges(info::MappingInfo, callee_key, var_assignment, eq_a
         (kind, slotidx) = var_assignment[caller_var]
         @assert callee_kind == kind
 
-        currange = state_ranges[kind]
-        if first(currange) == 0
-            state_ranges[kind] = slotidx:slotidx
-        else
-            @assert last(currange) == slotidx-1
-            state_ranges[kind] = first(currange):slotidx
+        assign_slot!(kind, slotidx)
+        if kind == AssignedDiff
+            assign_slot!(StateDiff, slotidx)
         end
     end
 
     for (callee_eq, eq) in enumerate(info.mapping.eqs)
-        (kind, slotidx) =eq_assignment[eq]
+        eqa = eq_assignment[eq]
+        eqa === nothing && continue
+        (kind, slotidx) = eqa
+        kind == Explicit || continue
 
-        currange = state_ranges[kind]
-        if first(currange) == 0
-            state_ranges[kind] = slotidx:slotidx
-        else
-            @assert last(currange) == slotidx-1
-            state_ranges[kind] = first(currange):slotidx
-        end
+        assign_slot!(kind, slotidx)
     end
 
     @assert state_ranges[StateDiff] == state_ranges[AssignedDiff]

@@ -95,13 +95,10 @@ function ssrm!(state::TransformationState)
     end
 end
 
-function varkind(result, structure, var)
-    while var > length(result.varkinds)
-        var = invview(structure.var_to_diff)[var]
-    end
-    return result.varkinds[var]
-end
+varkind(result, structure, var) = result.varkinds[basevar(result, structure, var)]
 varkind(state, var) = varkind(state.result, state.structure, var)
+varclassification(result, structure, var) = result.varkinds[basevar(result, structure, var)]
+varclassification(state, var) = varclassification(state.result, state.structure, var)
 
 function structural_transformation!(state::TransformationState)
     first = true
