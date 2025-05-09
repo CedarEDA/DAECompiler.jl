@@ -44,7 +44,10 @@ Tracy = "e689c965-62c8-4b79-b2c5-8359227902fd"
 ModelingToolkit = "961ee093-0014-501f-94e3-6117800e7a78"
 
 [sources]
+Compiler = {rev = "master", url = "git@github.com:JuliaLang/BaseCompiler.jl.git"}
+Cthulhu = {rev = "master", url = "https://github.com/JuliaDebug/Cthulhu.jl.git"}
 DifferentiationInterface = {rev = "main", subdir = "DifferentiationInterface", url = "https://github.com/Keno/DifferentiationInterface.jl#main"}
+Diffractor = {rev = "main", url = "https://github.com/JuliaDiff/Diffractor.jl.git"}
 SimpleNonlinearSolve = {rev = "master", subdir = "lib/SimpleNonlinearSolve", url = "https://github.com/SciML/NonlinearSolve.jl.git"}
 StateSelection = {rev = "main", url = "https://github.com/JuliaComputing/StateSelection.jl.git"}
 
@@ -54,7 +57,7 @@ AutoHashEquals = "2.2.0"
 CentralizedCaches = "1.1.0"
 ChainRules = "1.50"
 ChainRulesCore = "1.20"
-Compiler = ">= 0.0.1"
+Compiler = "0"
 DiffEqBase = "6.149.2"
 DifferentiationInterface = "0.6.52"
 Diffractor = "0.2.7"
