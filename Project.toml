@@ -44,7 +44,7 @@ Tracy = "e689c965-62c8-4b79-b2c5-8359227902fd"
 ModelingToolkit = "961ee093-0014-501f-94e3-6117800e7a78"
 
 [sources]
-Compiler = {rev = "master", url = "https:/github.com/JuliaLang/BaseCompiler.jl.git"}
+Compiler = {rev = "master", url = "https://github.com/JuliaLang/BaseCompiler.jl.git"}
 Cthulhu = {rev = "master", url = "https://github.com/JuliaDebug/Cthulhu.jl.git"}
 DifferentiationInterface = {rev = "main", subdir = "DifferentiationInterface", url = "https://github.com/Keno/DifferentiationInterface.jl#main"}
 Diffractor = {rev = "main", url = "https://github.com/JuliaDiff/Diffractor.jl.git"}
