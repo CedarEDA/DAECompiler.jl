@@ -19,7 +19,7 @@ sol = solve(DAECProblem(onecall!, (1,) .=> 1.), IDA())
 sol = solve(ODECProblem(onecall!, (1,) .=> 1.), Rodas5(autodiff=false))
 @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[1, :], exp.(sol.t)))
 
-#= + Contained Equations =#
+#==== Contained Equations ============#
 function twocall!()
     onecall!(); onecall!();
     return nothing
@@ -32,7 +32,7 @@ for (sol, i) in Iterators.product((dae_sol, ode_sol), 1:2)
     @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[i, :], exp.(sol.t)))
 end
 
-#= + NonLinear =#
+#============== NonLinear ============#
 @noinline function sin!()
     x = continuous()
     always!(ddt(x) - sin(x))
@@ -47,7 +47,7 @@ for (sol, i) in Iterators.product((dae_sol, ode_sol), 1:2)
     @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[i, :], 2*acot.(exp.(-sol.t).*cot(1/2))))
 end
 
-#= + SICM =#
+#============== SICM ============#
 struct sicm!
     arg::Float64
 end
@@ -72,7 +72,7 @@ for (sol, i) in Iterators.product((dae_sol, ode_sol), 1:2)
     @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[i, :], 1. .+ sol.t))
 end
 
-#= + NonLinear SICM =#
+#========== NonLinear SICM ===========#
 struct nlsicm!
     arg::Float64
 end
@@ -97,7 +97,7 @@ for (sol, i) in Iterators.product((dae_sol, ode_sol), 1:2)
     @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[i, :], 1. .+ sin(1.)*sol.t))
 end
 
-#= + Ping Ping =#
+#============== Ping Pong ============#
 @noinline function ping(a, b, c, d)
     always!(b - sin(a))
     always!(d - sin(c))
@@ -124,6 +124,19 @@ ode_sol = solve(ODECProblem(pingpong, (1,) .=> 0.1), Rodas5(autodiff=false))
 # asin(sin) are inverses in [-pi/2, pi/2]
 for sol in (dae_sol, ode_sol)
     @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[1, :], 0.1exp.(sol.t)))
+end
+
+#========== Implicit External ===========#
+@noinline intro() = ddt(continuous())
+@noinline outro!(x) = always!(x-1)
+
+implicit() = outro!(intro())
+
+dae_sol = solve(DAECProblem(implicit, (1,) .=> 1), IDA())
+ode_sol = solve(ODECProblem(implicit, (1,) .=> 1), Rodas5(autodiff=false))
+
+for sol in (dae_sol, ode_sol)
+    @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[1, :], 1 .+ sol.t))
 end
 
 end

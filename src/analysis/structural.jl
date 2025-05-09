@@ -97,6 +97,8 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
                 push!(externally_refined, i)
             elseif is_equation_call(stmt, ir, #=allow_call=#false)
                 push!(eqcallssas, SSAValue(i))
+            else
+                ir.stmts[i][:flag] |= Compiler.IR_FLAG_REFINED
             end
         elseif isexpr(stmt, :call)
             if is_known_call(stmt, Core.current_scope, ir)
