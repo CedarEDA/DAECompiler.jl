@@ -72,4 +72,11 @@ end
 sol = solve(DAECProblem(tfb5, (1,) .=> 1.), IDA())
 @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol.u[:, 1], (sol.t .+ 1) .* log.(sol.t .+ 1) .+ 1 .- sol.t))
 
+function tfb6()
+    x = continuous()
+    always!(ddt(x) - x^0.5)
+end
+sol = solve(DAECProblem(tfb6, (1,) .=> 1.), IDA())
+@test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol.u[:, 1], 1/4 .* (sol.t .+ 2).^2))
+
 end

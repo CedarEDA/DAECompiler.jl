@@ -350,15 +350,14 @@ function process_ipo_return!(𝕃, ultimate_rt::Incidence, eqclassification, var
     new_eq_row = _zero_row()
     for (v_offset, coeff) in zip(rowvals(ultimate_rt.row), nonzeros(ultimate_rt.row))
         v = v_offset - 1
-        if varclassification[v] != External && coeff == nonlinear
+        if v != 0 && varclassification[v] != External && coeff == nonlinear
             get_nonlinrepl()
             new_eq_row[v_offset] = nonlinear
         else
             new_row[v_offset] = coeff
-            while true
+            while v != 0 && v !== nothing
                 varclassification[v] = External
                 v = invview(var_to_diff)[v]
-                v === nothing && break
             end
         end
     end
@@ -424,6 +423,17 @@ function add_internal_equations_to_structure!(refiner::StructuralRefiner, eqkind
     end
 
     return true
+end
+
+function process_ipo_return!(𝕃, ultimate_rt::Type, eqclassification, varclassification, var_to_diff, total_incidence, eq_callee_mapping)
+    # If we don't have any internal variables (in which case we might have to to do a more aggressive rewrite), strengthen the incidence
+    # by demoting to full incidence over the argument variables. Incidence is not allowed to propagate through global mutable state, so
+    # the incidence of the return type is bounded by the incidence of the arguments in this case.
+    if !all(==(External), varclassification)
+        return ultimate_rt, 0
+    end
+    # TODO: Keep track of whether we have any time dependence?
+    return Incidence(ultimate_rt, IncidenceVector(MAX_EQS, Int[1:length(varclassification)+1;], Union{Float64, NonLinear}[nonlinear for _ in 1:length(varclassification)+1])), 0
 end
 
 function process_ipo_return!(𝕃, ultimate_rt::Eq, eqclassification, args...)
