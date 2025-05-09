@@ -55,15 +55,6 @@ end
 
 Base.IteratorSize(::Type{Compiler.UseRefIterator}) = Base.SizeUnknown()
 
-struct StateInvariant; end
-StateSelection.BipartiteGraphs.overview_label(::Type{StateInvariant}) = ('P', "State Invariant / Parameter", :red)
-
-struct InOut
-    ordinal::Int
-end
-StateSelection.BipartiteGraphs.overview_label(::Type{InOut}) = ('#', "IPO in var / out eq", :green)
-StateSelection.BipartiteGraphs.overview_label(io::InOut) = (string(io.ordinal), "IPO in var / out eq", :green)
-
 function schedule_incidence!(compact, var_eq_matching, curval, ::Type, var, line; vars=nothing, schedule_missing_var! = nothing)
     # This just needs the linear part, which is `0` in `Type`
     return (curval, nothing)
@@ -511,7 +502,7 @@ function matching_for_key(result::DAEIPOResult, key::TornCacheKey, structure = m
     may_use_eq(eq) = !(eq in explicit_eqs) && eqclassification(result, structure, eq) != External && eqkind(result, structure, eq) in (allow_init_eqs ? (Intrinsics.Initial, Intrinsics.Always) : (Intrinsics.Always,))
 
     # Max match is the (unique) tearing result given the choice of states
-    var_eq_matching = StateSelection.complete(StateSelection.maximal_matching(structure.graph, Union{Unassigned, SelectedState, StateInvariant, InOut};
+    var_eq_matching = StateSelection.complete(StateSelection.maximal_matching(structure.graph, IPOMatches;
         dstfilter = may_use_var, srcfilter = may_use_eq), nsrcs(structure.graph))
 
     if diff_states !== nothing
