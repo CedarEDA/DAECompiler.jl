@@ -353,12 +353,14 @@ is_any_incidence(@nospecialize args...) = any(@nospecialize(x)->isa(x, Incidence
                 (f == Core.Intrinsics.mul_float || f == Core.Intrinsics.div_float) ||
                 f == Core.Intrinsics.copysign_float
                 return tfunc(Val(f), a, b)
-            elseif f in (Core.Intrinsics.or_int, Core.Intrinsics.and_int, Core.Intrinsics.xor_int, Core.Intrinsics.shl_int, Core.Intrinsics.lshr_int, Core.Intrinsics.flipsign_int)
+            elseif f in (Core.Intrinsics.or_int, Core.Intrinsics.and_int, Core.Intrinsics.xor_int,
+                         Core.Intrinsics.shl_int, Core.Intrinsics.lshr_int, Core.Intrinsics.flipsign_int,
+                         Core.Intrinsics.ashr_int, Core.Intrinsics.checked_srem_int)
                 return generic_math_twoarg(f, a, b)
             elseif f == Core.Intrinsics.fptosi || f == Core.Intrinsics.sitofp || f == Core.Intrinsics.bitcast || f == Core.Intrinsics.trunc_int || f == Core.Intrinsics.zext_int || f == Core.Intrinsics.sext_int
                 # We keep the linearity structure here and absorb the rounding error into be base Int64
                 return Incidence(Compiler.conversion_tfunc(Compiler.typeinf_lattice(interp), widenconst(a), widenconst(b)), b.row)
-            elseif f == Core.Intrinsics.lt_float || f == Core.Intrinsics.ne_float || f == Core.Intrinsics.eq_float || f == Core.Intrinsics.slt_int || f == Core.Intrinsics.sle_int || f == Core.Intrinsics.ult_int || f == Core.Intrinsics.ule_int || f == Core.Intrinsics.eq_int || f == Base.:(===)
+            elseif f == Core.Intrinsics.lt_float || f == Core.Intrinsics.le_float || f == Core.Intrinsics.ne_float || f == Core.Intrinsics.eq_float || f == Core.Intrinsics.slt_int || f == Core.Intrinsics.sle_int || f == Core.Intrinsics.ult_int || f == Core.Intrinsics.ule_int || f == Core.Intrinsics.eq_int || f == Base.:(===)
                 r = Compiler.tmerge(Compiler.typeinf_lattice(interp), argtypes[1], argtypes[2])
                 @assert isa(r, Incidence)
                 return Incidence(Bool, r.row)
