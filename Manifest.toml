@@ -294,7 +294,7 @@ weakdeps = ["Dates", "LinearAlgebra"]
 [[deps.Compiler]]
 git-tree-sha1 = "e16288a65fb8569815d93e3cc7b508cea28d02d0"
 repo-rev = "master"
-repo-url = "git@github.com:JuliaLang/BaseCompiler.jl.git"
+repo-url = "https://github.com/JuliaLang/BaseCompiler.jl.git"
 uuid = "807dbc54-b67e-4c79-8afb-eafe4df6f2e1"
 version = "0.0.0"
 
