@@ -95,13 +95,10 @@ function ssrm!(state::TransformationState)
     end
 end
 
-function varkind(result, structure, var)
-    while var > length(result.varkinds)
-        var = invview(structure.var_to_diff)[var]
-    end
-    return result.varkinds[var]
-end
+varkind(result, structure, var) = result.varkinds[basevar(result, structure, var)]
 varkind(state, var) = varkind(state.result, state.structure, var)
+varclassification(result, structure, var) = result.varkinds[basevar(result, structure, var)]
+varclassification(state, var) = varclassification(state.result, state.structure, var)
 
 function structural_transformation!(state::TransformationState)
     first = true
@@ -119,12 +116,25 @@ function structural_transformation!(state::TransformationState)
             first = false
             continue
         end
-        
+
         return StateSelection.complete(var_eq_matching, nsrcs(state.structure.graph))
     end
 end
 
 using StateSelection: Unassigned, SelectedState, unassigned
+
+struct StateInvariant; end
+StateSelection.BipartiteGraphs.overview_label(::Type{StateInvariant}) = ('P', "State Invariant / Parameter", :red)
+
+struct InOut
+    ordinal::Int
+end
+StateSelection.BipartiteGraphs.overview_label(::Type{InOut}) = ('#', "IPO in var / out eq", :green)
+StateSelection.BipartiteGraphs.overview_label(io::InOut) = (string(io.ordinal), "IPO in var / out eq", :green)
+
+const IPOMatches = Union{Unassigned, SelectedState, StateInvariant, InOut}
+const IPOMatching = StateSelection.Matching{IPOMatches}
+
 function top_level_state_selection!(tstate)
     (; result, structure) = tstate
     # For the top-level problem, all external vars are state-invariant, and we do no other fissioning
@@ -135,16 +145,20 @@ function top_level_state_selection!(tstate)
     StateSelection.complete!(structure)
 
     ## Part 1: Perform the selection of differential states and subsequent tearing of the
-    #          non-linear problem at every time step. 
+    #          non-linear problem at every time step.
 
-    var_eq_matching = StateSelection.partial_state_selection_graph!(structure, highest_diff_max_match)
+    var_eq_matching = convert(IPOMatching, StateSelection.partial_state_selection_graph!(structure, highest_diff_max_match))
 
     diff_vars = BitSet()
     alg_vars = BitSet()
     explicit_eqs = BitSet()
 
     for (v, match) in enumerate(var_eq_matching)
-        v in param_vars && continue
+        if v in param_vars
+            @assert match === unassigned
+            var_eq_matching[v] = StateInvariant()
+            continue
+        end
         if match === SelectedState()
             push!(diff_vars, v)
         elseif match === unassigned
@@ -164,14 +178,19 @@ function top_level_state_selection!(tstate)
     varfilter(var) = varkind(result, structure, var) == Intrinsics.Continuous && !(var <= result.nexternalvars)
 
     ## Part 2: Perform the selection of differential states and subsequent tearing of the
-    #          non-linear problem at every time step. 
-    init_var_eq_matching = StateSelection.complete(StateSelection.maximal_matching(structure.graph;
+    #          non-linear problem at every time step.
+    init_var_eq_matching = StateSelection.complete(StateSelection.maximal_matching(structure.graph, IPOMatches;
         dstfilter = varfilter, srcfilter = eq->eqkind(result, structure, eq) in (Intrinsics.Always, Intrinsics.Initial)), nsrcs(structure.graph))
-    init_var_eq_matching = StateSelection.pss_graph_modia!(structure, init_var_eq_matching)
+    init_var_eq_matching = convert(IPOMatching, StateSelection.pss_graph_modia!(structure, init_var_eq_matching))
 
     init_state_vars = BitSet()
     init_explicit_eqs = BitSet()
     for (v, match) in enumerate(init_var_eq_matching)
+        if v in param_vars
+            @assert match === unassigned
+            init_var_eq_matching[v] = StateInvariant()
+            continue
+        end
         varfilter(v) || continue
         if match === unassigned
             push!(init_state_vars, v)

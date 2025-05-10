@@ -49,4 +49,34 @@ end
 sol = solve(DAECProblem(tfb2_ipo, (1,) .=> 1.), IDA())
 @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol.u[:, 1], exp.(sol.t)))
 
+function tfb3()
+    x = continuous()
+    r = Base.fma_emulated(x,x,x)
+    always!(ddt(x) - r)
+end
+sol = solve(DAECProblem(tfb3, (1,) .=> 1., (0, 0.1)), IDA())
+@test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol.u[:, 1], -exp.(sol.t)./(exp.(sol.t) .- 2)))
+
+function tfb4()
+    x = continuous()
+    r = Core.ifelse(Core.Intrinsics.have_fma(Float64), Base.fma_float(x,x,x), Base.fma_emulated(x,x,x))
+    always!(ddt(x) - r)
+end
+sol = solve(DAECProblem(tfb4, (1,) .=> 1., (0, 0.1)), IDA())
+@test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol.u[:, 1], -exp.(sol.t)./(exp.(sol.t) .- 2)))
+
+function tfb5()
+    x = continuous()
+    always!(ddt(x) - log(1. + sim_time()))
+end
+sol = solve(DAECProblem(tfb5, (1,) .=> 1.), IDA())
+@test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol.u[:, 1], (sol.t .+ 1) .* log.(sol.t .+ 1) .+ 1 .- sol.t))
+
+function tfb6()
+    x = continuous()
+    always!(ddt(x) - x^0.5)
+end
+sol = solve(DAECProblem(tfb6, (1,) .=> 1.), IDA())
+@test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol.u[:, 1], 1/4 .* (sol.t .+ 2).^2))
+
 end

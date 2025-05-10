@@ -33,7 +33,7 @@ function make_odefunction(f, mass_matrix = LinearAlgebra.I, initf = nothing)
 end
 
 function initialization_data_ode(initf)
-    return SciMLBase.OverrideInitData(NonlinearProblem((args...)->nothing, nothing, nothing), nothing, initf, nothing, nothing)
+    return SciMLBase.OverrideInitData(NonlinearProblem((args...)->nothing, nothing, nothing), nothing, initf, nothing, nothing, Val{false}())
 end
 
 """

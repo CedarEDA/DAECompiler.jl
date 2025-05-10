@@ -97,6 +97,8 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
                 push!(externally_refined, i)
             elseif is_equation_call(stmt, ir, #=allow_call=#false)
                 push!(eqcallssas, SSAValue(i))
+            else
+                ir.stmts[i][:flag] |= Compiler.IR_FLAG_REFINED
             end
         elseif isexpr(stmt, :call)
             if is_known_call(stmt, Core.current_scope, ir)
@@ -279,6 +281,9 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
         inst = ir[SSAValue(i)]
         stmt = inst[:stmt]
         stmt === nothing && continue
+        # No need to process error paths - even if they were to contain intrinsics, such intrinsics would have
+        # no effect.
+        inst[:type] === Union{} && continue
         isexpr(stmt, :invoke) || continue
         is_known_invoke(stmt, variable, ir) && continue
         is_known_invoke(stmt, equation, ir) && continue
@@ -312,7 +317,7 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
 
     nimplicitoutpairs = 0
     var_to_diff = StateSelection.complete(var_to_diff)
-    ultimate_rt, nimplicitoutpairs = process_ipo_return!(Compiler.typeinf_lattice(refiner), ultimate_rt, eqclassification, varclassification,
+    ultimate_rt, nimplicitoutpairs = process_ipo_return!(Compiler.typeinf_lattice(refiner), ultimate_rt, eqclassification, eqkinds, varclassification, varkinds,
         var_to_diff, total_incidence, eq_callee_mapping)
 
     names = OrderedDict{Any, ScopeDictEntry}()
@@ -331,7 +336,7 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
         warnings)
 end
 
-function process_ipo_return!(𝕃, ultimate_rt::Incidence, eqclassification, varclassification, var_to_diff, total_incidence, eq_callee_mapping)
+function process_ipo_return!(𝕃, ultimate_rt::Incidence, eqclassification, eqkinds, varclassification, varkinds, var_to_diff, total_incidence, eq_callee_mapping)
     nonlinrepl = nothing
     nimplicitoutpairs = 0
     function get_nonlinrepl()
@@ -347,15 +352,14 @@ function process_ipo_return!(𝕃, ultimate_rt::Incidence, eqclassification, var
     new_eq_row = _zero_row()
     for (v_offset, coeff) in zip(rowvals(ultimate_rt.row), nonzeros(ultimate_rt.row))
         v = v_offset - 1
-        if varclassification[v] != External && coeff == nonlinear
+        if v != 0 && varclassification[v] != External && coeff == nonlinear
             get_nonlinrepl()
             new_eq_row[v_offset] = nonlinear
         else
             new_row[v_offset] = coeff
-            while true
+            while v != 0 && v !== nothing
                 varclassification[v] = External
                 v = invview(var_to_diff)[v]
-                v === nothing && break
             end
         end
     end
@@ -367,8 +371,8 @@ function process_ipo_return!(𝕃, ultimate_rt::Incidence, eqclassification, var
     if nonlinrepl !== nothing
         new_eq_row[get_nonlinrepl()+1] = -1.
         new_row[get_nonlinrepl()+1] = 1.
-        ultimate_rt = Incidence(Const(0.0), new_row, ultimate_rt.eps)
-        push!(total_incidence, Incidence(ultimate_rt.typ, new_eq_row, BitSet()))
+        ultimate_rt = Incidence(Const(0.0), new_row)
+        push!(total_incidence, Incidence(ultimate_rt.typ, new_eq_row))
         push!(eq_callee_mapping, nothing)
         push!(eqclassification, Owned)
         push!(eqkinds, Intrinsics.Always)
@@ -393,7 +397,7 @@ function add_internal_equations_to_structure!(refiner::StructuralRefiner, eqkind
     for eq = 1:length(callee_result.eqclassification)
         mapped_eq = callee_mapping.eqs[eq]
         mapped_eq == 0 && continue
-        mapped_inc = apply_linear_incidence(Compiler.typeinf_lattice(refiner), callee_result.total_incidence[eq], callee_result, refiner.var_to_diff, refiner.varclassification, eqclassification, callee_mapping)
+        mapped_inc = apply_linear_incidence(Compiler.typeinf_lattice(refiner), callee_result.total_incidence[eq], callee_result, refiner.var_to_diff, refiner.varclassification, refiner.varkinds, eqclassification, callee_mapping)
         if isassigned(total_incidence, mapped_eq)
             total_incidence[mapped_eq] = tfunc(Val(Core.Intrinsics.add_float),
                 total_incidence[mapped_eq],
@@ -409,7 +413,7 @@ function add_internal_equations_to_structure!(refiner::StructuralRefiner, eqkind
 
     for (ieq, inc) in enumerate(callee_result.total_incidence[(callee_result.nexternaleqs+1):end])
         callee_mapping.eqs[ieq] == 0 || continue
-        extinc = apply_linear_incidence(Compiler.typeinf_lattice(refiner), inc, callee_result, refiner.var_to_diff, refiner.varclassification, eqclassification, callee_mapping)
+        extinc = apply_linear_incidence(Compiler.typeinf_lattice(refiner), inc, callee_result, refiner.var_to_diff, refiner.varclassification, refiner.varkinds, eqclassification, callee_mapping)
         if !isa(extinc, Incidence) && !isa(extinc, Const)
             return "Failed to map internal incidence for equation $ieq (internal result $inc) - got $extinc while processing $thisssa"
         end
@@ -421,6 +425,17 @@ function add_internal_equations_to_structure!(refiner::StructuralRefiner, eqkind
     end
 
     return true
+end
+
+function process_ipo_return!(𝕃, ultimate_rt::Type, eqclassification, eqkinds, varclassification, varkinds, var_to_diff, total_incidence, eq_callee_mapping)
+    # If we don't have any internal variables (in which case we might have to to do a more aggressive rewrite), strengthen the incidence
+    # by demoting to full incidence over the argument variables. Incidence is not allowed to propagate through global mutable state, so
+    # the incidence of the return type is bounded by the incidence of the arguments in this case.
+    if !all(==(External), varclassification)
+        return ultimate_rt, 0
+    end
+    # TODO: Keep track of whether we have any time dependence?
+    return Incidence(ultimate_rt, IncidenceVector(MAX_EQS, Int[1:length(varclassification)+1;], Union{Float64, NonLinear}[nonlinear for _ in 1:length(varclassification)+1])), 0
 end
 
 function process_ipo_return!(𝕃, ultimate_rt::Eq, eqclassification, args...)

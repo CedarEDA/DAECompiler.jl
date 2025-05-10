@@ -55,15 +55,6 @@ end
 
 Base.IteratorSize(::Type{Compiler.UseRefIterator}) = Base.SizeUnknown()
 
-struct StateInvariant; end
-StateSelection.BipartiteGraphs.overview_label(::Type{StateInvariant}) = ('P', "State Invariant / Parameter", :red)
-
-struct InOut
-    ordinal::Int
-end
-StateSelection.BipartiteGraphs.overview_label(::Type{InOut}) = ('#', "IPO in var / out eq", :green)
-StateSelection.BipartiteGraphs.overview_label(io::InOut) = (string(io.ordinal), "IPO in var / out eq", :green)
-
 function schedule_incidence!(compact, var_eq_matching, curval, ::Type, var, line; vars=nothing, schedule_missing_var! = nothing)
     # This just needs the linear part, which is `0` in `Type`
     return (curval, nothing)
@@ -170,8 +161,10 @@ function schedule_nonlinear!(compact, param_vars, var_eq_matching, ir, val::Unio
         f = f.val
         @assert f in (Core.Intrinsics.sub_float, Core.Intrinsics.add_float,
                       Core.Intrinsics.mul_float, Core.Intrinsics.copysign_float,
-                      Core.ifelse, Core.Intrinsics.or_int, Core.Intrinsics.and_int)
+                      Core.ifelse, Core.Intrinsics.or_int, Core.Intrinsics.and_int,
+                      Core.Intrinsics.fma_float, Core.Intrinsics.muladd_float)
         # TODO: or_int is linear in Bool
+        # TODO: {fma, muladd}_float is linear in one of its arguments
         call_is_linear = f in (Core.Intrinsics.sub_float, Core.Intrinsics.add_float)
     end
 
@@ -184,7 +177,7 @@ function schedule_nonlinear!(compact, param_vars, var_eq_matching, ir, val::Unio
 
         # TODO: SICM
 
-        if !is_fully_state_linear(typ::Incidence, param_vars)
+        if !is_const_plus_state_linear(typ::Incidence, param_vars)
             this_nonlinear = schedule_nonlinear!(compact, param_vars, var_eq_matching, ir, arg, ssa_rename; vars, schedule_missing_var!)
         else
             if @isdefined(result)
@@ -204,7 +197,7 @@ function schedule_nonlinear!(compact, param_vars, var_eq_matching, ir, val::Unio
         return schedule_incidence!(compact, var_eq_matching, this_nonlinear, typ, -1, inst[:line]; vars, schedule_missing_var!)[1]
     end
 
-    if is_fully_state_linear(incT, param_vars)
+    if is_const_plus_state_linear(incT, param_vars)
         # TODO: This needs to do a proper template match
         ret = schedule_incidence!(compact, var_eq_matching, nothing, info.result.extended_rt, -1, inst[:line]; vars=
             [arg === nothing ? 0.0 : arg for arg in args[2:end]])[1]
@@ -458,6 +451,7 @@ function assign_slots(state::TransformationState, key::TornCacheKey, var_eq_matc
     end
 
     for i = 1:length(var_assignment)
+        varclassification(result, structure, i) == External && continue
         kind = classify_var(state.structure.var_to_diff, key, i)
         kind === nothing && continue
         cache_kind = kind
@@ -479,6 +473,7 @@ function assign_slots(state::TransformationState, key::TornCacheKey, var_eq_matc
 
     if var_eq_matching !== nothing
         for eq = 1:length(state.total_incidence)
+            eqclassification(result, structure, eq) == External && continue
             (invview(var_eq_matching)[eq] === unassigned) || continue
             assign_slot!(Explicit, eq)
         end
@@ -509,8 +504,8 @@ function matching_for_key(result::DAEIPOResult, key::TornCacheKey, structure = m
     may_use_eq(eq) = !(eq in explicit_eqs) && eqclassification(result, structure, eq) != External && eqkind(result, structure, eq) in (allow_init_eqs ? (Intrinsics.Initial, Intrinsics.Always) : (Intrinsics.Always,))
 
     # Max match is the (unique) tearing result given the choice of states
-    var_eq_matching = StateSelection.complete(StateSelection.maximal_matching(structure.graph, Union{Unassigned, SelectedState, StateInvariant, InOut};
-        dstfilter = may_use_var, srcfilter = may_use_eq), nsrcs(structure.graph))
+    var_eq_matching = StateSelection.complete(StateSelection.maximal_matching(structure.solvable_graph, IPOMatches;
+        dstfilter = may_use_var, srcfilter = may_use_eq), nsrcs(structure.solvable_graph))
 
     if diff_states !== nothing
         for var in diff_states
@@ -682,7 +677,7 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
 
                 for (callee_eq, caller_eq) in enumerate(info.mapping.eqs)
                     if caller_eq in key.explicit_eqs
-                        push!(callee_explicit_eqs, callee_Eq)
+                        push!(callee_explicit_eqs, callee_eq)
                     end
                 end
 
@@ -732,14 +727,14 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
                         ur[] = sicm_rename[ur[].id]
                     end
 
-                    state = insert_node_here!(compact, NewInstruction(inst; stmt=new_stmt, type=Tuple, flag=UInt32(0)))
-                    push!(stmt.args, SICMSSAValue(state.id))
+                    sstate = insert_node_here!(compact, NewInstruction(inst; stmt=new_stmt, type=Tuple, flag=UInt32(0)))
+                    push!(stmt.args, SICMSSAValue(sstate.id))
                 else
                     push!(stmt.args, callee_sicm_ci.rettype_const)
                 end
             elseif stmt === nothing || isa(stmt, ReturnNode)
                 continue
-            elseif isexpr(stmt, :call)
+            elseif isexpr(stmt, :call) || isexpr(stmt, :new) || isa(stmt, GotoNode)
                 # TODO: Pull this up, if arguments are state-independent
                 continue
             else
@@ -979,6 +974,7 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
                 if isa(var, Int)
                     curval = nonlinearssa
                     (curval, thiscoeff) = schedule_incidence!(compact1, var_eq_matching, curval, incT, var, line; vars=var_sols, schedule_missing_var!)
+                    @assert thiscoeff != nonlinear
                     curval = ir_mul_const!(compact1, line, 1/thiscoeff, curval)
                     var_sols[var] = curval
                     insert_solved_var_here!(compact1, var, curval, line)
