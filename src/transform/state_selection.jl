@@ -96,9 +96,10 @@ function ssrm!(state::TransformationState)
 end
 
 varkind(result, structure, var) = result.varkinds[basevar(result, structure, var)]
-varkind(state, var) = varkind(state.result, state.structure, var)
-varclassification(result, structure, var) = result.varkinds[basevar(result, structure, var)]
-varclassification(state, var) = varclassification(state.result, state.structure, var)
+varkind(state::TransformationState, var::Int) = varkind(state.result, state.structure, var)
+varclassification(result::DAEIPOResult, structure, var) = result.varclassification[basevar(result, structure, var)]
+varclassification(result::DAEIPOResult, var::Int) = result.varclassification[var]
+varclassification(state::TransformationState, var::Int) = varclassification(state.result, state.structure, var)
 
 function structural_transformation!(state::TransformationState)
     first = true
@@ -107,7 +108,7 @@ function structural_transformation!(state::TransformationState)
     while true
         neq_before = length(state.structure.eq_to_diff)
         var_eq_matching = StateSelection.pantelides!(state;
-            varfilter = var->varkind(state, var) == Intrinsics.Continuous && !(var <= state.result.nexternalvars),
+            varfilter = var->varkind(state, var) == Intrinsics.Continuous && varclassification(state, var) != External,
             eqfilter  = eq->eqkind(state, eq) == Intrinsics.Always)
 
         differentiated_any = neq_before != length(state.structure.eq_to_diff)
@@ -138,7 +139,7 @@ const IPOMatching = StateSelection.Matching{IPOMatches}
 function top_level_state_selection!(tstate)
     (; result, structure) = tstate
     # For the top-level problem, all external vars are state-invariant, and we do no other fissioning
-    param_vars = BitSet(1:result.nexternalvars)
+    param_vars = BitSet(1:result.nexternalargvars)
 
     highest_diff_max_match = structural_transformation!(tstate)
 
@@ -175,7 +176,8 @@ function top_level_state_selection!(tstate)
     diff_key = TornCacheKey(diff_vars, alg_vars, param_vars, explicit_eqs, Vector{Pair{BitSet, BitSet}}())
     @assert matching_for_key(result, diff_key, structure) == var_eq_matching
 
-    varfilter(var) = varkind(result, structure, var) == Intrinsics.Continuous && !(var <= result.nexternalvars)
+    varfilter(var) = varkind(result, structure, var) == Intrinsics.Continuous &&
+                     varclassification(result, structure, var) != External
 
     ## Part 2: Perform the selection of differential states and subsequent tearing of the
     #          non-linear problem at every time step.
