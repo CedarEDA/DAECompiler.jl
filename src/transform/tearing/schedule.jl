@@ -97,7 +97,7 @@ function schedule_incidence!(compact, var_eq_matching, curval, incT::Incidence, 
                 continue
             end
         end
-\
+
         acc = ir_mul_const!(compact, line, coeff, lin_var_ssa)
         curval = curval === nothing ? acc : ir_add!(compact, line, curval, acc)
     end
@@ -504,8 +504,8 @@ function matching_for_key(result::DAEIPOResult, key::TornCacheKey, structure = m
     may_use_eq(eq) = !(eq in explicit_eqs) && eqclassification(result, structure, eq) != External && eqkind(result, structure, eq) in (allow_init_eqs ? (Intrinsics.Initial, Intrinsics.Always) : (Intrinsics.Always,))
 
     # Max match is the (unique) tearing result given the choice of states
-    var_eq_matching = StateSelection.complete(StateSelection.maximal_matching(structure.graph, IPOMatches;
-        dstfilter = may_use_var, srcfilter = may_use_eq), nsrcs(structure.graph))
+    var_eq_matching = StateSelection.complete(StateSelection.maximal_matching(structure.solvable_graph, IPOMatches;
+        dstfilter = may_use_var, srcfilter = may_use_eq), nsrcs(structure.solvable_graph))
 
     if diff_states !== nothing
         for var in diff_states
@@ -677,7 +677,7 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
 
                 for (callee_eq, caller_eq) in enumerate(info.mapping.eqs)
                     if caller_eq in key.explicit_eqs
-                        push!(callee_explicit_eqs, callee_Eq)
+                        push!(callee_explicit_eqs, callee_eq)
                     end
                 end
 
@@ -734,7 +734,7 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
                 end
             elseif stmt === nothing || isa(stmt, ReturnNode)
                 continue
-            elseif isexpr(stmt, :call)
+            elseif isexpr(stmt, :call) || isexpr(stmt, :new) || isa(stmt, GotoNode)
                 # TODO: Pull this up, if arguments are state-independent
                 continue
             else
@@ -974,6 +974,7 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
                 if isa(var, Int)
                     curval = nonlinearssa
                     (curval, thiscoeff) = schedule_incidence!(compact1, var_eq_matching, curval, incT, var, line; vars=var_sols, schedule_missing_var!)
+                    @assert thiscoeff != nonlinear
                     curval = ir_mul_const!(compact1, line, 1/thiscoeff, curval)
                     var_sols[var] = curval
                     insert_solved_var_here!(compact1, var, curval, line)
