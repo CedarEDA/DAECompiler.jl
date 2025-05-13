@@ -1,5 +1,10 @@
 # Cedar License FAQ
 
+!!! note
+This FAQ applies to use of this package as part of CedarEDA and under the
+Cedar / CERN-OHL-S Version 2.0 license. If you are using package as part of
+Dyad, this FAQ does not apply.
+
 The Cedar Electronic Design Automation (EDA) platform by
 JuliaHub provides a composable, library-based interface to assist
 analog design engineers in chip design.
