@@ -65,11 +65,11 @@ end
 
 function cache_dae_ci!(old_ci, src, debuginfo, abi, owner)
     mi = old_ci.def
-    edges = Core.svec(mi)
+    edges = Core.svec(old_ci)
     daef_ci = CodeInstance(abi === nothing ? old_ci.def : Core.ABIOverride(abi, old_ci.def), owner, Tuple, Union{}, nothing, src, Int32(0),
-        UInt(1)#=ci.min_world=#, old_ci.max_world, old_ci.ipo_purity_bits,
+        old_ci.min_world, old_ci.max_world, old_ci.ipo_purity_bits,
         nothing, debuginfo, edges)
-    ccall(:jl_method_instance_add_backedge, Cvoid, (Any, Any, Any), mi, nothing, daef_ci)
+    Compiler.store_backedges(daef_ci, edges)
     ccall(:jl_mi_cache_insert, Cvoid, (Any, Any), mi, daef_ci)
     return daef_ci
 end
