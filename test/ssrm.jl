@@ -19,7 +19,7 @@ function ssrm2()
 end
 
 ssrm2()
-# Doesn't DFBDF doens't like the degenerate case
+# DFBDF doens't like the degenerate case
 @test isempty(DAECompiler.factory(ssrm2)[2])
 @test_broken solve(DAECProblem(ssrm2, ()), DFBDF())
 

@@ -2,7 +2,7 @@
 
 julia_version = "1.13.0-DEV"
 manifest_format = "2.0"
-project_hash = "97ef67108160e41dbe644502a9397e44b5e363c8"
+project_hash = "0bac63a2970186e9522208a4d37d51592f2ca2a0"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "e2478490447631aedba0823d4d7a80b2cc8cdb32"
@@ -2039,7 +2039,7 @@ weakdeps = ["ChainRulesCore"]
 deps = ["DocStringExtensions", "FindFirstFunctions", "Graphs", "LinearAlgebra", "Setfield", "SparseArrays", "UnPack"]
 git-tree-sha1 = "bdb37d184a0a529c307875a6bc066f561e0c25f6"
 repo-rev = "main"
-repo-url = "git@github.com:JuliaComputing/StateSelection.jl.git"
+repo-url = "https://github.com/JuliaComputing/StateSelection.jl.git"
 uuid = "64909d44-ed92-46a8-bbd9-f047dfbdc84b"
 version = "0.2.1"
 
