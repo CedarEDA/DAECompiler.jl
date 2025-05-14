@@ -372,7 +372,7 @@ weakdeps = ["Compiler"]
     CthulhuCompilerExt = "Compiler"
 
 [[deps.DAECompiler]]
-deps = ["Accessors", "AutoHashEquals", "CentralizedCaches", "ChainRules", "ChainRulesCore", "Compiler", "Cthulhu", "DiffEqBase", "DiffEqCallbacks", "DifferentiationInterface", "Diffractor", "Distributions", "ExprTools", "ForwardDiff", "Graphs", "LinearAlgebra", "NonlinearSolve", "OrderedCollections", "OrdinaryDiffEq", "PrecompileTools", "Preferences", "REPL", "Random", "SciMLBase", "SimpleNonlinearSolve", "SparseArrays", "StateSelection", "StaticArraysCore", "Sundials", "SymbolicIndexingInterface", "TimerOutputs", "Tracy"]
+deps = ["Accessors", "AutoHashEquals", "CentralizedCaches", "ChainRules", "ChainRulesCore", "Compiler", "Cthulhu", "DiffEqBase", "DiffEqCallbacks", "DifferentiationInterface", "Diffractor", "Distributions", "ExprTools", "ForwardDiff", "Graphs", "InteractiveUtils", "LinearAlgebra", "NonlinearSolve", "OrderedCollections", "OrdinaryDiffEq", "PrecompileTools", "Preferences", "REPL", "Random", "SciMLBase", "SimpleNonlinearSolve", "SparseArrays", "StateSelection", "StaticArraysCore", "Sundials", "SymbolicIndexingInterface", "TimerOutputs", "Tracy"]
 path = "."
 uuid = "32805668-c3d0-42c2-aafd-0d0a9857a104"
 version = "1.21.0"
