@@ -35,6 +35,9 @@ then goes through structural analysis, and the resulting IR is returned.
 Parameters:
 - `world::UInt = Base.get_world_counter()`: the world in which to operate.
 - `force_inline_all::Bool = false`: if `true`, make inlining heuristics choose to always inline where possible.
+
+!!! warning
+    This will cache analysis results. You might want to invalidate with `DAECompiler.refresh()` between calls to `@code_structure`.
 """
 macro code_structure(exs...)
   gen_call_with_extracted_types_and_kwargs(__module__, :code_structure, exs)
