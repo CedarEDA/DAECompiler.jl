@@ -1,10 +1,17 @@
 Copyright (c) JuliaHub, Inc. and contributors.
 
-This package is part of CedarEDA. CedarEDA is available under both open hardware and commercial licenses.
+This package is part of Dyad and CedarEDA. This package is available under multiple licenses:
 
 1. If you obtained the Software pursuant to a commercial purchase and/or a separate JuliaHub License Agreement
    that includes a commercial license and support services, you may use the Software as per terms and conditions
    specified in the applicable JuliaHub License Agreement.
 
-2. If you do not have a valid JuliaHub License Agreement, you may use this software only under the terms of the
-   CERN-OHL-S v2 license (see LICENSE.CERN-OHL-S-V2 for license terms).
+2. If you do not have a valid JuliaHub license agreement, you may use this package pursuant to the terms of the
+   Dyad Source Available License 1.0 (see LICENSE.DYAD-SAL-V1.md).
+
+3. Alternatively, at your option, you may use this package pursuant to the terms of the CERN-OHL-S v2 license
+   (see LICENSE.CERN-OHL-S-V2 for license terms).
+
+Note that this license grant applies to the contents of this repository only, but does not extend to any
+other components that may be required to use the functionality of this repository, which are subject
+to their own licensing terms.
