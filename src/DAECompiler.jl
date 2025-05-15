@@ -11,6 +11,7 @@ module DAECompiler
     using SciMLBase
     using AutoHashEquals
     using LinearAlgebra: LinearAlgebra
+    using InteractiveUtils: gen_call_with_extracted_types_and_kwargs
 
     include("utils.jl")
     include("intrinsics.jl")
@@ -36,4 +37,5 @@ module DAECompiler
     include("transform/autodiff/index_lowering.jl")
     include("interface.jl")
     include("problem_interface.jl")
+    include("reflection.jl")
 end
