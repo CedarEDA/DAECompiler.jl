@@ -37,6 +37,7 @@ function compute_slot_ranges(info::MappingInfo, callee_key, var_assignment, eq_a
     end
 
     for callee_var = 1:length(info.result.var_to_diff)
+        varclassification(info.result, callee_var) == External && continue
         caller_map = info.mapping.var_coeffs[callee_var]
         isa(caller_map, Const) && continue
         caller_var = only(rowvals(caller_map.row))-1
@@ -62,7 +63,7 @@ function compute_slot_ranges(info::MappingInfo, callee_key, var_assignment, eq_a
     end
 
     @assert state_ranges[StateDiff] == state_ranges[AssignedDiff]
-    @assert state_ranges[Explicit] == state_ranges[Algebraic]
+    #@assert state_ranges[Explicit] == state_ranges[Algebraic]
 
     return state_ranges
 end

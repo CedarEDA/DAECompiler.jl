@@ -5,9 +5,46 @@ struct CalleeMapping
     applied_scopes::Vector{Any}
 end
 
-apply_linear_incidence(𝕃, ret::Type, result::DAEIPOResult, caller_var_to_diff::DiffGraph, caller_varclassification::Vector{VarEqClassification}, caller_varkind::Union{Vector{Intrinsics.VarKind}, Nothing}, caller_eqclassification::Vector{VarEqClassification}, mapping::CalleeMapping) = ret
-apply_linear_incidence(𝕃, ret::Const, result::DAEIPOResult, caller_var_to_diff::DiffGraph, caller_varclassification::Vector{VarEqClassification}, caller_varkind::Union{Vector{Intrinsics.VarKind}, Nothing}, caller_eqclassification::Vector{VarEqClassification}, mapping::CalleeMapping) = ret
-function apply_linear_incidence(𝕃, ret::Incidence, result::DAEIPOResult, caller_var_to_diff::DiffGraph, caller_varclassification::Vector{VarEqClassification}, caller_varkind::Union{Vector{Intrinsics.VarKind}, Nothing}, caller_eqclassification::Vector{VarEqClassification}, mapping::CalleeMapping)
+struct CallerMappingState
+    result::DAEIPOResult
+    caller_var_to_diff::DiffGraph
+    caller_varclassification::Vector{VarEqClassification}
+    caller_varkind::Union{Vector{Intrinsics.VarKind}, Nothing}
+    caller_eqclassification::Vector{VarEqClassification}
+end
+
+function compute_missing_coeff!(coeffs, (;result, caller_var_to_diff, caller_varclassification, caller_varkind)::CallerMappingState, v)
+    # First find the rootvar, and if we already have a coeff for it
+    # apply the derivatives.
+    ndiffs = 0
+    calle_inv = invview(result.var_to_diff)
+    while calle_inv[v] !== nothing && !isassigned(coeffs, v)
+        ndiffs += 1
+        v = calle_inv[v]
+    end
+
+    if !isassigned(coeffs, v)
+        @assert v > result.nexternalargvars # Arg vars should have already been mapped
+        # Reached the root and it's an internal variable. We need to allocate
+        # it in the caller now
+        coeffs[v] = Incidence(add_vertex!(caller_var_to_diff))
+        push!(caller_varclassification, result.varclassification[v] == External ? Owned : CalleeInternal)
+        push!(caller_varkind, result.varkinds[v])
+    end
+    thisinc = coeffs[v]
+
+    for _ = 1:ndiffs
+        dv = result.var_to_diff[v]
+        coeffs[dv] = structural_inc_ddt(caller_var_to_diff, caller_varclassification, caller_varkind, thisinc)
+        v = dv
+    end
+
+    return nothing
+end
+
+apply_linear_incidence(𝕃, ret::Type, caller::CallerMappingState, mapping::CalleeMapping) = ret
+apply_linear_incidence(𝕃, ret::Const, caller::CallerMappingState, mapping::CalleeMapping) = ret
+function apply_linear_incidence(𝕃, ret::Incidence, caller::Union{CallerMappingState, Nothing}, mapping::CalleeMapping)
     coeffs = mapping.var_coeffs
 
     const_val = ret.typ
@@ -23,7 +60,8 @@ function apply_linear_incidence(𝕃, ret::Incidence, result::DAEIPOResult, call
         end
 
         if !isassigned(coeffs, v)
-            compute_missing_coeff!(coeffs, result, caller_var_to_diff, caller_varclassification, caller_varkind, v)
+            @assert caller !== nothing
+            compute_missing_coeff!(coeffs, caller, v)
         end
 
         replacement = coeffs[v]
@@ -52,7 +90,7 @@ function apply_linear_incidence(𝕃, ret::Incidence, result::DAEIPOResult, call
     return Incidence(const_val, new_row)
 end
 
-function apply_linear_incidence(𝕃, ret::Eq, result::DAEIPOResult, caller_var_to_diff::DiffGraph, caller_varclassification::Vector{VarEqClassification}, caller_varkind::Union{Vector{Intrinsics.VarKind}, Nothing}, caller_eqclassification::Vector{VarEqClassification}, mapping::CalleeMapping)
+function apply_linear_incidence(𝕃, ret::Eq, caller::CallerMappingState, mapping::CalleeMapping)
     eq_mapping = mapping.eqs[ret.id]
     if eq_mapping == 0
         error("I removed these from StructuralRefiner for conceptual reasons - if we hit these, lets revisit")
@@ -63,8 +101,8 @@ function apply_linear_incidence(𝕃, ret::Eq, result::DAEIPOResult, caller_var_
     return Eq(eq_mapping)
 end
 
-function apply_linear_incidence(𝕃, ret::PartialStruct, result::DAEIPOResult, caller_var_to_diff::DiffGraph, caller_varclassification::Vector{VarEqClassification}, caller_varkind::Union{Vector{Intrinsics.VarKind}, Nothing}, caller_eqclassification::Vector{VarEqClassification}, mapping::CalleeMapping)
-    return PartialStruct(𝕃, ret.typ, Any[apply_linear_incidence(𝕃, f, result, caller_var_to_diff, caller_varclassification, caller_varkind, caller_eqclassification, mapping) for f in ret.fields])
+function apply_linear_incidence(𝕃, ret::PartialStruct, caller::CallerMappingState, mapping::CalleeMapping)
+    return PartialStruct(𝕃, ret.typ, Any[apply_linear_incidence(𝕃, f, caller, mapping) for f in ret.fields])
 end
 
 
@@ -110,7 +148,7 @@ function process_template!(𝕃, coeffs, eq_mapping, applied_scopes, argtypes, t
     end
 end
 
-function CalleeMapping(𝕃, argtypes::Vector{Any}, callee_result::DAEIPOResult)
+function CalleeMapping(𝕃::Compiler.AbstractLattice, argtypes::Vector{Any}, callee_result::DAEIPOResult)
     applied_scopes = Any[]
     coeffs = Vector{Any}(undef, length(callee_result.var_to_diff))
     eq_mapping = fill(0, length(callee_result.total_incidence))
@@ -120,34 +158,6 @@ function CalleeMapping(𝕃, argtypes::Vector{Any}, callee_result::DAEIPOResult)
     return CalleeMapping(coeffs, eq_mapping, applied_scopes)
 end
 
-function compute_missing_coeff!(coeffs, result, caller_var_to_diff, caller_varclassification, caller_varkind, v)
-    # First find the rootvar, and if we already have a coeff for it
-    # apply the derivatives.
-    ndiffs = 0
-    calle_inv = invview(result.var_to_diff)
-    while calle_inv[v] !== nothing && !isassigned(coeffs, v)
-        ndiffs += 1
-        v = calle_inv[v]
-    end
-
-    if !isassigned(coeffs, v)
-        @assert v > result.nexternalvars
-        # Reached the root and it's an internal variable. We need to allocate
-        # it in the caller now
-        coeffs[v] = Incidence(add_vertex!(caller_var_to_diff))
-        push!(caller_varclassification, result.varclassification[v] == External ? Owned : CalleeInternal)
-        push!(caller_varkind, result.varkinds[v])
-    end
-    thisinc = coeffs[v]
-
-    for _ = 1:ndiffs
-        dv = result.var_to_diff[v]
-        coeffs[dv] = structural_inc_ddt(caller_var_to_diff, caller_varclassification, caller_varkind, thisinc)
-        v = dv
-    end
-
-    return nothing
-end
 
 struct MappingInfo <: Compiler.CallInfo
     info::Any

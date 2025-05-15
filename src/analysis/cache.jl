@@ -25,7 +25,7 @@ struct DAEIPOResult
     ir::IRCode
     extended_rt::Any
     argtypes
-    nexternalvars::Int # total vars is length(var_to_diff)
+    nexternalargvars::Int # total vars is length(var_to_diff)
     nsysmscopes::Int
     nexternaleqs::Int
     ncallees::Int

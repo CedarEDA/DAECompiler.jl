@@ -2,7 +2,7 @@
 
 julia_version = "1.13.0-DEV"
 manifest_format = "2.0"
-project_hash = "0bac63a2970186e9522208a4d37d51592f2ca2a0"
+project_hash = "cc3bbc405b7886a93732d3bd67d08621f6e11dbd"
 
 [[deps.ADTypes]]
 git-tree-sha1 = "e2478490447631aedba0823d4d7a80b2cc8cdb32"
@@ -292,11 +292,11 @@ weakdeps = ["Dates", "LinearAlgebra"]
     CompatLinearAlgebraExt = "LinearAlgebra"
 
 [[deps.Compiler]]
-git-tree-sha1 = "e16288a65fb8569815d93e3cc7b508cea28d02d0"
+git-tree-sha1 = "f251406f8c327e9dbb4fdb4108c8f5f7b033dd7e"
 repo-rev = "master"
 repo-url = "https://github.com/JuliaLang/BaseCompiler.jl.git"
 uuid = "807dbc54-b67e-4c79-8afb-eafe4df6f2e1"
-version = "0.0.0"
+version = "0.1.0"
 
 [[deps.CompilerSupportLibraries_jll]]
 deps = ["Artifacts", "Libdl"]
@@ -2368,6 +2368,13 @@ deps = ["Unicode"]
 git-tree-sha1 = "71142739e695823729a335e9bc124ef41ec1433a"
 uuid = "b8c1c048-cf81-46c6-9da0-18c1d99e41f2"
 version = "1.0.1"
+
+[[deps.XSteam]]
+git-tree-sha1 = "955226ff62e847813dad9442f412b23d43e814a6"
+repo-rev = "master"
+repo-url = "https://github.com/hzgzh/XSteam.jl.git"
+uuid = "95ff35a0-be81-11e9-2ca3-5b4e338e8476"
+version = "0.3.0"
 
 [[deps.Zlib_jll]]
 deps = ["Libdl"]
