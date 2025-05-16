@@ -105,7 +105,6 @@ function apply_linear_incidence(𝕃, ret::PartialStruct, caller::CallerMappingS
     return PartialStruct(𝕃, ret.typ, Any[apply_linear_incidence(𝕃, f, caller, mapping) for f in ret.fields])
 end
 
-
 function process_template!(𝕃, coeffs, eq_mapping, applied_scopes, argtypes, template_argtypes)
     for (arg, template) in zip(argtypes, template_argtypes)
         if isa(template, Incidence)

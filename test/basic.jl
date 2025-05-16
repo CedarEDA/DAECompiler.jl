@@ -24,6 +24,21 @@ sol = solve(DAECProblem(oneeq!, (1,) .=> 1.), IDA())
 sol = solve(ODECProblem(oneeq!, (1,) .=> 1.), Rodas5(autodiff=false))
 @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol.u[:, 1], exp.(sol.t)))
 
+#= + parameterized =#
+struct parameterized
+    param::Float64
+end
+function (this::parameterized)()
+    x = continuous()
+    always!(ddt(x) -ᵢ getfield(this, :param))
+end
+
+dae_sol = solve(DAECProblem(parameterized(1.0), (1,) .=> 1.), IDA())
+ode_sol = solve(ODECProblem(parameterized(1.0), (1,) .=> 1.), Rodas5(autodiff=false))
+for sol in (dae_sol, ode_sol)
+    @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol.u[:, 1], 1. .+ sol.t))
+end
+
 #= + non-linear =#
 @noinline function oneeq_nl!()
     x = continuous()
@@ -92,5 +107,22 @@ end
 pantelides_from_init()
 # Incompletely implemented
 @test_broken solve(DAECProblem(pantelides_from_init, (1,) .=> 1.), DFBDF(autodiff=false))
+
+#= SICM variables =#
+struct sicm_vars
+    param::Float64
+end
+function (this::sicm_vars)()
+    x = continuous()
+    p = continuous()
+    always!(p -ᵢ this.param)
+    always!(ddt(x) -ᵢ p)
+end
+dae_sol = solve(DAECProblem(sicm_vars(1.0), (1,) .=> 1.), IDA())
+ode_sol = solve(ODECProblem(sicm_vars(1.0), (1,) .=> 1.), Rodas5(autodiff=false))
+for sol in (dae_sol, ode_sol)
+    @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol.u[:, 1], 1. .+ sol.t))
+end
+
 
 end

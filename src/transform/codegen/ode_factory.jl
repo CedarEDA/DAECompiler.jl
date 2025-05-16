@@ -70,7 +70,9 @@ function ode_factory_gen(state::TransformationState, ci::CodeInstance, key::Torn
         @assert sicm_ci !== nothing
 
         line = result.ir[SSAValue(1)][:line]
-        sicm = @insert_node_here compact line invoke(Argument(3), sicm_ci, (Argument(i+1) for i = 2:length(result.ir.argtypes))...)::Tuple
+        param_list = flatten_parameter!(compact, result.ir.argtypes[1:end], argn->Argument(2+argn), line)
+        sicm = insert_node_here!(compact,
+            NewInstruction(Expr(:call, invoke, param_list, sicm_ci), Tuple, line))
     else
         sicm = ()
     end
