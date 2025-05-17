@@ -35,6 +35,7 @@ module DAECompiler
     include("transform/autodiff/ad_common.jl")
     include("transform/autodiff/ad_runtime.jl")
     include("transform/autodiff/index_lowering.jl")
+    include("analysis/consistency.jl")
     include("interface.jl")
     include("problem_interface.jl")
     include("reflection.jl")
