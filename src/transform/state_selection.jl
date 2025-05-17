@@ -101,6 +101,9 @@ varclassification(result::DAEIPOResult, structure, var) = result.varclassificati
 varclassification(result::DAEIPOResult, var::Int) = result.varclassification[var]
 varclassification(state::TransformationState, var::Int) = varclassification(state.result, state.structure, var)
 
+continuous_vars_filter(state::TransformationState) = var->varkind(state, var) == Intrinsics.Continuous && varclassification(state, var) != External
+always_eq_filter(state::TransformationState) = eq->eqkind(state, eq) == Intrinsics.Always
+
 function structural_transformation!(state::TransformationState)
     first = true
     # This loop is required to handle situations where additional structural signularities arise in the differentiated
@@ -108,8 +111,8 @@ function structural_transformation!(state::TransformationState)
     while true
         neq_before = length(state.structure.eq_to_diff)
         var_eq_matching = StateSelection.pantelides!(state;
-            varfilter = var->varkind(state, var) == Intrinsics.Continuous && varclassification(state, var) != External,
-            eqfilter  = eq->eqkind(state, eq) == Intrinsics.Always)
+            varfilter = continuous_vars_filter(state),
+            eqfilter  = always_eq_filter(state))
 
         differentiated_any = neq_before != length(state.structure.eq_to_diff)
         if differentiated_any || first
@@ -138,6 +141,7 @@ const IPOMatching = StateSelection.Matching{IPOMatches}
 
 function top_level_state_selection!(tstate)
     (; result, structure) = tstate
+
     # For the top-level problem, all external vars are state-invariant, and we do no other fissioning
     param_vars = BitSet(1:result.nexternalargvars)
 
