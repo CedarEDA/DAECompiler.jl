@@ -10,6 +10,12 @@ struct RHSSpec
     ordinal::Int
 end
 
+function Base.StackTraces.show_custom_spec_sig(io::IO, owner::RHSSpec, linfo::CodeInstance, frame::Base.StackTraces.StackFrame)
+    print(io, "RHS Partition #$(owner.ordinal) for ")
+    mi = Base.get_ci_mi(linfo)
+    return Base.StackTraces.show_spec_sig(io, mi.def, mi.specTypes)
+end
+
 function handle_contribution!(ir::Compiler.IRCode, inst::Compiler.Instruction, kind, slot, arg_range, red)
     pos = SSAValue(inst.idx)
     @assert Int(LastStateKind) < Int(kind) <= Int(LastEquationStateKind)
@@ -218,8 +224,11 @@ function rhs_finish!(
             insert_node!(ir, idx, ni)
         end
         ir = Compiler.compact!(ir)
+        resize!(ir.cfg.blocks, 1)
+        empty!(ir.cfg.blocks[1].succs)
 
         widen_extra_info!(ir)
+        Compiler.verify_ir(ir)
         src = ir_to_src(ir)
 
         abi = Tuple{Tuple, Tuple, (VectorViewType for _ in arg_range)..., Float64}

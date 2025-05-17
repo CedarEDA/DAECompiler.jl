@@ -44,6 +44,43 @@ function make_daefunction(f, initf)
     DAEFunction(f; initialization_data = SciMLBase.OverrideInitData(NonlinearProblem((args...)->nothing, nothing, nothing), nothing, initf, nothing, nothing, Val{false}()))
 end
 
+# TODO: We should unify this function with _make_argument_lattice_elem to ensure consistency
+function _flatten_parameter!(compact, argtypes, ntharg, line)
+    list = Any[]
+    for (argn, argt) in enumerate(argtypes)
+        if isa(argt, Const)
+            push!(list, quoted(argt.val))
+        elseif Base.issingletontype(argt)
+            push!(list, quoted(argt.instance))
+        elseif Base.isprimitivetype(argt) || isa(argt, Incidence)
+            push!(list, ntharg(argn))
+        elseif isa(argt, Type) && argt <: Intrinsics.AbstractScope
+            continue
+        elseif isabstracttype(argt) || ismutabletype(argt) || (!isa(argt, DataType) && !isa(argt, PartialStruct))
+            continue
+        else
+            if !isa(argt, PartialStruct) && Base.datatype_fieldcount(argt) === nothing
+                continue
+            end
+            this = ntharg(argn)
+            nthfield(i) = insert_node_here!(compact,
+                NewInstruction(Expr(:call, getfield, this, i), argt, line))
+            if isa(argt, PartialStruct)
+                fields = _flatten_parameter!(compact, argt.fields, nthfield, line)
+            else
+                fields = _flatten_parameter!(compact, fieldtypes(argt), nthfield, line)
+            end
+            append!(list, fields)
+        end
+    end
+    return list
+end
+
+function flatten_parameter!(compact, argtypes, ntharg, line)
+    return insert_node_here!(compact,
+        NewInstruction(Expr(:call, tuple, _flatten_parameter!(compact, argtypes, ntharg, line)...), Tuple, line))
+end
+
 """
     dae_factory_gen(ci, key)
 
@@ -78,10 +115,9 @@ function dae_factory_gen(state::TransformationState, ci::CodeInstance, key::Torn
         @assert sicm_ci !== nothing
 
         line = result.ir[SSAValue(1)][:line]
-        #insert_node_here!(compact, NewInstruction(Expr(:call, println, "Trace: A"), Cvoid, line))
+        param_list = flatten_parameter!(compact, result.ir.argtypes[1:end], argn->Argument(2+argn), line)
         sicm = insert_node_here!(compact,
-            NewInstruction(Expr(:call, invoke, Argument(3), sicm_ci, (Argument(i+1) for i = 2:length(result.ir.argtypes))...), Tuple, line))
-        #insert_node_here!(compact, NewInstruction(Expr(:call, println, "Trace: B"), Cvoid, line))
+            NewInstruction(Expr(:call, invoke, param_list, sicm_ci), Tuple, line))
     else
         sicm = ()
     end
