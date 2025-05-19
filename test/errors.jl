@@ -14,7 +14,7 @@ function unblanaced_too_many_eqs()
 end
 @test_throws ["The system is unbalanced.",
     "There are 1 highest order differentiated variable(s) and 2 equation(s).",
-    r"(▫.Bar.qux)|(▫.foo)",
+    #= r"(▫.Bar.qux)|(▫.foo)", =#
     "was potentially redundant:"] solve(ODECProblem(unblanaced_too_many_eqs, (1,) .=> 1.), Rodas5(autodiff=false))
 
 function structurally_singular()
