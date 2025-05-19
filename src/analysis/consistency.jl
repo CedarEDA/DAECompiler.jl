@@ -92,7 +92,6 @@ function StateSelection.check_consistency(state::TransformationState, _)
         isempty(𝑑neighbors(graph, v)) && continue
         n_highest_vars += 1
     end
-    @show (neqs, n_highest_vars)
     is_balanced = n_highest_vars == neqs
 
     if neqs > 0 && !is_balanced
