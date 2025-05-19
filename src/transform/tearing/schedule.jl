@@ -28,8 +28,8 @@ function find_eqs_vars(graph, compact::IncrementalCompact)
     (eqs, vars)
 end
 
-function find_eqs_vars(state)
-    compact = IncrementalCompact(copy(state.ir))
+function find_eqs_vars(state::TransformationState)
+    compact = IncrementalCompact(copy(state.result.ir))
     find_eqs_vars(state.structure.graph, compact)
 end
 
