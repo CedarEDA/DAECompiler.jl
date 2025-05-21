@@ -44,43 +44,6 @@ function make_daefunction(f, initf)
     DAEFunction(f; initialization_data = SciMLBase.OverrideInitData(NonlinearProblem((args...)->nothing, nothing, nothing), nothing, initf, nothing, nothing, Val{false}()))
 end
 
-# TODO: We should unify this function with _make_argument_lattice_elem to ensure consistency
-function _flatten_parameter!(compact, argtypes, ntharg, line)
-    list = Any[]
-    for (argn, argt) in enumerate(argtypes)
-        if isa(argt, Const)
-            push!(list, quoted(argt.val))
-        elseif Base.issingletontype(argt)
-            push!(list, quoted(argt.instance))
-        elseif Base.isprimitivetype(argt) || isa(argt, Incidence)
-            push!(list, ntharg(argn))
-        elseif isa(argt, Type) && argt <: Intrinsics.AbstractScope
-            continue
-        elseif isabstracttype(argt) || ismutabletype(argt) || (!isa(argt, DataType) && !isa(argt, PartialStruct))
-            continue
-        else
-            if !isa(argt, PartialStruct) && Base.datatype_fieldcount(argt) === nothing
-                continue
-            end
-            this = ntharg(argn)
-            nthfield(i) = insert_node_here!(compact,
-                NewInstruction(Expr(:call, getfield, this, i), argt, line))
-            if isa(argt, PartialStruct)
-                fields = _flatten_parameter!(compact, argt.fields, nthfield, line)
-            else
-                fields = _flatten_parameter!(compact, fieldtypes(argt), nthfield, line)
-            end
-            append!(list, fields)
-        end
-    end
-    return list
-end
-
-function flatten_parameter!(compact, argtypes, ntharg, line)
-    return insert_node_here!(compact,
-        NewInstruction(Expr(:call, tuple, _flatten_parameter!(compact, argtypes, ntharg, line)...), Tuple, line))
-end
-
 """
     dae_factory_gen(ci, key)
 
@@ -104,7 +67,7 @@ function dae_factory_gen(state::TransformationState, ci::CodeInstance, key::Torn
 
     (;ir_sicm) = torn_ir
 
-    ir_factory = copy(result.ir)
+    ir_factory = copy(ci.inferred.ir)
     pushfirst!(ir_factory.argtypes, Settings)
     pushfirst!(ir_factory.argtypes, typeof(factory))
     compact = IncrementalCompact(ir_factory)
@@ -115,7 +78,7 @@ function dae_factory_gen(state::TransformationState, ci::CodeInstance, key::Torn
         @assert sicm_ci !== nothing
 
         line = result.ir[SSAValue(1)][:line]
-        param_list = flatten_parameter!(compact, result.ir.argtypes[1:end], argn->Argument(2+argn), line)
+        param_list = flatten_parameter!(Compiler.fallback_lattice, compact, ci.inferred.ir.argtypes[1:end], argn->Argument(2+argn), line)
         sicm = insert_node_here!(compact,
             NewInstruction(Expr(:call, invoke, param_list, sicm_ci), Tuple, line))
     else
@@ -139,7 +102,7 @@ function dae_factory_gen(state::TransformationState, ci::CodeInstance, key::Torn
         (kind != AlgebraicDerivative) && push!(all_states, var)
     end
 
-    ir_oc = copy(result.ir)
+    ir_oc = copy(ci.inferred.ir)
     empty!(ir_oc.argtypes)
     push!(ir_oc.argtypes, Tuple)
     push!(ir_oc.argtypes, Vector{Float64})
@@ -208,6 +171,9 @@ function dae_factory_gen(state::TransformationState, ci::CodeInstance, key::Torn
     insert_node_here!(oc_compact, NewInstruction(ReturnNode(nothing), Union{}, line))
 
     ir_oc = Compiler.finish(oc_compact)
+    resize!(ir_oc.cfg.blocks, 1)
+    empty!(ir_oc.cfg.blocks[1].succs)
+    Compiler.verify_ir(ir_oc)
     oc = Core.OpaqueClosure(ir_oc)
 
     line = result.ir[SSAValue(1)][:line]
@@ -240,6 +206,9 @@ function dae_factory_gen(state::TransformationState, ci::CodeInstance, key::Torn
     insert_node_here!(compact, NewInstruction(ReturnNode(daef_and_diff), Core.OpaqueClosure, line), true)
 
     ir_factory = Compiler.finish(compact)
+    resize!(ir_factory.cfg.blocks, 1)
+    empty!(ir_factory.cfg.blocks[1].succs)
+    Compiler.verify_ir(ir_factory)
 
     return ir_factory
 end

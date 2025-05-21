@@ -1,12 +1,18 @@
-export code_structure_by_type, code_structure, @code_structure
+export code_structure_by_type, code_structure, @code_structure,
+       code_ad_by_type, code_ad, @code_ad
 
 function code_structure(@nospecialize(f), @nospecialize(types = Base.default_tt(f)); kwargs...)
   tt = Base.signature_type(f, types)
   return code_structure_by_type(tt; kwargs...)
 end
 
-function code_structure_by_type(@nospecialize(tt::Type);
-                                world::UInt = Base.get_world_counter(),
+function code_ad(@nospecialize(f), @nospecialize(types = Base.default_tt(f)); kwargs...)
+  tt = Base.signature_type(f, types)
+  return code_ad_by_type(tt; kwargs...)
+end
+
+function _code_ad_by_type(@nospecialize(tt::Type);
+                                world::UInt = Base.tls_world_age(),
                                 force_inline_all::Bool = false)
 
   fT = fieldtype(tt, 1)
@@ -16,11 +22,17 @@ function code_structure_by_type(@nospecialize(tt::Type);
   # First, perform ordinary type inference, under the assumption that we may need to AD
   # parts of the function later.
   ci = ad_typeinf(world, tt; force_inline_all, edges=Core.svec(factory_mi))
+end
+code_ad_by_type(@nospecialize(tt::Type); kwargs...) =
+  _code_ad_by_type(tt; kwargs...).inferred.ir
 
+function code_structure_by_type(@nospecialize(tt::Type); world::UInt = Base.tls_world_age(),  kwargs...)
+  ci = _code_ad_by_type(tt; world, kwargs...)
   # Perform or lookup DAECompiler specific analysis for this system.
   result = structural_analysis!(ci, world)
   return result.ir
 end
+
 
 """
     @code_structure ssrm()
@@ -41,4 +53,8 @@ Parameters:
 """
 macro code_structure(exs...)
   gen_call_with_extracted_types_and_kwargs(__module__, :code_structure, exs)
+end
+
+macro code_ad(exs...)
+  gen_call_with_extracted_types_and_kwargs(__module__, :code_ad, exs)
 end

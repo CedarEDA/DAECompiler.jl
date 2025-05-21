@@ -109,7 +109,7 @@ struct Incidence
     typ::Union{Type, Const}
     row::IncidenceVector
 
-    function Incidence(@nospecialize(type), row)
+    function Incidence(@nospecialize(type), row::AbstractVector)
         if is_non_incidence_type(type)
             throw(DomainError(type, "Invalid type for Incidence"))
         end
@@ -197,6 +197,12 @@ function Incidence(v::Int)
     row = _zero_row()
     row[v+1] = 1.0
     return Incidence(_ZERO_CONST, row)
+end
+function Incidence(T::Union{Type, Compiler.Const}, v::Int)
+    T === Float64 && return Incidence(v)
+    row = _zero_row()
+    row[v+1] = nonlinear
+    return Incidence(T, row)
 end
 
 "Identify the id number of an equation or variable"

@@ -1,6 +1,6 @@
 
 function init_uncompress_gen(result::DAEIPOResult, ci::CodeInstance, init_key::TornCacheKey, diff_key::TornCacheKey, world::UInt)
-    ir_factory = copy(result.ir)
+    ir_factory = copy(ci.inferred.ir)
     pushfirst!(ir_factory.argtypes, Settings)
     pushfirst!(ir_factory.argtypes, typeof(factory))
     compact = IncrementalCompact(ir_factory)
@@ -9,6 +9,7 @@ function init_uncompress_gen(result::DAEIPOResult, ci::CodeInstance, init_key::T
     insert_node_here!(compact, NewInstruction(ReturnNode(new_oc), Core.OpaqueClosure, result.ir[SSAValue(1)][:line]), true)
 
     ir_factory = Compiler.finish(compact)
+    Compiler.verify_ir(ir_factory)
 
     return ir_factory
 end
@@ -25,7 +26,7 @@ function init_uncompress_gen!(compact::Compiler.IncrementalCompact, result::DAEI
         @assert sicm_ci !== nothing
 
         line = result.ir[SSAValue(1)][:line]
-        param_list = flatten_parameter!(compact, result.ir.argtypes[1:end], argn->Argument(2+argn), line)
+        param_list = flatten_parameter!(Compiler.fallback_lattice, compact, ci.inferred.ir.argtypes[1:end], argn->Argument(2+argn), line)
         sicm = insert_node_here!(compact,
             NewInstruction(Expr(:call, invoke, param_list, sicm_ci), Tuple, line))
     else
@@ -49,11 +50,12 @@ function init_uncompress_gen!(compact::Compiler.IncrementalCompact, result::DAEI
         (kind != AlgebraicDerivative) && push!(all_states, var)
     end
 
-    ir_oc = copy(result.ir)
+    ir_oc = copy(ci.inferred.ir)
     empty!(ir_oc.argtypes)
     push!(ir_oc.argtypes, Tuple)
     push!(ir_oc.argtypes, Any)
 
+    Compiler.verify_ir(ir_oc)
     oc_compact = IncrementalCompact(ir_oc)
     line = ir_oc[SSAValue(1)][:line]
 
