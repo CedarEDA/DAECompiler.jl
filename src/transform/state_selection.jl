@@ -14,7 +14,7 @@ function StateSelection.linear_subsys_adjmat!(state::TransformationState)
     linear_equations = Vector{Int}()
     for (i, inc) in enumerate(state.total_incidence)
         isa(inc, Const) && continue
-        any(x->x === nonlinear || !isinteger(x), nonzeros(inc.row)) && continue
+        any(x->isa(x, Linearity) || !isinteger(x), nonzeros(inc.row)) && continue
         (isa(inc.typ, Const) && iszero(inc.typ.val)) || continue
         # Skip any equations involving `t` for now
         # TODO: We may want to adjust our ILS to include equations with `t` in them.
@@ -91,7 +91,7 @@ function ssrm!(state::TransformationState)
         for g in (s.graph, s.solvable_graph)
             StateSelection.set_neighbors!(g, e, ils.row_cols[ei])
         end
-        state.total_incidence[e] = Incidence(Const(0.), IncidenceVector(MAX_EQS, map(x->x+1, ils.row_cols[ei]), Union{Float64, NonLinear}[Float64(x) for x in ils.row_vals[ei]]))
+        state.total_incidence[e] = Incidence(Const(0.), IncidenceVector(MAX_EQS, map(x->x+1, ils.row_cols[ei]), IncidenceValue[Float64(x) for x in ils.row_vals[ei]]))
     end
 end
 

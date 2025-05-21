@@ -80,7 +80,8 @@ function schedule_incidence!(compact, var_eq_matching, curval, incT::Incidence, 
             continue
         end
 
-        coeff == nonlinear && continue
+        # XXX: what to do with the linear parts that have an unknown coefficient?
+        isa(coeff, Float64) || continue
 
         if lin_var == 0
             lin_var_ssa = insert_node_here!(compact,

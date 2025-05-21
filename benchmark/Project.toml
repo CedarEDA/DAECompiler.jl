@@ -1,9 +1,12 @@
 [deps]
 Compiler = "807dbc54-b67e-4c79-8afb-eafe4df6f2e1"
 DAECompiler = "32805668-c3d0-42c2-aafd-0d0a9857a104"
+Polynomials = "f27b6e38-b328-58d1-80ce-0feddd5e7a45"
 SciMLBase = "0bca4576-84f4-4d90-8ffe-ffa030f20462"
 Sundials = "c3572dad-4567-51f8-b174-8c6c989267f4"
 XSteam = "95ff35a0-be81-11e9-2ca3-5b4e338e8476"
 
 [sources]
+Compiler = {rev = "master", url = "https://github.com/JuliaLang/BaseCompiler.jl.git"}
+DAECompiler = {path = "."}
 XSteam = {rev = "master", url = "https://github.com/hzgzh/XSteam.jl.git"}

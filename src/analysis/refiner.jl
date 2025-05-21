@@ -91,28 +91,44 @@ function structural_inc_ddt(var_to_diff::DiffGraph, varclassification::Union{Vec
         return dv + 1
     end
     base = isa(inc.typ, Const) ? Const(zero(inc.typ.val)) : inc.typ
-    for (v_offset, coeff) in zip(rowvals(inc.row), nonzeros(inc.row))
+    indices = rowvals(inc.row)
+    for (v_offset, coeff) in zip(indices, nonzeros(inc.row))
         if v_offset == 1
             # t
-            if isa(base, Const)
-                if isa(coeff, Float64)
+            if isa(coeff, Float64) # known constant coefficient
+                # Do not set r[v_offset]; d/dt t = 1
+                if isa(base, Const)
                     base = Const(base.val + coeff)
-                    # Do not set r[v_offset]; d/dt t = 1
-                else
-                    r[v_offset] = nonlinear
                 end
-            elseif !isa(coeff, Const)
+            elseif coeff.nonlinear
                 r[v_offset] = nonlinear
+            else
+                @assert !coeff.time_dependent # should be nonlinear if time-dependent
+                if coeff.state_dependent # e.g. u₁ * t
+                    # State dependence will not be eliminated because of the chain rule.
+                    r[v_offset] = coeff
+                else # unknown constant coefficient
+                    if isa(base, Const)
+                        # We are adding an unknown but constant value to the
+                        # result, additive `Const` information is no longer accurate.
+                        base = widenconst(base)
+                    end
+                end
             end
             continue
         end
         if isa(coeff, Float64)
-            # Linear, just add to the derivative
+            # Linear with a known constant coefficient, just add to the derivative
             r[get_or_make_diff(v_offset)] += coeff
-        else
-            # nonlinear
+        elseif !coeff.state_dependent && !coeff.time_dependent
+            # Linear with an unknown constant coefficient.
+            r[get_or_make_diff(v_offset)] = coeff
+        elseif coeff.nonlinear
             r[v_offset] = nonlinear
             r[get_or_make_diff(v_offset)] = nonlinear
+        else # time- or state-dependent linear coefficient
+            r[v_offset] = coeff
+            r[get_or_make_diff(v_offset)] = coeff
         end
     end
     return Incidence(base, r)
@@ -177,8 +193,27 @@ function tfunc(::Val{Core.Intrinsics.mul_float}, @nospecialize(a::Union{Const, T
         return Incidence(builtin_math_tfunc(Core.Intrinsics.mul_float, a.typ, b), a.row * b.val)
     end
     rrow = _zero_row()
-    for i in Iterators.flatten((rowvals(a.row), rowvals(b.row)))
-        rrow[i] = nonlinear
+    ia = rowvals(a.row)
+    ib = rowvals(b.row)
+    time_dependent = in(1, ia) || in(1, ib)
+    states = union(filter(≠(1), ia), filter(≠(1), ib))
+    for i in Iterators.flatten((ia, ib))
+        x = a.row[i]
+        y = b.row[i]
+        if x ≠ 0 && y ≠ 0
+            val = nonlinear
+        else
+            val = x * y
+            if isa(val, Float64)
+                if i == 1 && !isempty(states) # time; state-dependent factors will appear after distribution
+                    val = Linearity(; time_dependent = false, state_dependent = true, nonlinear = false)
+                elseif i > 1 # state
+                    state_dependent = any(≠(i), states)
+                    val = Linearity(; time_dependent, state_dependent, nonlinear = false)
+                end
+            end
+        end
+        rrow[i] = val
     end
     return Incidence(builtin_math_tfunc(Core.Intrinsics.mul_float, a.typ, b.typ), rrow)
 end
@@ -215,7 +250,9 @@ function tfunc(::Val{Core.Intrinsics.div_float}, @nospecialize(a::Union{Const, T
     if isa(a, Incidence)
         rrow .+= a.row
     end
-    rrow .*= nonlinear
+    for i in rowvals(rrow)
+        rrow[i] = nonlinear
+    end
     return Incidence(builtin_math_tfunc(Core.Intrinsics.div_float, isa(a, Incidence) ? a.typ : a, widenconst(b.typ)), rrow)
 end
 

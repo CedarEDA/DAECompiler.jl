@@ -1,7 +1,12 @@
 include("basic.jl")
 include("reflection.jl")
+include("incidence.jl")
 include("ipo.jl")
 include("ssrm.jl")
 include("regression.jl")
 include("invalidation.jl")
-include("../benchmark/thermalfluid.jl")
+
+using Pkg
+Pkg.activate(joinpath(dirname(@__DIR__), "benchmark")) do
+  include("../benchmark/thermalfluid.jl")
+end

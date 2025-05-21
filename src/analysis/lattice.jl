@@ -39,56 +39,82 @@ Compiler.widenlattice(::EqStructureLattice) = Compiler.ConstsLattice()
 Compiler.is_valid_lattice_norec(::EqStructureLattice, @nospecialize(v)) = isa(v, Incidence) || isa(v, Eq) || isa(v, PartialScope) || isa(v, PartialKeyValue)
 Compiler.has_extended_unionsplit(::EqStructureLattice) = true
 
-############################## NonLinear #######################################
+############################## Linearity #######################################
 
+# XXX: update docstring
 """
-    struct NonLinear
+    struct Linearity
+        nonlinear::Bool = true
+    end
 
-This singleton number is similar to `missing` in that arithmatic with it is
+This struct expresses linearity information: linear or nonlinear.
+
+Nonlinearity is similar to `missing` in that arithmetic with it is
 saturating. When used as a coefficient in the Incidence lattice, it indicates
 that the corresponding variable does not have a (constant) linear coefficient.
 This may either mean that the variable in question has a non-constant linear
 coefficient or that the variable is used non-linearly. We do not currently
 distinguish the two situations.
 """
-struct NonLinear; end
-Base.iszero(::NonLinear) = false
-Base.zero(::Type{Union{NonLinear, Float64}}) = 0.
-for f in (:+, :-)
-    @eval begin
-        Base.$f(a::Real, b::NonLinear) = b
-        Base.$f(a::NonLinear, b::Real) = a
-        Base.$f(a::NonLinear, b::NonLinear) = nonlinear
-        Base.$f(::NonLinear) = nonlinear
+Base.@kwdef struct Linearity
+    time_dependent::Bool = true
+    state_dependent::Bool = true
+    nonlinear::Bool = true
+    function Linearity(time_dependent, state_dependent, nonlinear)
+        if nonlinear && (!time_dependent || !state_dependent)
+            throw(ArgumentError("Modeling of state or time independence is not supported for nonlinearities"))
+        end
+        new(time_dependent, state_dependent, nonlinear)
     end
 end
 
-Base.:(*)(a::Real, b::NonLinear) = iszero(a) ? a : b
-Base.:(*)(a::NonLinear, b::Real) = iszero(b) ? b : a
-Base.:(*)(a::NonLinear, b::NonLinear) = nonlinear
-Base.div(a::Real, b::NonLinear) = iszero(a) ? a : b
-Base.div(a::NonLinear, b::Real) = a
-Base.div(a::NonLinear, b::NonLinear) = a
-Base.:(/)(a::Real, b::NonLinear) = iszero(a) ? a : b
-Base.:(/)(a::NonLinear, b::Real) = a
-Base.:(/)(a::NonLinear, b::NonLinear) = a
-Base.rem(a::Real, b::NonLinear) = b
-Base.rem(a::NonLinear, b::Real) = a
-Base.rem(a::NonLinear, b::NonLinear) = a
-Base.abs(a::NonLinear) = nonlinear
-Base.isone(a::NonLinear) = false
+const linear = Linearity(time_dependent = false, state_dependent = false, nonlinear = false)
+const linear_time_dependent = Linearity(state_dependent = false, nonlinear = false)
+const linear_state_dependent = Linearity(time_dependent = false, nonlinear = false)
+const linear_time_and_state_dependent = Linearity(nonlinear = false)
+const nonlinear = Linearity()
 
-const nonlinear = NonLinear.instance
-Base.Broadcast.broadcastable(::NonLinear) = Ref(nonlinear)
+join_linearity(a::Linearity, b::Real) = a
+join_linearity(a::Real, b::Linearity) = b
+join_linearity(a::Real, b::Real) = a == b ? promote(a, b) : Linearity(time_dependent = false, state_dependent = false, nonlinear = false)
+function join_linearity(a::Linearity, b::Linearity)
+    (a.nonlinear | b.nonlinear) && return nonlinear
+    return Linearity(; time_dependent = a.time_dependent | b.time_dependent, state_dependent = a.state_dependent | b.state_dependent, nonlinear = false)
+end
+
+Base.iszero(::Linearity) = false
+Base.zero(::Type{Union{Linearity, Float64}}) = 0.
+for f in (:+, :-)
+    @eval begin
+        Base.$f(a::Real, b::Linearity) = b
+        Base.$f(a::Linearity, b::Real) = a
+        Base.$f(a::Linearity, b::Linearity) = join_linearity(a, b)
+        Base.$f(a::Linearity) = a
+    end
+end
+
+Base.:(*)(a::Real, b::Linearity) = iszero(a) ? a : b
+Base.:(*)(a::Linearity, b::Real) = iszero(b) ? b : a
+Base.div(a::Real, b::Linearity) = iszero(a) ? a : nonlinear
+Base.div(a::Linearity, b::Real) = a
+Base.div(a::Linearity, b::Linearity) = nonlinear
+Base.:(/)(a::Real, b::Linearity) = iszero(a) ? a : nonlinear
+Base.:(/)(a::Linearity, b::Real) = a
+Base.:(/)(a::Linearity, b::Linearity) = nonlinear
+Base.rem(a::Real, b::Linearity) = b
+Base.rem(a::Linearity, b::Real) = a
+Base.rem(a::Linearity, b::Linearity) = a
+Base.abs(a::Linearity) = nonlinear
+Base.isone(a::Linearity) = false
+
+Base.Broadcast.broadcastable(x::Linearity) = Ref(x)
 
 ############################## Incidence #######################################
 # TODO: Just use Infinities.jl here?
 const MAX_EQS = div(typemax(Int), 2)
 
-# For now, we only track exact, integer linearities, because that's what
-# MTK can handle, so `nonlinear` includes linear operations with floating
-# point values.
-const IncidenceVector = SparseVector{Union{Float64, NonLinear}, Int}
+const IncidenceValue = Union{Float64, Linearity}
+const IncidenceVector = SparseVector{IncidenceValue, Int}
 
 is_non_incidence_type(@nospecialize(type)) = type === Union{} || Base.issingletontype(type)
 
@@ -112,6 +138,24 @@ struct Incidence
     function Incidence(@nospecialize(type), row)
         if is_non_incidence_type(type)
             throw(DomainError(type, "Invalid type for Incidence"))
+        end
+        row = convert(IncidenceVector, row)
+        time = row[1]
+        if in(time, (linear_time_dependent, linear_time_and_state_dependent))
+            throw(ArgumentError("Time incidence cannot be both linear and time-dependent, otherwise it would be nonlinear"))
+        end
+        for (i, coeff) in zip(rowvals(row), nonzeros(row))
+            isa(coeff, Linearity) || continue
+            coeff.nonlinear && continue
+            if coeff.time_dependent && !in(1, rowvals(row))
+                throw(ArgumentError("Time-dependent incidence annotation for $(subscript_state(i)) is inconsistent with an absence of time incidence"))
+            end
+            if coeff.state_dependent && !any(x -> x != 1, rowvals(row))
+                throw(ArgumentError("State-dependent incidence annotation for $(subscript_state(i)) is inconsistent with an absence of state incidence"))
+            end
+            if i > 1 && coeff.time_dependent && (isa(time, Float64) || !time.state_dependent)
+                throw(ArgumentError("Time-dependent state incidence for $(subscript_state(i)) is inconsistent with an absence of state dependence for time"))
+            end
         end
         return new(type, row)
     end
@@ -148,33 +192,52 @@ function Base.show(io::IO, inc::Incidence)
         else
             print(io, minus ? " - " : " + ")
         end
+    time = inc.row[1]
+    time_linear = time !== nonlinear
+    is_grouped(v, i) = isa(v, Linearity) && (v.state_dependent || (v.time_dependent || i == 1) && in(time, (linear_state_dependent, nonlinear)))
     for (i, v) in zip(rowvals(inc.row), nonzeros(inc.row))
-        v !== nonlinear || continue
-        print_plusminus(io, v < 0)
-        if abs(v) != 1 || i == 1
-            print(io, abs(v))
+        is_grouped(v, i) && continue
+        if isa(v, Float64)
+            print_plusminus(io, v < 0)
+            if abs(v) != 1
+                print(io, abs(v))
+            end
+        else
+            !first && print(io, " + ")
+            first = false
+            if !is_grouped(inc.row[1], 1)
+                ᵢ = i > 1 ? subscript(i - 1) : 'ₜ'
+                if v.time_dependent
+                    print(io, time_linear ? "∝t" : "f$ᵢ(t)", " * ")
+                else # unknown constant coefficient
+                    print(io, "c$ᵢ * ")
+                end
+            end
         end
         print(io, subscript_state(i))
     end
-    first_nonlinear = true
-    for (i, v) in zip(rowvals(inc.row), nonzeros(inc.row))
-        v === nonlinear || continue
-        if first_nonlinear
-            print_plusminus(io)
-            first_nonlinear = false
-            print(io, "f(")
-        else
-            print(io, ", ")
+    first_grouped = true
+    if any(i -> is_grouped(inc.row[i], i), rowvals(inc.row))
+        for (i, v) in zip(rowvals(inc.row), nonzeros(inc.row))
+            !is_grouped(v, i) && continue
+            if first_grouped
+                print_plusminus(io)
+                first_grouped = false
+                print(io, "f(")
+            else
+                print(io, ", ")
+            end
+            !v.nonlinear && print(io, '∝')
+            print(io, subscript_state(i))
         end
-        print(io, i == 1 ? "t" : subscript_state(i))
-    end
-    if !first_nonlinear
-        print(io, ")")
+        if !first_grouped
+            print(io, ")")
+        end
     end
     print(io, ")")
 end
 
-_zero_row() = IncidenceVector(MAX_EQS, Int[], Union{Float64, NonLinear}[])
+_zero_row() = IncidenceVector(MAX_EQS, Int[], IncidenceValue[])
 const _ZERO_ROW = _zero_row()
 const _ZERO_CONST = Const(0.0)
 Base.zero(::Type{Incidence}) = Incidence(_ZERO_CONST, _zero_row())
@@ -584,17 +647,14 @@ function _aggressive_incidence_join(@nospecialize(rt), argtypes::Vector{Any})
             for (i, v) in zip(rowvals(a.row), nonzeros(a.row))
                 # as long as they are equal then it is correct for both so nothing to do
                 if inci.row[i] != v
-                    # Otherwise it can't be either but must allow both. We would ideally represent this as
-                    # `LinearUnion{rr[i], v}` or `Linear`, but we don't have lattice elements like that
-                    # `NonLinear` is our more general representation
-                    inci.row[i] = nonlinear
+                    # Otherwise it can't be either but must allow both.
+                    inci.row[i] = join_linearity(inci.row[i], v)
                 end
             end
             # and the the other way: catch places that `rr` is nonzero but `aa` is zero
             for (i, v) in zip(rowvals(inci.row), nonzeros(inci.row))
                 if a.row[i] != v
-                    # mix of nonlinear and linear, or again: a mix of two different linear coefficients
-                    inci.row[i] = nonlinear
+                    inci.row[i] = join_linearity(a.row[i], v)
                 end
             end
         end
