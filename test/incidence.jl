@@ -1,4 +1,4 @@
-module Incidence
+module _Incidence
 
 using Test
 using DAECompiler
