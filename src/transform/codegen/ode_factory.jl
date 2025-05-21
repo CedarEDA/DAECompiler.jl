@@ -59,7 +59,7 @@ function ode_factory_gen(state::TransformationState, ci::CodeInstance, key::Torn
 
     (;ir_sicm) = torn_ir
 
-    ir_factory = copy(result.ir)
+    ir_factory = copy(ci.inferred.ir)
     pushfirst!(ir_factory.argtypes, Settings)
     pushfirst!(ir_factory.argtypes, typeof(factory))
     compact = IncrementalCompact(ir_factory)
@@ -70,7 +70,7 @@ function ode_factory_gen(state::TransformationState, ci::CodeInstance, key::Torn
         @assert sicm_ci !== nothing
 
         line = result.ir[SSAValue(1)][:line]
-        param_list = flatten_parameter!(compact, result.ir.argtypes[1:end], argn->Argument(2+argn), line)
+        param_list = flatten_parameter!(Compiler.fallback_lattice, compact, ci.inferred.ir.argtypes[1:end], argn->Argument(2+argn), line)
         sicm = insert_node_here!(compact,
             NewInstruction(Expr(:call, invoke, param_list, sicm_ci), Tuple, line))
     else
@@ -91,11 +91,12 @@ function ode_factory_gen(state::TransformationState, ci::CodeInstance, key::Torn
         (kind != AlgebraicDerivative) && push!(all_states, var)
     end
 
-    ir_oc = copy(result.ir)
+    ir_oc = copy(ci.inferred.ir)
     empty!(ir_oc.argtypes)
     argt = Tuple{Vector{Float64}, Vector{Float64}, SciMLBase.NullParameters, Float64}
     push!(ir_oc.argtypes, Tuple)
     append!(ir_oc.argtypes, fieldtypes(argt))
+    Compiler.verify_ir(ir_oc)
 
     oc_compact = IncrementalCompact(ir_oc)
     self = Argument(1)
@@ -149,6 +150,7 @@ function ode_factory_gen(state::TransformationState, ci::CodeInstance, key::Torn
     @insert_node_here compact line (return odef_and_n)::Core.OpaqueClosure true
 
     ir_factory = Compiler.finish(compact)
+    Compiler.verify_ir(ir_factory)
 
     return ir_factory
 end

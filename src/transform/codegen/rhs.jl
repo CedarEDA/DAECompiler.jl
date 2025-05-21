@@ -99,6 +99,7 @@ function rhs_finish!(
     var_eq_matching = matching_for_key(result, key, state.structure)
     (slot_assignments, var_assignment, eq_assignment) = assign_slots(state, key, var_eq_matching)
 
+
     torn_ci = find_matching_ci(ci->isa(ci.owner, TornIRSpec) && ci.owner.key == key, ci.def, world)
     torn = torn_ci.inferred
     rhs_ms = nothing
@@ -166,7 +167,8 @@ function rhs_finish!(
                 push!(stmt.args, in_vars)
 
                 # Ordering from tearing is (AssignedDiff, UnassignedDiff, Algebraic, Explicit)
-                for (arg, range) in zip(arg_range, compute_slot_ranges(info, callee_key, var_assignment, eq_assignment))
+                slot_ranges = compute_slot_ranges(info, callee_key, var_assignment, eq_assignment)
+                for (arg, range) in zip(arg_range, slot_ranges)
                     push!(stmt.args, insert_node!(ir, SSAValue(i),
                         NewInstruction(inst;
                         stmt=Expr(:call, view, Argument(arg), range),
@@ -229,6 +231,8 @@ function rhs_finish!(
 
         widen_extra_info!(ir)
         Compiler.verify_ir(ir)
+        #println("RHS #ordinal $(ir_ordinal) for $(Compiler.get_ci_mi(ci)):")
+        #display(ir)
         src = ir_to_src(ir)
 
         abi = Tuple{Tuple, Tuple, (VectorViewType for _ in arg_range)..., Float64}

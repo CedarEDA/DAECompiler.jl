@@ -21,6 +21,15 @@ end
     var_schedule::Vector{Pair{BitSet, BitSet}}
 end
 
+"""
+    StructuralSSARef
+
+Represents an SSA reference to the IR after structural analysis. Used as keys for callees, etc.
+"""
+struct StructuralSSARef
+    id::Int
+end
+
 struct DAEIPOResult
     ir::IRCode
     extended_rt::Any
@@ -34,7 +43,7 @@ struct DAEIPOResult
     varclassification::Vector{VarEqClassification}
     total_incidence::Vector{Any}
     eqclassification::Vector{VarEqClassification}
-    eq_callee_mapping::Vector{Union{Nothing, Vector{Pair{SSAValue, Int}}}}
+    eq_callee_mapping::Vector{Union{Nothing, Vector{Pair{StructuralSSARef, Int}}}}
     names::OrderedDict{Any, ScopeDictEntry} # TODO: OrderedIdDict
     varkinds::Vector{Union{Intrinsics.VarKind, Nothing}}
     eqkinds::Vector{Union{Intrinsics.EqKind, Nothing}}

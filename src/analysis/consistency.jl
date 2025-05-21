@@ -27,7 +27,7 @@ function get_inline_backtrace(ir::IRCode, v::SSAValue)
     runtime_jl_path = maybe_realpath(joinpath(dirname(pathof(@__MODULE__)), "runtime.jl"))
 
     frames = Base.StackTrace();
-    for lineinfo in Base.IRShow.buildLineInfoNode(ir.debuginfo, nothing, v.id)
+    for lineinfo in Compiler.IRShow.buildLineInfoNode(ir.debuginfo, nothing, v.id)
         btpath = maybe_realpath(expanduser(string(lineinfo.file)))
         if btpath != runtime_jl_path
             frame = Base.StackFrame(lineinfo.method, lineinfo.file, lineinfo.line)
