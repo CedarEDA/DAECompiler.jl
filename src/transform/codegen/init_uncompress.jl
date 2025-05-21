@@ -149,6 +149,7 @@ function gen_init_uncompress!(
             insert_node!(ir, idx, ni)
         end
         ir = Compiler.compact!(ir)
+        Compiler.verify_ir(ir)
 
         widen_extra_info!(ir)
         src = ir_to_src(ir)

@@ -37,10 +37,26 @@ function factory_gen(world::UInt, source::Method, @nospecialize(_gen), settings,
             @__MODULE__, false)
     end
 
-    # Select differential and algebraic states
     structure = make_structure_from_ipo(result)
     tstate = TransformationState(result, structure, copy(result.total_incidence))
-    (diff_key, init_key) = top_level_state_selection!(tstate)
+
+    # Ensure that the system is a consistent DAE system
+    err = StateSelection.check_consistency(tstate, nothing)
+    if err !== nothing
+        return Base.generated_body_to_codeinfo(
+            Expr(:lambda, Any[:var"#self", :settings, :f], Expr(:block, Expr(:return, Expr(:call, throw, err)))),
+            @__MODULE__, false)
+    end
+
+    # Select differential and algebraic states
+    ret = top_level_state_selection!(tstate)
+
+    if isa(ret, UncompilableIPOResult)
+        return Base.generated_body_to_codeinfo(
+            Expr(:lambda, Any[:var"#self", :settings, :f], Expr(:block, Expr(:return, Expr(:call, throw, ret.error)))),
+            @__MODULE__, false)
+    end
+    (diff_key, init_key) = ret
 
     if settings.mode in (DAE, DAENoInit, ODE, ODENoInit)
         tearing_schedule!(tstate, ci, diff_key, world)

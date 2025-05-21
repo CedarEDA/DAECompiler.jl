@@ -4,6 +4,7 @@ include("incidence.jl")
 include("ipo.jl")
 include("ssrm.jl")
 include("regression.jl")
+include("errors.jl")
 include("invalidation.jl")
 
 using Pkg

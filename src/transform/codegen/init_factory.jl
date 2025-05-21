@@ -1,6 +1,6 @@
 
 function init_uncompress_gen(result::DAEIPOResult, ci::CodeInstance, init_key::TornCacheKey, diff_key::TornCacheKey, world::UInt)
-    ir_factory = copy(result.ir)
+    ir_factory = copy(ci.inferred.ir)
     pushfirst!(ir_factory.argtypes, Settings)
     pushfirst!(ir_factory.argtypes, typeof(factory))
     compact = IncrementalCompact(ir_factory)
@@ -9,6 +9,7 @@ function init_uncompress_gen(result::DAEIPOResult, ci::CodeInstance, init_key::T
     insert_node_here!(compact, NewInstruction(ReturnNode(new_oc), Core.OpaqueClosure, result.ir[SSAValue(1)][:line]), true)
 
     ir_factory = Compiler.finish(compact)
+    Compiler.verify_ir(ir_factory)
 
     return ir_factory
 end
@@ -25,10 +26,9 @@ function init_uncompress_gen!(compact::Compiler.IncrementalCompact, result::DAEI
         @assert sicm_ci !== nothing
 
         line = result.ir[SSAValue(1)][:line]
-        #insert_node_here!(compact, NewInstruction(Expr(:call, println, "Trace: A"), Cvoid, line))
+        param_list = flatten_parameter!(Compiler.fallback_lattice, compact, ci.inferred.ir.argtypes[1:end], argn->Argument(2+argn), line)
         sicm = insert_node_here!(compact,
-            NewInstruction(Expr(:call, invoke, Argument(3), sicm_ci, (Argument(i+1) for i = 2:length(result.ir.argtypes))...), Tuple, line))
-        #insert_node_here!(compact, NewInstruction(Expr(:call, println, "Trace: B"), Cvoid, line))
+            NewInstruction(Expr(:call, invoke, param_list, sicm_ci), Tuple, line))
     else
         sicm = ()
     end
@@ -50,11 +50,12 @@ function init_uncompress_gen!(compact::Compiler.IncrementalCompact, result::DAEI
         (kind != AlgebraicDerivative) && push!(all_states, var)
     end
 
-    ir_oc = copy(result.ir)
+    ir_oc = copy(ci.inferred.ir)
     empty!(ir_oc.argtypes)
     push!(ir_oc.argtypes, Tuple)
     push!(ir_oc.argtypes, Any)
 
+    Compiler.verify_ir(ir_oc)
     oc_compact = IncrementalCompact(ir_oc)
     line = ir_oc[SSAValue(1)][:line]
 
@@ -76,7 +77,7 @@ function init_uncompress_gen!(compact::Compiler.IncrementalCompact, result::DAEI
     ntotalstates = numstates[AssignedDiff] + numstates[UnassignedDiff] + numstates[Algebraic]
 
     (out_u_mm, out_u_unassgn, out_alg) = sciml_dae_split_u!(oc_compact, line, out_arr, numstates)
-    (out_du_unassgn, _) = sciml_dae_split_du!(oc_compact, line, scratch_arr, numstates) 
+    (out_du_unassgn, _) = sciml_dae_split_du!(oc_compact, line, scratch_arr, numstates)
 
     # Call DAECompiler-generated RHS with internal ABI
     oc_sicm = insert_node_here!(oc_compact,

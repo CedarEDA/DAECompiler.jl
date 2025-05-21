@@ -151,55 +151,12 @@ function apply_linear_incidence(𝕃, ret::PartialStruct, caller::CallerMappingS
     return PartialStruct(𝕃, ret.typ, Any[apply_linear_incidence(𝕃, f, caller, mapping) for f in ret.fields])
 end
 
-
-function process_template!(𝕃, coeffs, eq_mapping, applied_scopes, argtypes, template_argtypes)
-    for (arg, template) in zip(argtypes, template_argtypes)
-        if isa(template, Incidence)
-            if isempty(template)
-                # @assert iszero(arg)
-                continue
-            end
-            (idxs, vals) = findnz(template.row)
-            @assert only(vals) == 1.0
-            @assert !isassigned(coeffs, only(idxs)-1)
-            coeffs[only(idxs)-1] = arg
-        elseif isa(template, Eq)
-            @assert isa(arg, Eq)
-            eq_mapping[idnum(template)] = idnum(arg)
-        elseif Compiler.is_const_argtype(template)
-            #@CC.show (arg, template)
-            #@assert CC.is_lattice_equal(DAE_LATTICE, arg, template)
-        elseif isa(template, PartialScope)
-            id = idnum(template)
-            (id > length(applied_scopes)) && resize!(applied_scopes, id)
-            if isa(arg, Const)
-                @assert isa(arg.val, Union{Scope, Nothing})
-                applied_scopes[id] = arg.val
-            elseif isa(arg, PartialScope)
-                applied_scopes[id] = arg
-            else
-                applied_scopes[id] = arg
-            end
-        elseif isa(template, PartialStruct)
-            if isa(arg, PartialStruct)
-                fields = arg.fields
-            else
-                fields = Any[Compiler.getfield_tfunc(𝕃, arg, Const(i)) for i = 1:length(template.fields)]
-            end
-            process_template!(𝕃, coeffs, eq_mapping, applied_scopes, fields, template.fields)
-        else
-            @show (arg, template, template_argtypes)
-            error()
-        end
-    end
-end
-
-function CalleeMapping(𝕃::Compiler.AbstractLattice, argtypes::Vector{Any}, callee_result::DAEIPOResult)
+function CalleeMapping(𝕃::Compiler.AbstractLattice, argtypes::Vector{Any}, callee_result::DAEIPOResult, template_argtypes)
     applied_scopes = Any[]
     coeffs = Vector{Any}(undef, length(callee_result.var_to_diff))
     eq_mapping = fill(0, length(callee_result.total_incidence))
 
-    process_template!(𝕃, coeffs, eq_mapping, applied_scopes, argtypes, callee_result.argtypes)
+    process_template!(𝕃, coeffs, eq_mapping, applied_scopes, argtypes, template_argtypes)
 
     return CalleeMapping(coeffs, eq_mapping, applied_scopes)
 end

@@ -46,10 +46,10 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
 
     # Equations
     eqclassification = VarEqClassification[]
-    eqssas = Pair{Union{SSAValue, Argument}, Vector{SSAValue}}[]
+    eqssas = Union{SSAValue, Argument}[]
     eqkinds = Intrinsics.EqKind[]
     function add_equation!(i::Union{SSAValue, Argument})
-        push!(eqssas, i=>SSAValue[])
+        push!(eqssas, i)
         push!(eqclassification, isa(i, Argument) ? External : Owned)
         push!(eqkinds, Intrinsics.RemovedEq)
         return length(eqssas)
@@ -65,14 +65,19 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
     # Get the IR
     ir = copy(ci.inferred.ir)
 
+    compact = IncrementalCompact(ir)
+    old_argtypes = copy(ir.argtypes)
+    empty!(ir.argtypes)
+    (arg_replacements, new_argtypes, nexternalargvars) = flatten_arguments!(compact, old_argtypes, 0, ir.argtypes)
+    for i = 1:nexternalargvars
+        add_variable!(Argument(i))
+    end
+    argtypes = Any[Incidence(new_argtypes[i], i) for i = 1:nexternalargvars]
+
     # Allocate variable and equation numbers of any incoming arguments
     refiner = StructuralRefiner(world, var_to_diff, varkinds, varclassification)
-    argtypes = Any[make_argument_lattice_elem(Compiler.typeinf_lattice(refiner), Argument(i), argt, add_variable!, add_equation!, add_scope!) for (i, argt) in enumerate(ir.argtypes)]
     nexternalargvars = length(var_to_diff)
     nexternaleqs = length(eqssas)
-
-    # (::equation)(...) calls
-    eqcallssas = SSAValue[]
 
     # IR Warnings - this tracks cases of malformed optional information. The system
     # is still malformed, but something is likely wrong. These will get printed if
@@ -82,32 +87,39 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
     # Go through the IR, annotating each intrinsic with an appropriate taint
     # source lattice element.
     externally_refined = BitSet()
-    for (bb, i) in bbidxiter(ir)
-        stmt = ir.stmts[i][:inst]
+    for ((old_idx, i), stmt) in compact
+        urs = userefs(stmt)
+        compact[SSAValue(i)] = nothing
+        for ur in urs
+            if isa(ur[], Argument)
+                repl = arg_replacements[ur[].n]
+                ur[] = repl
+            end
+        end
+        stmt = urs[]
+        compact[SSAValue(i)] = stmt
         if isexpr(stmt, :invoke)
-            if is_known_invoke(stmt, variable, ir)
+            if is_known_invoke(stmt, variable, compact)
                 v = add_variable!(SSAValue(i))
-                ir.stmts[i][:type] = Incidence(v)
+                compact[SSAValue(i)][:type] = Incidence(v)
                 push!(externally_refined, i)
-            elseif is_known_invoke(stmt, equation, ir)
-                ir.stmts[i][:type] = Eq(add_equation!(SSAValue(i)))
+            elseif is_known_invoke(stmt, equation, compact)
+                compact[SSAValue(i)][:type] = Eq(add_equation!(SSAValue(i)))
                 push!(externally_refined, i)
-            elseif is_known_invoke(stmt, sim_time, ir)
-                ir.stmts[i][:type] = Incidence(0)
+            elseif is_known_invoke(stmt, sim_time, compact)
+                compact[SSAValue(i)][:type] = Incidence(0)
                 push!(externally_refined, i)
-            elseif is_equation_call(stmt, ir, #=allow_call=#false)
-                push!(eqcallssas, SSAValue(i))
             else
-                ir.stmts[i][:flag] |= Compiler.IR_FLAG_REFINED
+                compact[SSAValue(i)][:flag] |= Compiler.IR_FLAG_REFINED
             end
         elseif isexpr(stmt, :call)
-            if is_known_call(stmt, Core.current_scope, ir)
+            if is_known_call(stmt, Core.current_scope, compact)
                 # N.B.: We make the assumption here that all current_scope that
                 # was inside EnterScope within the same function has already
                 # been folded by SROA, so the only thing left are those that
                 # refer to the function's entry scope.
-                ir.stmts[i][:type] = cur_scope_lattice
-                ir.stmts[i][:flag] |= Compiler.IR_FLAG_REFINED
+                compact[SSAValue(i)][:type] = cur_scope_lattice
+                compact[SSAValue(i)][:flag] |= Compiler.IR_FLAG_REFINED
                 push!(externally_refined, i)
                 continue
             end
@@ -123,23 +135,23 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
         elseif isa(stmt, GlobalRef)
             continue
         elseif isexpr(stmt, :new)
-            newT = argextype(stmt.args[1], ir)
+            newT = argextype(stmt.args[1], compact)
             if isa(newT, Const) && newT.val === Intrinsics.ScopeIdentity
                 # Allocate the identity now. After inlining, we're guaranteed that
                 # every Expr(:new) uniquely corresponds to a scope identity, so this
                 # is legal here (but not before)
-                ir.stmts[i][:stmt] = Intrinsics.ScopeIdentity()
-                ir.stmts[i][:flag] |= CC.IR_FLAG_REFINED
+                compact[SSAValue(i)][:stmt] = Intrinsics.ScopeIdentity()
+                compact[SSAValue(i)][:flag] |= CC.IR_FLAG_REFINED
             end
             continue
         elseif isexpr(stmt, :splatnew)
             continue
         elseif isexpr(stmt, :boundscheck)
-            ir.stmts[i][:type] = Incidence(Bool)
-            ir.stmts[i][:flag] |= Compiler.IR_FLAG_REFINED
+            compact[SSAValue(i)][:type] = Incidence(Bool)
+            compact[SSAValue(i)][:flag] |= Compiler.IR_FLAG_REFINED
         elseif isa(stmt, PhiNode)
             # Take into account control-dependent taint
-            ir.stmts[i][:flag] |= Compiler.IR_FLAG_REFINED
+            compact[SSAValue(i)][:flag] |= Compiler.IR_FLAG_REFINED
         elseif isa(stmt, PiNode)
             continue
         elseif isa(stmt, GotoIfNot) || isa(stmt, GotoNode)
@@ -150,6 +162,7 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
             @show stmt
         end
     end
+    ir = Compiler.finish(compact)
 
     # Perform the actual dataflow analysis
     mi = Compiler.get_ci_mi(ci)
@@ -209,7 +222,7 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
     end
 
     # Do the same for equations
-    for (ieq, (ssa, _)) in enumerate(eqssas)
+    for (ieq, ssa) in enumerate(eqssas)
         inst = ir[ssa][:inst]::Union{Nothing, Expr}
         inst === nothing && continue # equation unused and was deleted
         @assert is_known_invoke(inst, equation, ir)
@@ -243,61 +256,61 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
 
     # Now record the association of (::equation)() calls with the equations that they originate from
     total_incidence = Vector{Any}(undef, length(eqssas))
-    for ssa in eqcallssas
-        eqcall = ir[ssa][:inst]
-        eqcall === nothing && continue # equation call was on a dead branch - deleted
-        eqeq = argextype(eqcall.args[2], ir)
 
-        if !isa(eqeq, Eq)
-            return UncompilableIPOResult(warnings, UnsupportedIRException("Equation call at $ssa has unknown equation reference.", ir))
-        end
-        ieq = eqeq.id
+    # Now go through and incorporate the structural information from any interior calls
+    eq_callee_mapping = Vector{Union{Nothing, Vector{Pair{StructuralSSARef, Int}}}}(nothing, length(eqssas))
+    handler_info = Compiler.compute_trycatch(ir)
+    ncallees = 0
+    compact = IncrementalCompact(ir)
+    for ((old_idx, i), stmt) in compact
+        stmt === nothing && continue
+        # No need to process error paths - even if they were to contain intrinsics, such intrinsics would have
+        # no effect.
+        compact[SSAValue(i)][:type] === Union{} && continue
+        isexpr(stmt, :invoke) || continue
+        is_known_invoke(stmt, variable, compact) && continue
+        is_known_invoke(stmt, equation, compact) && continue
+        is_known_invoke(stmt, sim_time, compact) && continue
+        is_known_invoke(stmt, ddt, compact) && continue
+        if is_equation_call(stmt, compact)
+            eqeq = argextype(stmt.args[2], compact)
 
-        eqssaval = eqcall.args[3]
-        if !isa(eqssaval, SSAValue) && !isa(eqssaval, Argument)
-            if !iszero(eqssaval)
-                return UncompilableIPOResult(warnings, UnsupportedIRException(
-                    "Equation call for $ieq at $ssa is set to $eqssaval. The system is unsolvable.", ir))
+            if !isa(eqeq, Eq)
+                return UncompilableIPOResult(warnings, UnsupportedIRException("Equation call at $ssa has unknown equation reference.", ir))
+            end
+            ieq = eqeq.id
+
+            eqssaval = stmt.args[3]
+            if !isa(eqssaval, SSAValue) && !isa(eqssaval, Argument)
+                if !iszero(eqssaval)
+                    return UncompilableIPOResult(warnings, UnsupportedIRException(
+                        "Equation call for $ieq at $ssa is set to $eqssaval. The system is unsolvable.", ir))
+                end
+                continue
+            end
+
+            inc = argextype(eqssaval, compact)
+            if !isa(inc, Incidence)
+                return UncompilableIPOResult(warnings, UnsupportedIRException("Expected incidence analysis to produce result for $eqssaval, got $inc", ir))
+            end
+            if isassigned(total_incidence, ieq)
+                total_incidence[ieq] += inc
+            else
+                total_incidence[ieq] = inc
             end
             continue
         end
 
-        inc = argextype(eqssaval, ir)
-        if !isa(inc, Incidence)
-            return UncompilableIPOResult(warnings, UnsupportedIRException("Expected incidence analysis to produce result for $eqssaval, got $inc", ir))
-        end
-        if isassigned(total_incidence, ieq)
-            total_incidence[ieq] += inc
-        else
-            total_incidence[ieq] = inc
-        end
-
-        push!(eqssas[ieq][2], ssa)
-    end
-
-    # Now go through and incorporate the structural information from any interior calls
-    eq_callee_mapping = Vector{Union{Nothing, Vector{Pair{SSAValue, Int}}}}(nothing, length(eqssas))
-    handler_info = Compiler.compute_trycatch(ir)
-    ncallees = 0
-    for i = 1:length(ir.stmts)
-        inst = ir[SSAValue(i)]
-        stmt = inst[:stmt]
-        stmt === nothing && continue
-        # No need to process error paths - even if they were to contain intrinsics, such intrinsics would have
-        # no effect.
-        inst[:type] === Union{} && continue
-        isexpr(stmt, :invoke) || continue
-        is_known_invoke(stmt, variable, ir) && continue
-        is_known_invoke(stmt, equation, ir) && continue
-        is_known_invoke(stmt, sim_time, ir) && continue
-        is_known_invoke(stmt, ddt, ir) && continue
-        is_equation_call(stmt, ir) && continue
+        inst = compact[SSAValue(i)]
+        stmtype = inst[:type]
+        stmtflags = inst[:flag]
+        line = inst[:line]
 
         info = inst[:info]
+        callee_codeinst = stmt.args[1]
         if isa(info, MappingInfo)
             (; result, mapping) = info
         else
-            callee_codeinst = stmt.args[1]
             result = structural_analysis!(callee_codeinst, Compiler.get_inference_world(refiner))
 
             if isa(result, UncompilableIPOResult)
@@ -305,17 +318,38 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
                 return result
             end
 
-            callee_argtypes = Compiler.collect_argtypes(refiner, stmt.args, Compiler.StatementState(nothing, false), irsv)[2:end]
-            mapping = CalleeMapping(Compiler.optimizer_lattice(refiner), callee_argtypes, result)
-            inst[:info] = MappingInfo(info, result, mapping)
+            callee_argtypes = Any[argextype(stmt.args[i], compact) for i in 2:length(stmt.args)]
+            mapping = CalleeMapping(Compiler.optimizer_lattice(refiner), callee_argtypes, result, callee_codeinst.inferred.ir.argtypes)
+            inst[:info] = info = MappingInfo(info, result, mapping)
         end
 
-        err = add_internal_equations_to_structure!(refiner, eqkinds, eqclassification, total_incidence, eq_callee_mapping, SSAValue(i),
+        # Determine whether this call is eligible for opaque treatement
+        if isa(result.extended_rt, Incidence) && isempty(result.total_incidence)
+            # For now, turn this into a call.
+            # TODO: We should keep the native code instance and use that
+            # TODO: Additional conditions:
+            #  - Does not introduce new variables
+            compact[SSAValue(i)] = nothing
+            compact[SSAValue(i)] = Expr(:call, stmt.args[2:end]...)
+            continue
+        end
+
+        # Rewrite to flattened ABI
+        compact[SSAValue(i)] = nothing
+        compact.result_idx -= 1
+        new_args = _flatten_parameter!(Compiler.optimizer_lattice(refiner), compact, callee_codeinst.inferred.ir.argtypes, arg->stmt.args[arg+1], line)
+
+        new_call = insert_node_here!(compact,
+                NewInstruction(Expr(:invoke, (StructuralSSARef(compact.result_idx), callee_codeinst), new_args...), stmtype, info, line, stmtflags))
+        compact.ssa_rename[compact.idx - 1] = new_call
+
+        err = add_internal_equations_to_structure!(refiner, eqkinds, eqclassification, total_incidence, eq_callee_mapping, StructuralSSARef(new_call.id),
             result, mapping)
         if err !== true
             return UncompilableIPOResult(warnings, UnsupportedIRException(err, ir))
         end
     end
+    ir = Compiler.finish(compact)
 
     var_to_diff = StateSelection.complete(var_to_diff)
     ultimate_rt, nimplicitoutpairs = process_ipo_return!(Compiler.typeinf_lattice(refiner), ultimate_rt, eqclassification, eqkinds, varclassification, varkinds,
@@ -384,7 +418,7 @@ function process_ipo_return!(𝕃, ultimate_rt::Incidence, eqclassification, eqk
 end
 
 function add_internal_equations_to_structure!(refiner::StructuralRefiner, eqkinds::Vector{Intrinsics.EqKind}, eqclassification::Vector{VarEqClassification}, total_incidence,
-        eq_callee_mapping::Vector{Union{Nothing, Vector{Pair{SSAValue, Int}}}}, thisssa::SSAValue, callee_result::DAEIPOResult, callee_mapping::CalleeMapping)
+        eq_callee_mapping::Vector{Union{Nothing, Vector{Pair{StructuralSSARef, Int}}}}, thisssa::StructuralSSARef, callee_result::DAEIPOResult, callee_mapping::CalleeMapping)
     cms = CallerMappingState(callee_result, refiner.var_to_diff, refiner.varclassification, refiner.varkinds, eqclassification)
     for i in 1:length(callee_mapping.var_coeffs)
         if !isassigned(callee_mapping.var_coeffs, i)

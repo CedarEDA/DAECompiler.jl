@@ -1,5 +1,6 @@
 function is_known_invoke(@nospecialize(x), @nospecialize(func), ir::Union{IRCode,IncrementalCompact})
     isexpr(x, :invoke) || return false
+    length(x.args) <= 1 && return false
     ft = argextype(x.args[2], ir)
     return singleton_type(ft) === func
 end
@@ -7,6 +8,7 @@ end
 function is_equation_call(@nospecialize(x), ir::Union{IRCode,IncrementalCompact},
         allow_call::Bool=true)
     isexpr(x, :invoke) || (allow_call && isexpr(x, :call)) || return false
+    isexpr(x, :invoke) && length(x.args) <= 1 && return false
     ft = argextype(_eq_function_arg(x), ir)
     return widenconst(ft) === equation
 end

@@ -57,7 +57,9 @@ Compiler.cache_owner(::StructuralRefiner) = StructureCache()
     end
 
     argtypes = Compiler.collect_argtypes(interp, stmt.args, Compiler.StatementState(nothing, false), irsv)[2:end]
-    mapping = CalleeMapping(Compiler.optimizer_lattice(interp), argtypes, callee_result)
+    m = Compiler.get_ci_mi(callee_codeinst).def
+    argtypes = Compiler.va_process_argtypes(Compiler.optimizer_lattice(interp), argtypes, UInt(m.nargs), m.isva)
+    mapping = CalleeMapping(Compiler.optimizer_lattice(interp), argtypes, callee_result, callee_codeinst.inferred.ir.argtypes)
     new_rt = apply_linear_incidence(Compiler.optimizer_lattice(interp), callee_result.extended_rt,
         CallerMappingState(callee_result, interp.var_to_diff, interp.varclassification, interp.varkinds, VarEqClassification[]), mapping)
 
@@ -180,7 +182,7 @@ function tfunc(F::Union{Val{Core.Intrinsics.sub_float}, Val{Core.Intrinsics.sub_
     return Incidence(const_val, rrow)
 end
 
-function tfunc(::Val{Core.Intrinsics.mul_float}, @nospecialize(a::Union{Const, Type{Float64}, Incidence}), @nospecialize(b::Union{Const, Type{Float64}, Incidence}))
+function tfunc(::Union{Val{Core.Intrinsics.mul_float}, Val{Core.Intrinsics.mul_int}}, @nospecialize(a::Union{Const, Type{Float64}, Incidence}), @nospecialize(b::Union{Const, Type{Float64}, Incidence}))
     if a === Float64 || b === Float64
         return Float64
     end
@@ -378,7 +380,7 @@ is_any_incidence(@nospecialize args...) = any(@nospecialize(x)->isa(x, Incidence
         if is_any_incidence(a)
             if f == Core.Intrinsics.neg_float || f === Core.Intrinsics.neg_int
                 return tfunc(Val(f), a)
-            elseif f === Core.Intrinsics.ctlz_int || f === Core.Intrinsics.not_int || f === Core.Intrinsics.abs_float
+            elseif f === Core.Intrinsics.ctlz_int || f === Core.Intrinsics.not_int || f === Core.Intrinsics.abs_float || f === Core.Intrinsics.rint_llvm
                 return generic_math_onearg(f, a)
             end
         end
@@ -388,7 +390,7 @@ is_any_incidence(@nospecialize args...) = any(@nospecialize(x)->isa(x, Incidence
         if is_any_incidence(a, b)
             if (f == Core.Intrinsics.add_float || f == Core.Intrinsics.sub_float) ||
                 (f == Core.Intrinsics.add_int || f == Core.Intrinsics.sub_int) ||
-                (f == Core.Intrinsics.mul_float || f == Core.Intrinsics.div_float) ||
+                (f == Core.Intrinsics.mul_float || f == Core.Intrinsics.div_float || f == Core.Intrinsics.mul_int) ||
                 f == Core.Intrinsics.copysign_float
                 return tfunc(Val(f), a, b)
             elseif f in (Core.Intrinsics.or_int, Core.Intrinsics.and_int, Core.Intrinsics.xor_int,

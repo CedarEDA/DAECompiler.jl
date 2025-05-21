@@ -47,6 +47,30 @@ for (sol, i) in Iterators.product((dae_sol, ode_sol), 1:2)
     @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[i, :], 2*acot.(exp.(-sol.t).*cot(1/2))))
 end
 
+#============== NonLinear argument ============#
+@noinline sink!(x, v) = always!(x - v)
+function sinsink!()
+    x = continuous()
+    sink!(ddt(x), sin(x))
+end
+dae_sol = solve(DAECProblem(sinsink!, (1,) .=> 1.), IDA())
+ode_sol = solve(ODECProblem(sinsink!, (1,) .=> 1.), Rodas5(autodiff=false))
+for sol in (dae_sol, ode_sol)
+    @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[1, :], 2*acot.(exp.(-sol.t).*cot(1/2))))
+end
+
+#============== NonLinear argument + derivative ============#
+@noinline sink2!(x, v) = always!(ddt(x) - v)
+function sinsink2!()
+    x = continuous()
+    sink2!(x, sin(x))
+end
+dae_sol = solve(DAECProblem(sinsink2!, (1,) .=> 1.), IDA())
+ode_sol = solve(ODECProblem(sinsink2!, (1,) .=> 1.), Rodas5(autodiff=false))
+for sol in (dae_sol, ode_sol)
+    @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[1, :], 2*acot.(exp.(-sol.t).*cot(1/2))))
+end
+
 #============== SICM ============#
 struct sicm!
     arg::Float64
@@ -137,6 +161,23 @@ ode_sol = solve(ODECProblem(implicit, (1,) .=> 1), Rodas5(autodiff=false))
 
 for sol in (dae_sol, ode_sol)
     @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[1, :], 1 .+ sol.t))
+end
+
+#========== Structured SICM ===========#
+@noinline function add4((a, b, c, d)::NTuple{4, Float64})
+    always!((a + b) + (c + d))
+end
+
+function structured_sicm()
+    x = continuous()
+    add4((1., 2., ddt(x), -x))
+end
+
+dae_sol = solve(DAECProblem(structured_sicm, (1,) .=> 1), IDA())
+ode_sol = solve(ODECProblem(structured_sicm, (1,) .=> 1), Rodas5(autodiff=false))
+
+for sol in (dae_sol, ode_sol)
+    @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[1, :], 3 .- 2exp.(sol.t)))
 end
 
 end

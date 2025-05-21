@@ -28,8 +28,8 @@ function find_eqs_vars(graph, compact::IncrementalCompact)
     (eqs, vars)
 end
 
-function find_eqs_vars(state)
-    compact = IncrementalCompact(copy(state.ir))
+function find_eqs_vars(state::TransformationState)
+    compact = IncrementalCompact(copy(state.result.ir))
     find_eqs_vars(state.structure.graph, compact)
 end
 
@@ -55,19 +55,19 @@ end
 
 Base.IteratorSize(::Type{Compiler.UseRefIterator}) = Base.SizeUnknown()
 
-function schedule_incidence!(compact, var_eq_matching, curval, ::Type, var, line; vars=nothing, schedule_missing_var! = nothing)
+function schedule_incidence!(compact, curval, ::Type, var, line; vars=nothing, schedule_missing_var! = nothing)
     # This just needs the linear part, which is `0` in `Type`
     return (curval, nothing)
 end
 
-function schedule_incidence!(compact, var_eq_matching, curval, incT::Const, var, line; vars=nothing, schedule_missing_var! = nothing)
+function schedule_incidence!(compact, curval, incT::Const, var, line; vars=nothing, schedule_missing_var! = nothing)
     if curval !== nothing
         return (ir_add!(compact, line, curval, incT.val), nothing)
     end
     return (incT.val, nothing)
 end
 
-function schedule_incidence!(compact, var_eq_matching, curval, incT::Incidence, var, line; vars=nothing, schedule_missing_var! = nothing)
+function schedule_incidence!(compact, curval, incT::Incidence, var, line; vars=nothing, schedule_missing_var! = nothing)
     thiscoeff = nothing
 
     # We do need to materialize the linear parts of the incidence here
@@ -90,10 +90,11 @@ function schedule_incidence!(compact, var_eq_matching, curval, incT::Incidence, 
                         Incidence(0),
                         line))
         else
-            if !isassigned(vars, lin_var)
-                schedule_missing_var!(lin_var)
+            if vars === nothing || !isassigned(vars, lin_var)
+                lin_var_ssa = schedule_missing_var!(lin_var)
+            else
+                lin_var_ssa = vars[lin_var]
             end
-            lin_var_ssa = vars[lin_var]
             if lin_var_ssa === 0.0
                 continue
             end
@@ -102,7 +103,7 @@ function schedule_incidence!(compact, var_eq_matching, curval, incT::Incidence, 
         acc = ir_mul_const!(compact, line, coeff, lin_var_ssa)
         curval = curval === nothing ? acc : ir_add!(compact, line, curval, acc)
     end
-    (curval, _) = schedule_incidence!(compact, var_eq_matching, curval, incT.typ, var, line; vars, schedule_missing_var!)
+    (curval, _) = schedule_incidence!(compact, curval, incT.typ, var, line; vars, schedule_missing_var!)
     return (curval, thiscoeff)
 end
 
@@ -120,11 +121,12 @@ Base.setindex!(rno::RenameOverlayVector, @nospecialize(val), i::Int) =
     Base.setindex!(rno.overlay, val, i)
 Base.size(rno::RenameOverlayVector) = Base.size(rno.base)
 
-is_state_part_linear(incT::Const, param_vars) = true
-is_state_part_linear(incT::Incidence, param_vars) = !(any(==(nonlinear), incT.row) || any(x->((x-1) in param_vars), rowvals(incT.row)))
-is_const_plus_state_linear(incT, param_vars) = is_state_part_linear(incT, param_vars) && isa(incT.typ, Const)
+is_var_part_linear(incT::Const) = true
+is_var_part_linear(incT::Incidence) = !any(==(nonlinear), incT.row)
+is_const_plus_var_linear(incT) = is_var_part_linear(incT) && isa(incT.typ, Const)
+is_const_plus_var_linear(incT::Const) = true
 
-is_fully_state_linear(incT, param_vars) = is_const_plus_state_linear(incT, param_vars) && is_fully_state_linear(incT.typ, param_vars)
+is_fully_state_linear(incT, param_vars) = is_const_plus_var_linear(incT) && is_fully_state_linear(incT.typ, param_vars)
 is_fully_state_linear(incT::Const, param_vars) = iszero(incT.val)
 
 function schedule_nonlinear!(compact, param_vars, var_eq_matching, ir, val::Union{SSAValue, Argument}, ssa_rename::AbstractVector{Any}; vars, schedule_missing_var! = nothing)
@@ -136,6 +138,7 @@ function schedule_nonlinear!(compact, param_vars, var_eq_matching, ir, val::Unio
 
     inst = ir[val]
 
+    #=
     if all(x->((x-1) in param_vars), rowvals(inst[:type].row))
         @assert (inst[:stmt]::Expr).args[1] === getfield
         this = insert_node_here!(compact, NewInstruction(inst))
@@ -143,7 +146,7 @@ function schedule_nonlinear!(compact, param_vars, var_eq_matching, ir, val::Unio
         ssa_rename[val.id] = this
         return this
     end
-
+    =#
 
     stmt = inst[:stmt]
     info = inst[:info]
@@ -163,7 +166,8 @@ function schedule_nonlinear!(compact, param_vars, var_eq_matching, ir, val::Unio
         @assert f in (Core.Intrinsics.sub_float, Core.Intrinsics.add_float,
                       Core.Intrinsics.mul_float, Core.Intrinsics.copysign_float,
                       Core.ifelse, Core.Intrinsics.or_int, Core.Intrinsics.and_int,
-                      Core.Intrinsics.fma_float, Core.Intrinsics.muladd_float)
+                      Core.Intrinsics.fma_float, Core.Intrinsics.muladd_float,
+                      Core.Intrinsics.have_fma, Core.getfield)
         # TODO: or_int is linear in Bool
         # TODO: {fma, muladd}_float is linear in one of its arguments
         call_is_linear = f in (Core.Intrinsics.sub_float, Core.Intrinsics.add_float)
@@ -177,12 +181,12 @@ function schedule_nonlinear!(compact, param_vars, var_eq_matching, ir, val::Unio
         end
 
         # TODO: SICM
-        if !is_const_plus_state_linear(typ::Incidence, param_vars)
+        if !is_const_plus_var_linear(typ::Incidence)
             this_nonlinear = schedule_nonlinear!(compact, param_vars, var_eq_matching, ir, arg, ssa_rename; vars, schedule_missing_var!)
         else
             if @isdefined(result)
-                template_argtype = result.argtypes[i]
-                template_v = only(rowvals(template_argtype.row))-1
+                # This relies on the flattening transform
+                template_v = i
                 if (extended_rt::Incidence).row[template_v+1] !== nonlinear
                     return nothing
                 end
@@ -194,15 +198,13 @@ function schedule_nonlinear!(compact, param_vars, var_eq_matching, ir, val::Unio
             return this_nonlinear
         end
 
-        return schedule_incidence!(compact, var_eq_matching, this_nonlinear, typ, -1, inst[:line]; vars, schedule_missing_var!)[1]
+        return schedule_incidence!(compact, this_nonlinear, typ, -1, inst[:line]; vars, schedule_missing_var!)[1]
     end
 
-    if is_const_plus_state_linear(incT, param_vars)
-        # TODO: This needs to do a proper template match
-        ret = schedule_incidence!(compact, var_eq_matching, nothing, info.result.extended_rt, -1, inst[:line]; vars=
-            [arg === nothing ? 0.0 : arg for arg in args[2:end]])[1]
+    if is_const_plus_var_linear(incT)
+        ret = schedule_incidence!(compact, nothing, info.result.extended_rt, -1, inst[:line]; vars=
+            [arg === nothing ? 0.0 : arg for arg in args], schedule_missing_var! = var->error((var, incT, args)))[1]
     else
-        # TODO: This needs to be the
         new_stmt = copy(stmt)
         for (i, arg) in enumerate(args)
             i += 1
@@ -224,7 +226,8 @@ function schedule_nonlinear!(compact, param_vars, var_eq_matching, ir, val::Unio
     return ret
 end
 
-struct SICMSSAValue
+struct CarriedSSAValue
+    ordinal::Int
     id::Int
 end
 
@@ -246,8 +249,8 @@ function compute_eq_schedule(key::TornCacheKey, total_incidence, result, mss::St
     (; diff_states, alg_states, var_schedule) = key
     (; structure, var_eq_matching) = mss
 
-    eq_orders  = Vector{Union{Int, SSAValue}}[]
-    callee_schedules = Dict{SSAValue, Vector{Pair{BitSet, BitSet}}}()
+    eq_orders  = Vector{Union{Int, StructuralSSARef}}[]
+    callee_schedules = Dict{StructuralSSARef, Vector{Pair{BitSet, BitSet}}}()
 
     available = BitSet()
     # Add all selected states to available
@@ -255,7 +258,7 @@ function compute_eq_schedule(key::TornCacheKey, total_incidence, result, mss::St
         union!(available, diff_states) # Computed by integrator
     end
     union!(available, alg_states)  # Computed by NL solver
-    union!(available, key.param_vars)  # Computed by SCIM hoist
+    union!(available, key.param_vars)  # Computed by SICM hoist
 
     frontier = BitSet()
 
@@ -273,7 +276,7 @@ function compute_eq_schedule(key::TornCacheKey, total_incidence, result, mss::St
     end
 
     for sched in var_schedule
-        eq_order = Union{Int, SSAValue}[]
+        eq_order = Union{Int, StructuralSSARef}[]
         push!(eq_orders, eq_order)
 
         (in_vars, _) = sched
@@ -285,9 +288,9 @@ function compute_eq_schedule(key::TornCacheKey, total_incidence, result, mss::St
 
         new_available = BitSet()
 
-        function schedule_callee_now!(ssa::SSAValue)
+        function schedule_callee_now!(ssa::StructuralSSARef)
             schedule = get!(callee_schedules, ssa, Vector{Pair{BitSet, BitSet}}())
-            callee_info = result.ir[ssa][:info]::MappingInfo
+            callee_info = result.ir[SSAValue(ssa.id)][:info]::MappingInfo
 
             # Determine which of this callee's external variables we have
             this_callee_in_vars = BitSet()
@@ -315,7 +318,7 @@ function compute_eq_schedule(key::TornCacheKey, total_incidence, result, mss::St
                     i in this_callee_eqs && continue # We already scheduled this
                     callee_incidence = callee_info.result.total_incidence[i]
                     incidence = apply_linear_incidence(nothing, callee_incidence, nothing, callee_info.mapping)
-                    if is_const_plus_state_linear(incidence, key.param_vars)
+                    if is_const_plus_var_linear(incidence)
                         # No non-linear components - skip it
                         push!(previously_scheduled_or_ignored, i)
                         continue
@@ -357,7 +360,7 @@ function compute_eq_schedule(key::TornCacheKey, total_incidence, result, mss::St
         function schedule_frontier_var!(var; force=false)
             # Find all frontier variables that in a callee that is fully available
             eq = var_eq_matching[var]::Int
-            if is_const_plus_state_linear(total_incidence[eq], key.param_vars)
+            if is_const_plus_var_linear(total_incidence[eq])
                 # This is a linear equation, we can schedule it now
                 push!(eq_order, eq)
                 push!(new_available, var)
@@ -377,10 +380,9 @@ function compute_eq_schedule(key::TornCacheKey, total_incidence, result, mss::St
 
             for (ssa, callee_eq) in mapping
                 schedule = get!(callee_schedules, ssa, Vector{Pair{BitSet, BitSet}}())
-                callee_info = result.ir[ssa][:info]::MappingInfo
+                callee_info = result.ir[SSAValue(ssa.id)][:info]::MappingInfo
 
-                callee_incidence_part = apply_linear_incidence(nothing, callee_info.result.total_incidence[callee_eq], nothing, callee_info.mapping)
-                if is_const_plus_state_linear(callee_incidence_part, key.param_vars)
+                if is_const_plus_var_linear(callee_info.result.total_incidence[callee_eq])
                     # This portion of the calle is linear, we can schedule it
                     continue
                 end
@@ -442,7 +444,7 @@ function compute_eq_schedule(key::TornCacheKey, total_incidence, result, mss::St
 end
 
 function invert_eq_callee_mapping(eq_callee_mapping)
-    callee_eq_mapping = Dict{SSAValue, Vector{Int}}()
+    callee_eq_mapping = Dict{StructuralSSARef, Vector{Int}}()
 
     for (ieq, mapping) in pairs(eq_callee_mapping)
         mapping === nothing && continue
@@ -528,6 +530,7 @@ function assign_slots(state::TransformationState, key::TornCacheKey, var_eq_matc
         for eq = 1:length(state.total_incidence)
             eqclassification(result, structure, eq) == External && continue
             (invview(var_eq_matching)[eq] === unassigned) || continue
+            is_const_plus_var_linear(state.total_incidence[eq]) && continue
             assign_slot!(Explicit, eq)
         end
     end
@@ -542,6 +545,12 @@ Cache partition for the state-invariant prologue
 """
 struct SICMSpec
     key::TornCacheKey
+end
+
+function Base.StackTraces.show_custom_spec_sig(io::IO, owner::SICMSpec, linfo::CodeInstance, frame::Base.StackTraces.StackFrame)
+    print(io, "SICM Partition for ")
+    mi = Base.get_ci_mi(linfo)
+    return Base.StackTraces.show_spec_sig(io, mi.def, mi.specTypes)
 end
 
 struct TornIRSpec
@@ -591,6 +600,12 @@ function tearing_schedule!(result::DAEIPOResult, ci::CodeInstance, key::TornCach
     return tearing_schedule!(tstate, ci, key, world)
 end
 
+struct DummyOptInterp <: Compiler.AbstractInterpreter;
+    world::UInt
+end
+Compiler.optimizer_lattice(::DummyOptInterp) = Compiler.PartialsLattice(EqStructureLattice())
+Compiler.get_inference_world(interp::DummyOptInterp) = interp.world
+
 function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::TornCacheKey, world::UInt)
     result_ci = find_matching_ci(ci->isa(ci.owner, SICMSpec) && ci.owner.key == key, ci.def, world)
     if result_ci !== nothing
@@ -606,6 +621,8 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
     (eq_orders, callee_schedules) = compute_eq_schedule(key, total_incidence, result, mss)
 
     ir = index_lowering_ad!(state, key)
+    ir = Compiler.sroa_pass!(ir, Compiler.InliningState(DummyOptInterp(world)))
+    ir = Compiler.compact!(ir)
 
     # First, schedule any statements that do not have state dependence
     sicm_rename = Vector{Any}(undef, length(ir.stmts))
@@ -627,26 +644,6 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
     non_sicm_use_counter = zeros(Int64, length(ir.stmts))
 
     function maybe_schedule_sicm_inst!(inst)
-        isa(inst[:type], Eq) && return false
-        if isready(inst) && (inst[:flag] & Compiler.IR_FLAG_UNUSED) == 0 && !has_dependence_other_than(inst[:type], key.param_vars)
-            stmt = inst[:stmt]
-            if isexpr(stmt, :invoke)
-                info = inst[:info]
-                if isa(info, MappingInfo) && length(info.result.total_incidence) != 0
-                    return false
-                end
-            end
-            isa(stmt, Expr) && (stmt = copy(stmt))
-            isa(stmt, ReturnNode) && return false
-            urs = userefs(stmt)
-            for ur in urs
-                isa(ur[], SSAValue) || continue
-                ur[] = sicm_rename[ur[].id]
-            end
-
-            sicm_rename[inst.idx] = insert_node_here!(compact, NewInstruction(inst; stmt=urs[]))
-            return true
-        end
         return false
     end
 
@@ -656,6 +653,16 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
 
     diff_states_in_callee = BitSet()
     processed_variables = Set{Int}()
+
+    var_sols = Vector{Any}(undef, length(structure.var_to_diff))
+
+    for (idx, var) in enumerate(key.param_vars)
+        var_sols[var] = insert_node_here!(compact,
+            NewInstruction(Expr(:call, getfield, Argument(1), idx), Any, line))
+    end
+
+    carried_states = Dict{StructuralSSARef, CarriedSSAValue}()
+    callee_position_map = Dict{StructuralSSARef, SSAValue}()
 
     # Generate SICM partition
     for i = 1:length(ir.stmts)
@@ -744,25 +751,31 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
                 end
 
                 callee_final_available = externally_solved_vars
-                if !haskey(callee_schedules, SSAValue(i))
+                sref = stmt.args[1][1]
+                if !haskey(callee_schedules, sref)
                     # This call may not be needed
                     if isempty(callee_diff_vars) && isempty(callee_alg_vars) && length(callee_result.total_incidence) == 0
                         continue
                     end
-                    callee_schedules[SSAValue(i)] = Pair{BitSet,BitSet}[callee_final_available => BitSet()]
-                    push!(eq_orders[end], SSAValue(i))
+                    callee_schedules[sref] = Pair{BitSet,BitSet}[callee_final_available => BitSet()]
+                    push!(eq_orders[end], sref)
                 else
-                    final_sched_avail = callee_schedules[SSAValue(i)][end][1]
+                    calleesched = callee_schedules[sref]
+                    if isempty(calleesched)
+                        final_sched_avail = BitSet()
+                    else
+                        final_sched_avail = calleesched[end][1]
+                    end
                     if !all(x->(x in final_sched_avail || x in callee_param_vars), callee_final_available)
-                        push!(callee_schedules[SSAValue(i)], callee_final_available => BitSet())
-                        push!(eq_orders[end], SSAValue(i))
+                        push!(callee_schedules[sref], callee_final_available => BitSet())
+                        push!(eq_orders[end], sref)
                     end
                 end
 
-                callee_var_schedule = callee_schedules[SSAValue(i)]
+                callee_var_schedule = callee_schedules[sref]
                 callee_key = TornCacheKey(callee_diff_vars, callee_alg_vars, callee_param_vars, callee_explicit_eqs, callee_var_schedule)
 
-                callee_codeinst = stmt.args[1]
+                callee_codeinst = stmt.args[1][2]
                 if isa(callee_codeinst, MethodInstance)
                     callee_codeinst = Compiler.get(Compiler.code_cache(interp), callee_codeinst, nothing)
                 end
@@ -772,31 +785,35 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
                 inst[:type] = Any
                 inst[:flag] = UInt32(0)
                 new_stmt = copy(stmt)
-
-                stmt.args[1] = (stmt.args[1], callee_key)
-                resize!(stmt.args, 1)
+                callee_position_map[sref] = SSAValue(i)
+                stmt.args[1] = (callee_codeinst, callee_key)
 
                 if !isdefined(callee_sicm_ci, :rettype_const)
+                    resize!(new_stmt.args, 2)
                     new_stmt.args[1] = callee_sicm_ci
 
-                    urs = userefs(new_stmt)
-                    for ur in urs
-                        isa(ur[], SSAValue) || continue
-                        if !isassigned(sicm_rename, ur[].id)
-                            ur[] = 0.
-                            continue
+                    in_param_vars = Expr(:call, tuple)
+                    for var in callee_param_vars
+                        varmap = info.mapping.var_coeffs[var]
+                        nonlin = nothing
+                        if !is_const_plus_var_linear(varmap)
+                            nonlin = schedule_nonlinear!(compact, key.param_vars, var_eq_matching, ir, stmt.args[1+var], sicm_rename; vars=var_sols)
                         end
-                        ur[] = sicm_rename[ur[].id]
+                        (argval, _) = schedule_incidence!(compact,
+                            nonlin, info.mapping.var_coeffs[var], -1, line; vars=var_sols)
+                        @assert argval !== nothing
+                        push!(in_param_vars.args, argval)
                     end
 
+                    new_stmt.args[2] = insert_node_here!(compact, NewInstruction(inst; stmt=in_param_vars, type=Tuple, flag=UInt32(0)))
                     sstate = insert_node_here!(compact, NewInstruction(inst; stmt=new_stmt, type=Tuple, flag=UInt32(0)))
-                    push!(stmt.args, SICMSSAValue(sstate.id))
+                    carried_states[sref] = CarriedSSAValue(0, sstate.id)
                 else
-                    push!(stmt.args, callee_sicm_ci.rettype_const)
+                    carried_states[sref] = callee_sicm_ci.rettype_const
                 end
             elseif stmt === nothing || isa(stmt, ReturnNode)
                 continue
-            elseif isexpr(stmt, :call) || isexpr(stmt, :new) || isa(stmt, GotoNode)
+            elseif isexpr(stmt, :call) || isexpr(stmt, :new) || isa(stmt, GotoNode) || isexpr(stmt, :boundscheck)
                 # TODO: Pull this up, if arguments are state-independent
                 continue
             else
@@ -804,8 +821,12 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
                 error()
             end
         else
-            ir[SSAValue(i)][:stmt] = SICMSSAValue(sicm_rename[i].id)
+            ir[SSAValue(i)][:stmt] = CarriedSSAValue(0, sicm_rename[i].id)
         end
+    end
+
+    for (idx, var) in enumerate(key.param_vars)
+        var_sols[var] = CarriedSSAValue(0, var_sols[var].id)
     end
 
     # Now make sure to schedule all unassigned equations that were not needed
@@ -815,7 +836,7 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
     scheduled_eqs = BitSet()
     for eq_order in eq_orders
         for eq in eq_order
-            isa(eq, SSAValue) && continue
+            isa(eq, StructuralSSARef) && continue
             push!(scheduled_eqs, eq::Int)
         end
     end
@@ -829,38 +850,15 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
                 result.eq_callee_mapping[baseeq(result, structure, eq)] === nothing &&
                 eqclassification(result, structure, eq) != External &&
                 eqkind(result, structure, eq) == Intrinsics.Always &&
-                !is_const_plus_state_linear(total_incidence[eq], key.param_vars)
+                !is_const_plus_var_linear(total_incidence[eq])
             push!(eq_orders[end], eq)
         end
     end
-
-    resid = Expr(:call, tuple)
-    sicm_resid_rename = Vector{Any}(undef, compact.result_idx)
 
     compact1 = IncrementalCompact(ir)
     foreach(_->nothing, compact1)
     rename_hack = copy(compact1.ssa_rename)
     ir = Compiler.finish(compact1)
-
-    # Rewrite SICM to state references
-    line = ir[SSAValue(1)][:line]
-    resid_recv = Argument(1)
-    for i = 1:length(ir.stmts)
-        inst = ir[SSAValue(i)]
-        stmt = inst[:stmt]
-        @assert !isa(stmt, SICMSSAValue)
-        urs = userefs(stmt)
-        for ur in urs
-            isa(ur[], SICMSSAValue) || continue
-            if !isassigned(sicm_resid_rename, ur[].id)
-                push!(resid.args, SSAValue(ur[].id))
-                sicm_resid_rename[ur[].id] = insert_node!(ir, SSAValue(1),
-                    NewInstruction(Expr(:call, getfield, resid_recv, length(resid.args)-1), Incidence(Any), line))
-            end
-            ur[] = sicm_resid_rename[ur[].id]
-        end
-        inst[:stmt] = urs[]
-    end
 
     # Normalize by explicitly inserting implicit equations for return
     if result.nimplicitoutpairs > 0
@@ -884,35 +882,6 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
     rename_hack2 = copy(compact1.ssa_rename)
 
     ir = Compiler.finish(compact1)
-
-    # Done with state-independent
-    if compact.result_idx == 1
-        ir_sicm = nothing
-    else
-        if length(resid.args) != 1
-            resid_ssa = insert_node_here!(compact, NewInstruction(resid, Tuple, line))
-        else
-            resid_ssa = ()
-        end
-
-#=
-        if length(eq_resid.args) != 1
-            eq_resid_ssa = insert_node_here!(compact, NewInstruction(eq_resid, Tuple, line))
-        else
-            eq_resid_ssa = ()
-        end
-        ret_ssa = insert_node_here!(compact, NewInstruction(Expr(:call, tuple, resid_ssa, eq_resid_ssa), Tuple{Tuple, Tuple}, line))
-=#
-
-        insert_node_here!(compact, NewInstruction(ReturnNode(resid_ssa), Union{}, line))
-        ir_sicm = Compiler.finish(compact)
-    end
-
-    var_sols = Vector{Any}(undef, length(structure.var_to_diff))
-
-    for var in key.param_vars
-        var_sols[var] = 0.0
-    end
 
     ssa_rename = Vector{Any}(undef, length(result.ir.stmts))
 
@@ -938,9 +907,10 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
 
     isempty(var_schedule) && (var_schedule = Pair{BitSet, BitSet}[BitSet()=>BitSet()])
 
-    callee_ordinals = Dict{SSAValue, Int}()
+    callee_ordinals = Dict{StructuralSSARef, Int}()
 
     irs = IRCode[]
+    resids = Vector{Tuple{IncrementalCompact, Expr, Union{Tuple{}, SSAValue}}}(undef, length(var_schedule))
     for (ordinal, (eq_order, sched)) in enumerate(zip(eq_orders, var_schedule))
         # Schedule internal var-eq pairs
         nir = copy(ir)
@@ -960,8 +930,8 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
         end
 
         for eq in eq_order
-            if isa(eq, SSAValue)
-                eqinst = ir[rename_hack2[rename_hack[eq.id].id]]
+            if isa(eq, StructuralSSARef)
+                eqinst = ir[callee_position_map[eq]]
                 @assert isexpr(eqinst[:stmt], :invoke)
 
                 info = eqinst[:info]::MappingInfo
@@ -973,23 +943,27 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
 
                 in_vars = Expr(:call, tuple)
                 for var in callee_in_vars
+                    nonlin = nothing
+                    varmap = info.mapping.var_coeffs[var]
+                    if !is_const_plus_var_linear(varmap)
+                        nonlin = schedule_nonlinear!(compact1, key.param_vars, var_eq_matching, ir, eqinst[:stmt].args[1+var], ssa_rename; vars=var_sols, schedule_missing_var!)
+                    end
                     (argval, _) = schedule_incidence!(compact1,
-                        var_eq_matching, nothing, info.mapping.var_coeffs[var], -1, line; vars=var_sols, schedule_missing_var!)
+                        nonlin, info.mapping.var_coeffs[var], -1, line; vars=var_sols, schedule_missing_var!)
 
+                    @assert argval !== nothing
                     push!(in_vars.args, argval)
                 end
 
                 in_vars_ssa = insert_node_here!(compact1, NewInstruction(eqinst; stmt=in_vars, type=Tuple))
 
                 new_stmt = copy(eqinst[:stmt])
+                resize!(new_stmt.args, 2)
                 spec = new_stmt.args[1]
                 @assert isa(spec, NTuple{2, Any})
                 new_stmt.args[1] = (spec..., callee_ordinal)
                 push!(new_stmt.args, in_vars_ssa)
-
-                if isa(new_stmt.args[2], SSAValue)
-                    new_stmt.args[2] = insert_node_here!(compact1, NewInstruction(eqinst; stmt=ir[new_stmt.args[2]][:stmt], type=Tuple))
-                end
+                new_stmt.args[2] = carried_states[eq]
 
                 urs = userefs(new_stmt)
                 for ur in urs
@@ -1000,19 +974,22 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
                 callee_ordinals[eq] = callee_ordinal+1
 
                 this_call = insert_node_here!(compact1, NewInstruction(eqinst; stmt=urs[]))
+                this_eqresids = insert_node_here!(compact1, NewInstruction(eqinst; stmt=Expr(:call, getfield, this_call, 1), type=Any))
+                new_state = insert_node_here!(compact1, NewInstruction(eqinst; stmt=Expr(:call, getfield, this_call, 2), type=Any))
+                carried_states[eq] = CarriedSSAValue(ordinal, new_state.id)
 
                 for (idx, this_callee_eq) in enumerate(callee_out_eqs)
                     this_eq = callee_eq_mapping[eq][this_callee_eq]
                     incT = state.total_incidence[this_eq]
                     var = invview(var_eq_matching)[this_eq]
-                    curval = insert_node_here!(compact1, NewInstruction(eqinst; stmt=Expr(:call, getfield, this_call, idx), type=Any))
+                    curval = insert_node_here!(compact1, NewInstruction(eqinst; stmt=Expr(:call, getfield, this_eqresids, idx), type=Any))
                     push!(eqs[this_eq][2], NewSSAValue(curval.id))
                 end
             else
                 var = invview(var_eq_matching)[eq]
 
                 incT = state.total_incidence[eq]
-                anynonlinear = !is_const_plus_state_linear(incT, key.param_vars)
+                anynonlinear = !is_const_plus_var_linear(incT)
                 nonlinearssa = nothing
                 if anynonlinear
                     if isa(var, Int) && isa(vars[var], SolvedVariable)
@@ -1030,6 +1007,20 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
                             end
                             nonlinearssa = nonlinearssa === nothing ? this_nonlinearssa : ir_add!(compact1, line, this_nonlinearssa, nonlinearssa)
                         end
+                        mapping = result.eq_callee_mapping[eq]
+                        if mapping !== nothing
+                            # Schedule the portions that were linear in the callee, but non-linear in terms of caller vars
+                            for (ssa, callee_eq) in mapping
+                                callee_info = result.ir[SSAValue(ssa.id)][:info]::MappingInfo
+                                callee_var_incidence = callee_info.result.total_incidence[callee_eq]
+                                function schedule_argument(var)
+                                    vc = callee_info.mapping.var_coeffs[var]
+                                    is_fully_state_linear(vc, nothing) && return 0.
+                                    return schedule_nonlinear!(compact1, key.param_vars, var_eq_matching, ir, ir[SSAValue(ssa.id)][:stmt].args[var+1], ssa_rename; vars=var_sols, schedule_missing_var!)
+                                end
+                                nonlinearssa = schedule_incidence!(compact1, nonlinearssa, callee_var_incidence, -1, line; schedule_missing_var! = schedule_argument)[1]
+                            end
+                        end
                     end
                     @assert nonlinearssa !== nothing
                 end
@@ -1039,14 +1030,14 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
 
                 if isa(var, Int)
                     curval = nonlinearssa
-                    (curval, thiscoeff) = schedule_incidence!(compact1, var_eq_matching, curval, incT, var, line; vars=var_sols, schedule_missing_var!)
+                    (curval, thiscoeff) = schedule_incidence!(compact1, curval, incT, var, line; vars=var_sols, schedule_missing_var!)
                     @assert thiscoeff != nonlinear
                     curval = ir_mul_const!(compact1, line, 1/thiscoeff, curval)
                     var_sols[var] = curval
                     insert_solved_var_here!(compact1, var, curval, line)
                 else
                     curval = nonlinearssa
-                    (curval, thiscoeff) = schedule_incidence!(compact1, var_eq_matching, curval, incT, -1, line; vars=var_sols, schedule_missing_var!)
+                    (curval, thiscoeff) = schedule_incidence!(compact1, curval, incT, -1, line; vars=var_sols, schedule_missing_var!)
                     insert_node_here!(compact1, NewInstruction(Expr(:call, InternalIntrinsics.contribution!, eq, Explicit, curval), Nothing, line))
                 end
             end
@@ -1077,21 +1068,80 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
             insert_node_here!(compact1, NewInstruction(eq_resids, Tuple,
                 ir[SSAValue(length(ir.stmts))][:line]))
 
-        insert_node_here!(compact1, NewInstruction(ReturnNode(eq_resid_ssa), Union{},
-            ir[SSAValue(length(ir.stmts))][:line]))
-
-        this_ir = Compiler.finish(compact1)
-        push!(irs, this_ir)
+        state_resid = Expr(:call, tuple)
+        resids[ordinal] = (compact1, state_resid, eq_resid_ssa)
     end
 
-    if ir_sicm === nothing
+    sicm_resid = Expr(:call, tuple)
+    sicm_resid_rename = Dict{CarriedSSAValue, Dict{Int, Union{SSAValue, NewSSAValue}}}()
+    for i = length(resids):-1:1
+        (this_compact, this_resid, eq_resid_ssa) = resids[i]
+        state_resid_ssa =
+            insert_node_here!(this_compact, NewInstruction(this_resid, Tuple,
+                ir[SSAValue(length(ir.stmts))][:line]))
+
+        tup_resid_ssa =
+            insert_node_here!(this_compact, NewInstruction(Expr(:call, tuple, eq_resid_ssa, state_resid_ssa), Tuple{Tuple, Tuple},
+                ir[SSAValue(length(ir.stmts))][:line]))
+
+        insert_node_here!(this_compact, NewInstruction(ReturnNode(tup_resid_ssa), Union{},
+            ir[SSAValue(length(ir.stmts))][:line]))
+
+        # Rewrite SICM to state references
+        line = this_compact[SSAValue(1)][:line]
+        resid_recv = Argument(1)
+        for j = 1:(this_compact.result_idx-1)
+            inst = this_compact[SSAValue(j)]
+            stmt = inst[:stmt]
+            @assert !isa(stmt, CarriedSSAValue)
+            urs = userefs(stmt)
+            any = false
+            for ur in urs
+                isa(ur[], CarriedSSAValue) || continue
+                rename_dict = get!(sicm_resid_rename, ur[], Dict{Int, Union{SSAValue, NewSSAValue}}(ur[].ordinal => SSAValue(ur[].id)))
+                for k = (ur[].ordinal+1):i
+                    haskey(rename_dict, k) && continue
+                    (_, oldresid) = (k-1 == 0) ? (compact, sicm_resid) : resids[k-1]
+                    push!(oldresid.args, rename_dict[k-1])
+                    inserted = insert_node!(i == k ? this_compact : resids[k][1], SSAValue(1),
+                        NewInstruction(Expr(:call, getfield, resid_recv, length(oldresid.args)-1), Incidence(Any), line))
+                    rename_dict[k] = inserted
+                end
+                # Temporarily remove this stmt from compact during modification
+                any || (this_compact[SSAValue(j)] = nothing)
+                ur[] = rename_dict[i]
+                any = true
+            end
+            any || continue
+            this_compact[SSAValue(j)] = urs[]
+        end
+
+        this_ir = Compiler.finish(this_compact)
+        this_ir = Compiler.compact!(this_ir)
+        #println("Torn Partition $i for $(Compiler.get_ci_mi(ci)):")
+        #display(this_ir)
+
+        push!(irs, this_ir)
+    end
+    reverse!(irs)
+
+    if compact.result_idx == 1
+        ir_sicm = nothing
         src = nothing
         sig = Tuple
         debuginfo = Core.DebugInfo(:sicm)
     else
+        resid_ssa = insert_node_here!(compact, NewInstruction(sicm_resid, Tuple, line))
+        insert_node_here!(compact, NewInstruction(ReturnNode(resid_ssa), Union{}, line))
+        ir_sicm = Compiler.finish(compact)
+        resize!(ir_sicm.cfg.blocks, 1)
+        empty!(ir_sicm.cfg.blocks[1].succs)
         widen_extra_info!(ir_sicm)
+        empty!(ir_sicm.argtypes)
+        push!(ir_sicm.argtypes, Tuple)
+        Compiler.verify_ir(ir_sicm)
         src = ir_to_src(ir_sicm)
-        sig = Tuple{map(Compiler.widenconst, ir_sicm.argtypes)...}
+        sig = Tuple{Tuple}
         debuginfo = src.debuginfo
     end
 

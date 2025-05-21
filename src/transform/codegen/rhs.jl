@@ -10,6 +10,12 @@ struct RHSSpec
     ordinal::Int
 end
 
+function Base.StackTraces.show_custom_spec_sig(io::IO, owner::RHSSpec, linfo::CodeInstance, frame::Base.StackTraces.StackFrame)
+    print(io, "RHS Partition #$(owner.ordinal) for ")
+    mi = Base.get_ci_mi(linfo)
+    return Base.StackTraces.show_spec_sig(io, mi.def, mi.specTypes)
+end
+
 function handle_contribution!(ir::Compiler.IRCode, inst::Compiler.Instruction, kind, slot, arg_range, red)
     pos = SSAValue(inst.idx)
     @assert Int(LastStateKind) < Int(kind) <= Int(LastEquationStateKind)
@@ -93,6 +99,7 @@ function rhs_finish!(
     var_eq_matching = matching_for_key(result, key, state.structure)
     (slot_assignments, var_assignment, eq_assignment) = assign_slots(state, key, var_eq_matching)
 
+
     torn_ci = find_matching_ci(ci->isa(ci.owner, TornIRSpec) && ci.owner.key == key, ci.def, world)
     torn = torn_ci.inferred
     rhs_ms = nothing
@@ -160,7 +167,8 @@ function rhs_finish!(
                 push!(stmt.args, in_vars)
 
                 # Ordering from tearing is (AssignedDiff, UnassignedDiff, Algebraic, Explicit)
-                for (arg, range) in zip(arg_range, compute_slot_ranges(info, callee_key, var_assignment, eq_assignment))
+                slot_ranges = compute_slot_ranges(info, callee_key, var_assignment, eq_assignment)
+                for (arg, range) in zip(arg_range, slot_ranges)
                     push!(stmt.args, insert_node!(ir, SSAValue(i),
                         NewInstruction(inst;
                         stmt=Expr(:call, view, Argument(arg), range),
@@ -218,8 +226,13 @@ function rhs_finish!(
             insert_node!(ir, idx, ni)
         end
         ir = Compiler.compact!(ir)
+        resize!(ir.cfg.blocks, 1)
+        empty!(ir.cfg.blocks[1].succs)
 
         widen_extra_info!(ir)
+        Compiler.verify_ir(ir)
+        #println("RHS #ordinal $(ir_ordinal) for $(Compiler.get_ci_mi(ci)):")
+        #display(ir)
         src = ir_to_src(ir)
 
         abi = Tuple{Tuple, Tuple, (VectorViewType for _ in arg_range)..., Float64}
