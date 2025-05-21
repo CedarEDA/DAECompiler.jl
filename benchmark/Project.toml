@@ -7,6 +7,4 @@ Sundials = "c3572dad-4567-51f8-b174-8c6c989267f4"
 XSteam = "95ff35a0-be81-11e9-2ca3-5b4e338e8476"
 
 [sources]
-Compiler = {rev = "master", url = "https://github.com/JuliaLang/BaseCompiler.jl.git"}
-DAECompiler = {path = "."}
 XSteam = {rev = "master", url = "https://github.com/hzgzh/XSteam.jl.git"}
