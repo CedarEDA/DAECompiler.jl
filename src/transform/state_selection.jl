@@ -67,7 +67,7 @@ function baseeq(result, structure, eq)
     return eq
 end
 
-function basevar(result, structure, var)
+function basevar(result::DAEIPOResult, structure, var::Int)
     while var > length(result.varkinds)
         var = invview(structure.var_to_diff)[var]
     end
@@ -97,7 +97,7 @@ end
 
 varkind(result, structure, var) = result.varkinds[basevar(result, structure, var)]
 varkind(state::TransformationState, var::Int) = varkind(state.result, state.structure, var)
-varclassification(result::DAEIPOResult, structure, var) = result.varclassification[basevar(result, structure, var)]
+varclassification(result::DAEIPOResult, structure, var::Int) = result.varclassification[basevar(result, structure, var)]
 varclassification(result::DAEIPOResult, var::Int) = result.varclassification[var]
 varclassification(state::TransformationState, var::Int) = varclassification(state.result, state.structure, var)
 
