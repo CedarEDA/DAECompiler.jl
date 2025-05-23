@@ -30,6 +30,7 @@ function code_structure_by_type(@nospecialize(tt::Type); world::UInt = Base.tls_
   ci = _code_ad_by_type(tt; world, kwargs...)
   # Perform or lookup DAECompiler specific analysis for this system.
   result = structural_analysis!(ci, world)
+  isa(result, UncompilableIPOResult) && throw(result.error)
   return result.ir
 end
 
