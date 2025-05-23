@@ -138,7 +138,7 @@ function dae_factory_gen(state::TransformationState, ci::CodeInstance, key::Torn
         NewInstruction(Expr(:invoke, daef_ci, oc_sicm, (), in_u_mm, in_u_unassgn, in_du_unassgn, in_alg, out_du_mm, out_eq, Argument(6)), Nothing, line))
 
     # TODO: We should not have to recompute this here
-    var_eq_matching = matching_for_key(result, key, state.structure)
+    var_eq_matching = matching_for_key(state, key)
     (slot_assignments, var_assignment, eq_assignment) = assign_slots(state, key, var_eq_matching)
 
     # Manually apply mass matrix and implicit equations between selected states
