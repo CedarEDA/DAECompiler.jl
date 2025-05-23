@@ -76,6 +76,9 @@ dependencies(row) = sort(rowvals(row) .=> nonzeros(row), by = first)
     @test dependencies(incidence.row) == []
     @test repr(incidence) == "Incidence(1.0)"
 
+    incidence = Incidence(Float64)
+    @test repr(incidence) == "Incidence(a)"
+
     incidence = Incidence(Float64, IncidenceValue[1.0])
     @test dependencies(incidence.row) == [1 => 1]
     @test repr(incidence) == "Incidence(a + t)"
