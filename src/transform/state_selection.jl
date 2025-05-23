@@ -67,7 +67,7 @@ function baseeq(result, structure, eq)
     return eq
 end
 
-function basevar(result, structure, var)
+function basevar(result::DAEIPOResult, structure, var::Int)
     while var > length(result.varkinds)
         var = invview(structure.var_to_diff)[var]
     end
@@ -82,6 +82,7 @@ eqkind(state::TransformationState, eq) = eqkind(state.result, state.structure, e
 function eqclassification(result, structure, eq)
     return result.eqclassification[baseeq(result, structure, eq)]
 end
+eqclassification(state::TransformationState, eq) = eqclassification(state.result, state.structure, eq)
 
 function ssrm!(state::TransformationState)
     ils = StateSelection.structural_singularity_removal!(state)
@@ -97,7 +98,7 @@ end
 
 varkind(result, structure, var) = result.varkinds[basevar(result, structure, var)]
 varkind(state::TransformationState, var::Int) = varkind(state.result, state.structure, var)
-varclassification(result::DAEIPOResult, structure, var) = result.varclassification[basevar(result, structure, var)]
+varclassification(result::DAEIPOResult, structure, var::Int) = result.varclassification[basevar(result, structure, var)]
 varclassification(result::DAEIPOResult, var::Int) = result.varclassification[var]
 varclassification(state::TransformationState, var::Int) = varclassification(state.result, state.structure, var)
 
@@ -136,7 +137,16 @@ end
 StateSelection.BipartiteGraphs.overview_label(::Type{InOut}) = ('#', "IPO in var / out eq", :green)
 StateSelection.BipartiteGraphs.overview_label(io::InOut) = (string(io.ordinal), "IPO in var / out eq", :green)
 
-const IPOMatches = Union{Unassigned, SelectedState, StateInvariant, InOut}
+struct AlgebraicState; end
+StateSelection.BipartiteGraphs.overview_label(::Type{AlgebraicState}) = ('□', "Algebraic / Torn state", :blue)
+
+struct FullyLinear; end
+StateSelection.BipartiteGraphs.overview_label(::Type{FullyLinear}) = ('⊢', "Fully Linear (IPO ignored)", :red)
+
+struct WrongEquation; end
+StateSelection.BipartiteGraphs.overview_label(::Type{WrongEquation}) = ('✕', "Unused Equation kind", :dark_gray)
+
+const IPOMatches = Union{Unassigned, SelectedState, StateInvariant, AlgebraicState, FullyLinear, WrongEquation, InOut}
 const IPOMatching = StateSelection.Matching{IPOMatches}
 
 function top_level_state_selection!(tstate)
@@ -167,6 +177,7 @@ function top_level_state_selection!(tstate)
         if match === SelectedState()
             push!(diff_vars, v)
         elseif match === unassigned
+            var_eq_matching[v] = AlgebraicState()
             push!(alg_vars, v)
         end
     end
@@ -178,7 +189,7 @@ function top_level_state_selection!(tstate)
 
 
     diff_key = TornCacheKey(diff_vars, alg_vars, param_vars, explicit_eqs, Vector{Pair{BitSet, BitSet}}())
-    @assert matching_for_key(result, diff_key, structure) == var_eq_matching
+    @assert matching_for_key(tstate, diff_key) == var_eq_matching
 
     varfilter(var) = varkind(result, structure, var) == Intrinsics.Continuous &&
                      varclassification(result, structure, var) != External
@@ -200,6 +211,7 @@ function top_level_state_selection!(tstate)
         varfilter(v) || continue
         if match === unassigned
             push!(init_state_vars, v)
+            init_var_eq_matching[v] = AlgebraicState()
         end
     end
 
@@ -209,7 +221,7 @@ function top_level_state_selection!(tstate)
     end
 
     init_key = TornCacheKey(nothing, init_state_vars, param_vars, init_explicit_eqs, Vector{Pair{BitSet, BitSet}}())
-    @assert matching_for_key(result, init_key, structure) == init_var_eq_matching
+    @assert matching_for_key(tstate, init_key) == init_var_eq_matching
 
     (diff_key, init_key)
 end
