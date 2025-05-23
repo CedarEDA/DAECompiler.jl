@@ -178,20 +178,26 @@ end
 function Base.show(io::IO, inc::Incidence)
     print(io, "Incidence(")
     first = true
+    print_plusminus(io, minus=false) = if first
+        first = false
+        minus && print(io, "-")
+    else
+        print(io, minus ? " - " : " + ")
+    end
     if isa(inc.typ, Const) && isa(inc.typ.val, Float64)
         if !iszero(inc.typ.val)
             print(io, inc.typ.val)
             first = false
         end
-    else inc.typ !== Float64
-        print(io, inc.typ, ", ")
-    end
-    print_plusminus(io, minus=false) = if first
-            first = false
-            minus && print(io, "-")
+    else
+        if inc.typ === Float64
+            print(io, 'a')
+            !isempty(rowvals(inc.row)) && print_plusminus(io)
         else
-            print(io, minus ? " - " : " + ")
+            print(io, inc.typ)
+            !isempty(rowvals(inc.row)) && print(io, ", ")
         end
+    end
     time = inc.row[1]
     time_linear = time !== nonlinear
     is_grouped(v, i) = isa(v, Linearity) && (v.state_dependent || (v.time_dependent || i == 1) && in(time, (linear_state_dependent, nonlinear)))

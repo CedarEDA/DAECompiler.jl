@@ -197,24 +197,27 @@ function tfunc(::Union{Val{Core.Intrinsics.mul_float}, Val{Core.Intrinsics.mul_i
     rrow = _zero_row()
     ia = rowvals(a.row)
     ib = rowvals(b.row)
-    time_dependent = in(1, ia) || in(1, ib)
-    states = union(filter(≠(1), ia), filter(≠(1), ib))
+    states_a = filter(≠(1), ia)
+    states_b = filter(≠(1), ib)
+    time_dependent_a = in(1, ia)
+    time_dependent_b = in(1, ib)
     for i in Iterators.flatten((ia, ib))
         x = a.row[i]
         y = b.row[i]
         if x ≠ 0 && y ≠ 0
-            val = nonlinear
-        else
-            val = x * y
-            if isa(val, Float64)
-                if i == 1 && !isempty(states) # time; state-dependent factors will appear after distribution
-                    val = Linearity(; time_dependent = false, state_dependent = true, nonlinear = false)
-                elseif i > 1 # state
-                    state_dependent = any(≠(i), states)
-                    val = Linearity(; time_dependent, state_dependent, nonlinear = false)
-                end
-            end
+            rrow[i] = nonlinear # uᵢ²
+            continue
         end
+        if x == 0
+            val = y
+            state_dependent = !isempty(states_a)
+            time_dependent = time_dependent_a
+        else; @assert y == 0
+            val = x
+            state_dependent = !isempty(states_b)
+            time_dependent = time_dependent_b
+        end
+        val = join_linearity(val, Linearity(; time_dependent, state_dependent, nonlinear = false))
         rrow[i] = val
     end
     return Incidence(builtin_math_tfunc(Core.Intrinsics.mul_float, a.typ, b.typ), rrow)

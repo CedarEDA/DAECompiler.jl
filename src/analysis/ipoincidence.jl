@@ -130,7 +130,7 @@ end
 function compose_additive_term(@nospecialize(a), @nospecialize(b), coeff)
     isa(a, Const) || return widenconst(a)
     isa(b, Const) || return widenconst(a)
-    isa(coeff, Linearity) && return widenconst(a)
+    isa(coeff, Linearity) && return b.val == 0 ? a : widenconst(a)
     val = a.val + b.val * coeff
     isa(val, Float64) || return widenconst(a)
     return Const(val)

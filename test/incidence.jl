@@ -78,7 +78,7 @@ dependencies(row) = sort(rowvals(row) .=> nonzeros(row), by = first)
 
     incidence = Incidence(Float64, IncidenceValue[1.0])
     @test dependencies(incidence.row) == [1 => 1]
-    @test repr(incidence) == "Incidence(Float64, t)"
+    @test repr(incidence) == "Incidence(a + t)"
 
     incidence = Incidence(String, IncidenceValue[1.0])
     @test repr(incidence) == "Incidence(String, t)"
@@ -178,15 +178,32 @@ dependencies(row) = sort(rowvals(row) .=> nonzeros(row), by = first)
   @test dependencies(incidence.row) == [2 => nonlinear, 3 => linear_state_dependent, 4 => 1.0]
   @test repr(incidence) == "Incidence(6.0 + u₃ + f(u₁, ∝u₂))"
 
+  incidence = @incidence (u₁ +ᵢ u₂) *ᵢ t
+  @test incidence.typ === Const(0.0)
+  @test dependencies(incidence.row) == [1 => linear_state_dependent, (2:3 .=> linear_time_dependent)...]
+  @test repr(incidence) == "Incidence(f(∝t, ∝u₁, ∝u₂))"
+
+  incidence = @incidence u₁ *ᵢ u₂ +ᵢ (u₁ +ᵢ t) *ᵢ u₃
+  @test dependencies(incidence.row) == [1 => linear_state_dependent, 2 => linear_state_dependent, 3 => linear_state_dependent, 4 => linear_time_and_state_dependent]
+  @test repr(incidence) == "Incidence(f(∝t, ∝u₁, ∝u₂, ∝u₃))"
+
   # IPO
 
-  # NOTE: Most of the printing tests are broken due to having a poorly inferred `typ` argument.
-  # We expect `Const(0.0)` in most cases, but are provided with `Float64`, which appears in printing.
+  # NOTE: Most of additive terms (`.typ`) can't be precise given the current IPO representation.
+  # We expect `Const(0.0)` in most cases, but widen to `Float64`.
+
+  incidence = @incidence 1.0t * 3.0
+  @test dependencies(incidence.row) == [1 => linear]
+  @test repr(incidence) == "Incidence(a + cₜ * t)"
+
+  incidence = @incidence (1.0 + u₁ +ᵢ u₂) * 1.0
+  @test incidence.typ === Float64
+  @test dependencies(incidence.row) == (2:3 .=> linear_state_dependent)
+  @test repr(incidence) == "Incidence(a + f(∝u₁, ∝u₂))"
 
   incidence = @incidence (2.0 + u₁) * (3.0 + u₂)
-  @test_broken incidence.typ === Const(6.0)
   @test dependencies(incidence.row) == [2 => linear_state_dependent, 3 => linear_state_dependent]
-  @test_broken repr(incidence) == "Incidence(6.0 + f(∝u₁, ∝u₂))"
+  @test repr(incidence) == "Incidence(a + f(∝u₁, ∝u₂))"
 
   incidence = @incidence 5.0 + u₁
   @test incidence.typ === Const(5.0)
@@ -195,30 +212,30 @@ dependencies(row) = sort(rowvals(row) .=> nonzeros(row), by = first)
 
   incidence = @incidence u₁ * u₁
   @test dependencies(incidence.row) == [2 => nonlinear]
-  @test_broken repr(incidence) == "Incidence(f(u₁))"
+  @test repr(incidence) == "Incidence(f(u₁))"
 
   incidence = @incidence t * t
   @test dependencies(incidence.row) == [1 => nonlinear]
-  @test_broken repr(incidence) == "Incidence(f(t))"
+  @test repr(incidence) == "Incidence(f(t))"
 
   mul3(a, b, c) = a *ᵢ (b *ᵢ c)
   incidence = @incidence mul3(t, u₁, u₂)
   @test dependencies(incidence.row) == [1 => linear_state_dependent, (2:3 .=> linear_time_and_state_dependent)...]
-  @test_broken repr(incidence) == "Incidence(f(∝t, ∝u₁, ∝u₂))"
+  @test repr(incidence) == "Incidence(f(∝t, ∝u₁, ∝u₂))"
 
   incidence = @incidence mul3(t, u₁, u₁)
   @test dependencies(incidence.row) == [1 => linear_state_dependent, 2 => nonlinear]
-  @test_broken repr(incidence) == "Incidence(f(t, u₁))"
+  @test repr(incidence) == "Incidence(f(∝t, u₁))"
 
   incidence = @incidence mul3(t, u₁, t)
   # If we knew which state is used for state dependence,
   # state should be inferred as linear_time_dependent.
   @test dependencies(incidence.row) == [1 => nonlinear, 2 => linear_time_and_state_dependent]
-  @test_broken repr(incidence) == "Incidence(f(t, ∝u₁))"
+  @test repr(incidence) == "Incidence(f(t, ∝u₁))"
 
   incidence = @incidence mul3(u₂, u₁, u₂)
   @test dependencies(incidence.row) == [2 => linear_state_dependent, 3 => nonlinear]
-  @test_broken repr(incidence) == "Incidence(f(∝u₁, u₂))"
+  @test repr(incidence) == "Incidence(f(∝u₁, u₂))"
 
   _muladd(a, b, c) = a +ᵢ b *ᵢ c
   incidence = @incidence _muladd(u₁, u₁, u₂)
@@ -226,7 +243,7 @@ dependencies(row) = sort(rowvals(row) .=> nonzeros(row), by = first)
   # not multiplied by `a := u₁`. The solution would be to see that `a`
   # is linear but state-independent and therefore can't be a factor of `b`.
   @test dependencies(incidence.row) == [2 => nonlinear, 3 => linear_state_dependent]
-  @test_broken repr(incidence) == "Incidence(f(u₁, ∝u₂))"
+  @test repr(incidence) == "Incidence(f(u₁, ∝u₂))"
 
   # Here we still wouldn't be able to use the above solution because `a := u₁` is state-dependent.
   # So `c := u₁` having a state-dependent coefficient might be multiplied by `a` a.k.a itself
@@ -234,7 +251,7 @@ dependencies(row) = sort(rowvals(row) .=> nonzeros(row), by = first)
   _muladd2(a, b, c, d) = d *ᵢ a +ᵢ b *ᵢ c
   incidence = @incidence _muladd2(u₁, u₂, u₁, u₃)
   @test dependencies(incidence.row) == [2 => nonlinear, 3 => linear_state_dependent, 4 => linear_state_dependent]
-  @test_broken repr(incidence) == "Incidence(f(u₁, ∝u₂, ∝u₃))"
+  @test repr(incidence) == "Incidence(f(u₁, ∝u₂, ∝u₃))"
 end;
 
 end
