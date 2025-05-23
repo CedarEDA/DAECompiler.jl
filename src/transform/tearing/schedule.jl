@@ -157,6 +157,7 @@ function schedule_nonlinear!(compact, param_vars, var_eq_matching, ir, ordinal, 
     if isa(info, MappingInfo)
         result = info.result
         extended_rt = result.extended_rt
+        call_is_linear = is_fully_state_linear(extended_rt, nothing)
     else
         @assert isexpr(stmt, :call)
         f = argextype(stmt.args[1], ir)
@@ -274,11 +275,11 @@ function compute_eq_schedule(key::TornCacheKey, total_incidence, result, mss::St
         end
     end
 
-    for sched in var_schedule
+    for (ordinal, sched) in enumerate(var_schedule)
         eq_order = Union{Int, StructuralSSARef}[]
         push!(eq_orders, eq_order)
 
-        (in_vars, _) = sched
+        (in_vars, out_eqs) = sched
         union!(available, in_vars)
 
         for neighbor in 1:ndsts(structure.graph)
@@ -293,16 +294,26 @@ function compute_eq_schedule(key::TornCacheKey, total_incidence, result, mss::St
 
             # Determine which of this callee's external variables we have
             this_callee_in_vars = BitSet()
-            for i = 1:callee_info.result.nexternalargvars
+            for i = 1:length(callee_info.mapping.var_coeffs)
                 caller_map = callee_info.mapping.var_coeffs[i]
                 isa(caller_map, Const) && continue
                 caller_vars_for_this_callee_var = rowvals(caller_map.row) .- 1
+                if length(caller_vars_for_this_callee_var) == 1
+                    caller_var = only(caller_vars_for_this_callee_var)
+                    if (caller_var in key.diff_states || caller_var in key.alg_states) &&
+                       varclassification(result, structure, caller_var) == CalleeInternal
+                        continue
+                    end
+                end
                 if all(x->(x == 0 || x in available || x in key.param_vars), caller_vars_for_this_callee_var) &&
                 # If these are all param_vars, the var itself becomes a param var,
                 # not an in var.
                 !all(in(key.param_vars), caller_vars_for_this_callee_var)
                     push!(this_callee_in_vars, i)
                 end
+            end
+            if !isempty(schedule)
+                @assert this_callee_in_vars != schedule[end][1]
             end
 
             previously_scheduled_or_ignored = isempty(schedule) ? BitSet() : mapreduce(x->copy(x[2]), union, schedule)
@@ -327,7 +338,7 @@ function compute_eq_schedule(key::TornCacheKey, total_incidence, result, mss::St
                         if caller_var == 0 || coeff !== nonlinear
                             continue
                         end
-                        if !(caller_var in available) && !(caller_var in new_available)
+                        if !(caller_var in available) #&& !(caller_var in new_available)
                             # Can't schedule this yet - we don't have a variable that is used non-linearly
                             @goto outer_continue
                         end
@@ -335,7 +346,8 @@ function compute_eq_schedule(key::TornCacheKey, total_incidence, result, mss::St
                     # We have all variables for this incidence, schedule it
                     mapped_eq = callee_info.mapping.eqs[i]
                     assigned_var = invview(var_eq_matching)[mapped_eq]
-                    if assigned_var === unassigned
+                    @assert assigned_var !== unassigned
+                    if assigned_var === AlgebraicState()
                         push!(previously_scheduled_or_ignored, i)
                         continue
                     # TODO: Equations that stay entirely within the callee can be assigned here
@@ -350,14 +362,10 @@ function compute_eq_schedule(key::TornCacheKey, total_incidence, result, mss::St
             push!(schedule, this_callee_in_vars => this_callee_eqs)
         end
 
-        function schedule_frontier_var!(var; force=false)
-            # Find all frontier variables that in a callee that is fully available
-            eq = var_eq_matching[var]::Int
+        function schedule_eq!(eq; force=false)
             if is_const_plus_var_linear(total_incidence[eq])
                 # This is a linear equation, we can schedule it now
-                push!(eq_order, eq)
-                push!(new_available, var)
-                return
+                return true
             end
 
             # Otherwise, we need to compute some non-linear component
@@ -365,9 +373,7 @@ function compute_eq_schedule(key::TornCacheKey, total_incidence, result, mss::St
             mapping = result.eq_callee_mapping[eb]
             if mapping === nothing
                 # Eq is toplevel, can be scheduled now
-                push!(eq_order, eq)
-                push!(new_available, var)
-                return
+                return true
             end
             @assert eq == eb # TODO
 
@@ -386,15 +392,23 @@ function compute_eq_schedule(key::TornCacheKey, total_incidence, result, mss::St
                 # Check if this callee is ready to be fully scheduled
                 fully_ready = is_fully_ready(callee_info, available)
                 if !force && !fully_ready
-                    return
+                    return false
                 end
 
                 # Schedule (a portion of) this callee now
                 schedule_callee_now!(ssa)
-
-                @assert (callee_eq in schedule[end][2] || var in new_available)
+                if !(callee_eq in schedule[end][2])
+                    display(mss)
+                    error("Failed to schedule callee eq $callee_eq (caller eq $eq) for $ssa")
+                end
             end
-            if !(var in new_available)
+            return true
+        end
+
+        function schedule_frontier_var!(var; force=false)
+            # Find all frontier variables that in a callee that is fully available
+            eq = var_eq_matching[var]::Int
+            if schedule_eq!(eq; force) && !(var in new_available)
                 push!(new_available, var)
                 push!(eq_order, eq)
             end
@@ -425,7 +439,6 @@ function compute_eq_schedule(key::TornCacheKey, total_incidence, result, mss::St
 
             # TODO: We should have a heuristic for which callee to partition here rather
             # than just picking the first one
-
             schedule_frontier_var!(first(frontier); force=true)
             @assert !isempty(new_available)
             union!(available, new_available)
@@ -436,6 +449,11 @@ function compute_eq_schedule(key::TornCacheKey, total_incidence, result, mss::St
             end
             setdiff!(frontier, new_available)
             empty!(new_available)
+        end
+
+        for eq in out_eqs
+            did_sched = schedule_eq!(eq; force=true)
+            @assert did_sched
         end
     end
 
@@ -528,8 +546,10 @@ function assign_slots(state::TransformationState, key::TornCacheKey, var_eq_matc
     if var_eq_matching !== nothing
         for eq = 1:length(state.total_incidence)
             eqclassification(result, structure, eq) == External && continue
-            (invview(var_eq_matching)[eq] === unassigned) || continue
-            is_const_plus_var_linear(state.total_incidence[eq]) && continue
+            eqkind(result, structure, eq) == Intrinsics.Always || continue
+            assgn = invview(var_eq_matching)[eq]
+            @assert assgn !== unassigned
+            (assgn === AlgebraicState()) || continue
             assign_slot!(Explicit, eq)
         end
     end
@@ -556,13 +576,14 @@ struct TornIRSpec
     key::TornCacheKey
 end
 
-function matching_for_key(result::DAEIPOResult, key::TornCacheKey, structure = make_structure_from_ipo(result))
+function matching_for_key(state::TransformationState, key::TornCacheKey)
     (; diff_states, alg_states, explicit_eqs, var_schedule) = key
+    (; result, structure, total_incidence) = state
 
     allow_init_eqs = key.diff_states === nothing
 
-    may_use_var(var) = varclassification(result, structure, var) != External && (diff_states === nothing || !(var in diff_states)) && !(var in alg_states) && varkind(result, structure, var) == Intrinsics.Continuous
-    may_use_eq(eq) = !(eq in explicit_eqs) && eqclassification(result, structure, eq) != External && eqkind(result, structure, eq) in (allow_init_eqs ? (Intrinsics.Initial, Intrinsics.Always) : (Intrinsics.Always,))
+    may_use_var(var) = varclassification(state, var) != External && (diff_states === nothing || !(var in diff_states)) && !(var in alg_states) && varkind(state, var) == Intrinsics.Continuous
+    may_use_eq(eq) = !(eq in explicit_eqs) && eqclassification(state, eq) != External && eqkind(state, eq) in (allow_init_eqs ? (Intrinsics.Initial, Intrinsics.Always) : (Intrinsics.Always,))
 
     # Max match is the (unique) tearing result given the choice of states
     var_eq_matching = StateSelection.complete(StateSelection.maximal_matching(structure.solvable_graph, IPOMatches;
@@ -578,15 +599,34 @@ function matching_for_key(result::DAEIPOResult, key::TornCacheKey, structure = m
         var_eq_matching[var] = StateInvariant()
     end
 
+    for var in alg_states
+        @assert var_eq_matching[var] === unassigned
+        var_eq_matching[var] = AlgebraicState()
+    end
+
     for (ordinal, (in_vars, out_eqs)) in enumerate(key.var_schedule)
         for in_var in in_vars
             isa(var_eq_matching[in_var], InOut) && continue
-            @assert var_eq_matching[in_var] === unassigned
+            #@assert var_eq_matching[in_var] === unassigned
             var_eq_matching[in_var] = InOut(ordinal)
         end
 
         for out_eq in out_eqs
             invview(var_eq_matching)[out_eq] = InOut(ordinal)
+        end
+    end
+
+    for eq in explicit_eqs
+        invview(var_eq_matching)[eq] = AlgebraicState()
+    end
+
+    for eq = 1:length(invview(var_eq_matching))
+        if diff_states !== nothing && eqkind(state, eq) != Intrinsics.Always
+            invview(var_eq_matching)[eq] = WrongEquation()
+            continue
+        end
+        if is_const_plus_var_linear(total_incidence[eq]) && invview(var_eq_matching)[eq] === unassigned
+            invview(var_eq_matching)[eq] = FullyLinear()
         end
     end
 
@@ -614,7 +654,7 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
     (; diff_states, alg_states, var_schedule) = key
     (; result, structure, total_incidence ) = state
 
-    var_eq_matching = matching_for_key(result, key, structure)
+    var_eq_matching = matching_for_key(state, key)
 
     mss = StateSelection.MatchedSystemStructure(structure, var_eq_matching)
     (eq_orders, callee_schedules) = compute_eq_schedule(key, total_incidence, result, mss)
@@ -723,8 +763,6 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
                         if varclassification(callee_result, callee_var) == External
                             if all(x->(x in key.param_vars), rowvals(caller_map.row) .- 1)
                                 push!(callee_param_vars, callee_var)
-                            else
-                                push!(externally_solved_vars, callee_var)
                             end
                             continue
                         end
@@ -737,42 +775,55 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
                             push!(callee_param_vars, callee_var)
                         end
                         eq = var_eq_matching[caller_var]
-                        if isa(eq, Int) && result.eqclassification[eq] == Owned
-                            push!(externally_solved_vars, callee_var)
+                    end
+                end
+
+                sref = stmt.args[1][1]
+                callee_var_schedule = get(callee_schedules, sref, Vector{Pair{BitSet, BitSet}}())
+                callee_key = TornCacheKey(callee_diff_vars, callee_alg_vars, callee_param_vars, callee_explicit_eqs, callee_var_schedule)
+                for (callee_eq, caller_eq) in enumerate(info.mapping.eqs)
+                    if caller_eq in key.explicit_eqs
+                        push!(callee_explicit_eqs, callee_eq)
+                    else
+                        var = invview(var_eq_matching)[caller_eq]
+                        (is_const_plus_var_linear(callee_result.total_incidence[callee_eq]) ||
+                         is_const_plus_var_linear(total_incidence[caller_eq])) && continue
+                        @assert var !== unassigned
+                        if !any(out->callee_eq in out[2], callee_var_schedule)
+                            display(mss)
+                            cstructure = make_structure_from_ipo(callee_result)
+                            cvar_eq_matching = matching_for_key(callee_result, callee_key, cstructure)
+                            display(StateSelection.MatchedSystemStructure(cstructure, cvar_eq_matching))
+                            @show eq_orders
+                            @show callee_result.total_incidence[callee_eq]
+                            @show total_incidence[caller_eq]
+                            @show callee_var_schedule
+                            error("Caller Equation $(caller_eq) (callee equation $(callee_eq)) is not in the callee schedule ($sref)")
                         end
                     end
                 end
 
-                for (callee_eq, caller_eq) in enumerate(info.mapping.eqs)
-                    if caller_eq in key.explicit_eqs
-                        push!(callee_explicit_eqs, callee_eq)
+                if !isempty(callee_explicit_eqs)
+                    vars_for_final = BitSet()
+                    # TODO: This is a very expensive way to compute this - we should be able to do this cheaper
+                    cstructure = make_structure_from_ipo(callee_result)
+                    tstate = TransformationState(callee_result, cstructure, copy(callee_result.total_incidence))
+                    cvar_eq_matching = matching_for_key(tstate, callee_key)
+                    for callee_var in 1:length(cvar_eq_matching)
+                        if cvar_eq_matching[callee_var] !== unassigned
+                            continue
+                        end
+                        push!(vars_for_final, callee_var)
                     end
-                end
-
-                callee_final_available = externally_solved_vars
-                sref = stmt.args[1][1]
-                if !haskey(callee_schedules, sref)
-                    # This call may not be needed
-                    if isempty(callee_explicit_eqs) #isempty(callee_diff_vars) && isempty(callee_alg_vars) && length(callee_result.total_incidence) == 0
-                        continue
-                    end
-                    callee_schedules[sref] = Pair{BitSet,BitSet}[callee_final_available => BitSet()]
-                    push!(eq_orders[end], sref)
-                else
-                    calleesched = callee_schedules[sref]
-                    if isempty(calleesched)
-                        final_sched_avail = BitSet()
-                    else
-                        final_sched_avail = calleesched[end][1]
-                    end
-                    if !all(x->(x in final_sched_avail || x in callee_param_vars), callee_final_available)
-                        push!(callee_schedules[sref], callee_final_available => BitSet())
+                    if !isempty(vars_for_final)
+                        push!(callee_var_schedule, vars_for_final=>BitSet())
                         push!(eq_orders[end], sref)
                     end
                 end
-
-                callee_var_schedule = callee_schedules[sref]
-                callee_key = TornCacheKey(callee_diff_vars, callee_alg_vars, callee_param_vars, callee_explicit_eqs, callee_var_schedule)
+                if isempty(callee_var_schedule)
+                    # Apparently we just don't need this callee at all (e.g. it only has linear equations)
+                    continue
+                end
 
                 callee_codeinst = stmt.args[1][2]
                 if isa(callee_codeinst, MethodInstance)
@@ -900,7 +951,13 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
             if lin_var in key.param_vars
                 error()
             else
-                @assert lin_var > result.nexternalargvars
+                if !(lin_var in key.diff_states || lin_var in key.alg_states)
+                    @show lin_var
+                    @show ordinal
+                    @show eq_order
+                    display(result.ir)
+                    error("Tried to schedule variable $(lin_var) that we do not have a solution to (but our scheduling should have ensured that we do)")
+                end
                 var_sols[lin_var] = CarriedSSAValue(ordinal, insert_node_here!(compact1,
                     NewInstruction(
                         Expr(:invoke, nothing, Intrinsics.variable),

@@ -96,9 +96,8 @@ function rhs_finish!(
 
     allow_unassigned = false
 
-    var_eq_matching = matching_for_key(result, key, state.structure)
+    var_eq_matching = matching_for_key(state, key)
     (slot_assignments, var_assignment, eq_assignment) = assign_slots(state, key, var_eq_matching)
-
 
     torn_ci = find_matching_ci(ci->isa(ci.owner, TornIRSpec) && ci.owner.key == key, ci.def, world)
     torn = torn_ci.inferred
@@ -187,8 +186,9 @@ function rhs_finish!(
 
                 assgn = var_assignment[varnum]
                 if assgn == nothing
-                    ir[SSAValue(i)] = nothing
-                    continue
+                    display(StateSelection.MatchedSystemStructure(structure, var_eq_matching))
+                    @show varnum
+                    error("Variable left over in IR that doesn't have an assignment")
                 end
                 (kind, slot) = assgn
                 @assert 1 <= Int(kind) <= Int(LastStateKind)
@@ -197,7 +197,7 @@ function rhs_finish!(
             elseif is_known_invoke_or_call(stmt, InternalIntrinsics.contribution!, ir)
                 eq = stmt.args[end-2]::Int
                 kind = stmt.args[end-1]::EquationStateKind
-                (eqkind, slot) = eq_assignment[eq]
+                (eqkind, slot) = eq_assignment[eq]::Pair
                 @assert eqkind == kind
                 red = stmt.args[end]
                 handle_contribution!(ir, inst, kind, slot, arg_range, red)
@@ -231,8 +231,6 @@ function rhs_finish!(
 
         widen_extra_info!(ir)
         Compiler.verify_ir(ir)
-        #println("RHS #ordinal $(ir_ordinal) for $(Compiler.get_ci_mi(ci)):")
-        #display(ir)
         src = ir_to_src(ir)
 
         abi = Tuple{Tuple, Tuple, (VectorViewType for _ in arg_range)..., Float64}
