@@ -26,11 +26,11 @@ end
 code_ad_by_type(@nospecialize(tt::Type); kwargs...) =
   _code_ad_by_type(tt; kwargs...).inferred.ir
 
-function code_structure_by_type(@nospecialize(tt::Type); world::UInt = Base.tls_world_age(),  kwargs...)
+function code_structure_by_type(@nospecialize(tt::Type); world::UInt = Base.tls_world_age(), result = false, kwargs...)
   ci = _code_ad_by_type(tt; world, kwargs...)
   # Perform or lookup DAECompiler specific analysis for this system.
-  result = structural_analysis!(ci, world)
-  return result.ir
+  _result = structural_analysis!(ci, world)
+  return result ? _result : _result.ir
 end
 
 

@@ -48,7 +48,7 @@ Compiler.cache_owner(::StructuralRefiner) = StructureCache()
         return RT(nothing, (false, true))
     end
 
-    callee_codeinst = invokee
+    callee_codeinst = invokee::CodeInstance
     callee_result = structural_analysis!(callee_codeinst, Compiler.get_inference_world(interp))
 
     if isa(callee_result, UncompilableIPOResult) || isa(callee_result.extended_rt, Const) || isa(callee_result.extended_rt, Type)
