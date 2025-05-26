@@ -188,7 +188,7 @@ end
 implicitext_nl() = implicitext_nl(tanhdu())
 
 # ERROR: The system is unbalanced. There are 1 highest order differentiated variable(s) and 2 equation(s).
-@test_skip begin
+@test_broken begin
     dae_sol = solve(DAECProblem(implicitext_nl, (1,) .=> 1), IDA())
     ode_sol = solve(ODECProblem(implicitext_nl, (1,) .=> 1), Rodas5(autodiff=false))
 
@@ -206,7 +206,7 @@ end
 implicitexteq() = applyeq(external())
 
 # ERROR: I removed these from StructuralRefiner for conceptual reasons - if we hit these, lets revisit
-@test_skip begin
+@test_broken begin
     dae_sol = solve(DAECProblem(implicitexteq, (1,) .=> 1), IDA())
     ode_sol = solve(ODECProblem(implicitexteq, (1,) .=> 1), Rodas5(autodiff=false))
 
@@ -224,7 +224,7 @@ end
 implicitexteq_nl() = applyeq_nl(external2())
 
 # ERROR: I removed these from StructuralRefiner for conceptual reasons - if we hit these, lets revisit
-@test_skip begin
+@test_broken begin
     dae_sol = solve(DAECProblem(implicitexteq_nl, (1,) .=> 1), IDA())
     ode_sol = solve(ODECProblem(implicitexteq_nl, (1,) .=> 1), Rodas5(autodiff=false))
 
@@ -243,7 +243,7 @@ end
 end
 
 # ERROR: I removed these from StructuralRefiner for conceptual reasons - if we hit these, lets revisit
-@test_skip begin
+@test_broken begin
     dae_sol = solve(DAECProblem(impliciteqvar, (1,) .=> 1), IDA())
     ode_sol = solve(ODECProblem(impliciteqvar, (1,) .=> 1), Rodas5(autodiff=false))
 
@@ -261,7 +261,7 @@ end
 end
 
 # ERROR: I removed these from StructuralRefiner for conceptual reasons - if we hit these, lets revisit
-@test_skip begin
+@test_broken begin
     dae_sol = solve(DAECProblem(impliciteqvar2, (1,) .=> 1), IDA())
     ode_sol = solve(ODECProblem(impliciteqvar2, (1,) .=> 1), Rodas5(autodiff=false))
 
@@ -283,7 +283,7 @@ function scope_outer()
 end
 
 # ERROR: UndefVarError: `is_valid_partial_scope` not defined in `DAECompiler`
-@test_skip begin
+@test_broken begin
     result = @code_structure result = true scope_outer()
     @test length(result.varkinds) == 6 # 3 states + their differentials
     @test length(result.eqkinds) == 3
@@ -303,7 +303,7 @@ function genscope()
 end
 
 # ERROR: AssertionError: ivar == var_num
-@test_skip begin
+@test_broken begin
     result = @code_structure result = true genscope()
     @test length(result.varkinds) == 4 # 2 states + their differentials
     @test length(result.eqkinds) == 2
@@ -323,7 +323,7 @@ function derived_scope()
 end
 
 # ERROR: UndefVarError: `is_valid_partial_scope` not defined in `DAECompiler`
-@test_skip begin
+@test_broken begin
     result = @code_structure result = true derived_scope()
     @test length(result.varkinds) == 4 # 2 states + their differentials
     @test length(result.eqkinds) == 2
@@ -346,7 +346,7 @@ function eqscope()
 end
 
 # ERROR: UndefVarError: `is_valid_partial_scope` not defined in `DAECompiler`
-@test_skip begin
+@test_broken begin
     result = @code_structure result = true eqscope()
     @test length(result.varkinds) == 4 # 2 states + their differentials
     @test length(result.eqkinds) == 2
@@ -369,7 +369,7 @@ function scoped_equation_outer()
 end
 
 # ERROR: UndefVarError: `cur_scope_lattice` not defined in `DAECompiler`
-@test_skip begin
+@test_broken begin
     result = @code_structure result = true scoped_equation_outer()
     @test length(result.varkinds) == 4 # 2 states + their differentials
     @test length(result.eqkinds) == 2
@@ -396,7 +396,7 @@ end
 end
 
 # ERROR: AssertionError: info === NoCallInfo()
-@test_skip begin
+@test_broken begin
     result = @code_structure result = true varargs_outer!()
     @test length(result.varkinds) == 6 # 3 states + their differentials
     @test length(result.eqkinds) == 3
