@@ -141,7 +141,7 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
                 # every Expr(:new) uniquely corresponds to a scope identity, so this
                 # is legal here (bug not before)
                 compact[SSAValue(i)][:stmt] = Intrinsics.ScopeIdentity()
-                compact[SSAValue(i)][:flag] |= CC.IR_FLAG_REFINED
+                compact[SSAValue(i)][:flag] |= Compiler.IR_FLAG_REFINED
             end
             continue
         elseif isexpr(stmt, :splatnew)

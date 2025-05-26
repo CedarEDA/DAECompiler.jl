@@ -18,7 +18,7 @@ functions are:
 module Intrinsics
 
     import ..@defintrmethod
-    export continuous, discrete, epsilon, variable, equation, always, initial, initialguess, observed,
+    export Scope, GenScope, continuous, discrete, epsilon, variable, equation, always, initial, initialguess, observed,
         always!, initial!, initialguess!, observed!, sim_time, ett!, pre, threshold, ddt
 
     abstract type AbstractScope; end
@@ -303,7 +303,7 @@ module Intrinsics
     discrete(name::Symbol) = discrete(Scope(root_scope, name))
     discrete() = discrete(root_scope)
 
-    always() = equation(root_scope)
+    always() = equation(Always, root_scope)
     always!(val, scope::AbstractScope=root_scope) = always(scope)(val)
     always!(val::Number, name::Symbol) = always!(val, Scope(root_scope, name))
     initial() = initial(root_scope)

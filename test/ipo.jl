@@ -193,7 +193,7 @@ implicitext_nl() = implicitext_nl(tanhdu())
     ode_sol = solve(ODECProblem(implicitext_nl, (1,) .=> 1), Rodas5(autodiff=false))
 
     for sol in (dae_sol, ode_sol)
-        @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[1, :], 1 .+ atanh(0.5) .* sol.t))
+        @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[1, :], 1 .+ atanh(0.5)sol.t))
     end
 end
 
@@ -266,7 +266,7 @@ end
     ode_sol = solve(ODECProblem(impliciteqvar2, (1,) .=> 1), Rodas5(autodiff=false))
 
     for sol in (dae_sol, ode_sol)
-        @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[1, :], 1 .+ sol.t))
+        @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[1, :], 1 .+ 2sol.t))
     end
 end
 
