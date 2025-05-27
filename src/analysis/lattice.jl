@@ -139,7 +139,12 @@ struct Incidence
         if is_non_incidence_type(type)
             throw(DomainError(type, "Invalid type for Incidence"))
         end
-        row = convert(IncidenceVector, row)
+        if !isa(row, IncidenceVector)
+            vec, row = row, _zero_row()
+            for (i, val) in enumerate(vec)
+                row[i] = val
+            end
+        end
         time = row[1]
         if in(time, (linear_time_dependent, linear_time_and_state_dependent))
             throw(ArgumentError("Time incidence cannot be both linear and time-dependent, otherwise it would be nonlinear"))
@@ -199,8 +204,13 @@ function Base.show(io::IO, inc::Incidence)
         end
     end
     time = inc.row[1]
-    time_linear = time !== nonlinear
     is_grouped(v, i) = isa(v, Linearity) && (v.state_dependent || (v.time_dependent || i == 1) && in(time, (linear_state_dependent, nonlinear)))
+    function propto(linearity::Linearity)
+        str = "∝"
+        linearity.time_dependent && (str *= 'ₜ')
+        linearity.state_dependent && (str *= 'ₛ')
+        return str
+    end
     for (i, v) in zip(rowvals(inc.row), nonzeros(inc.row))
         is_grouped(v, i) && continue
         if isa(v, Float64)
@@ -211,13 +221,11 @@ function Base.show(io::IO, inc::Incidence)
         else
             !first && print(io, " + ")
             first = false
-            if !is_grouped(inc.row[1], 1)
-                ᵢ = i > 1 ? subscript(i - 1) : 'ₜ'
-                if v.time_dependent
-                    print(io, time_linear ? "∝t" : "f$ᵢ(t)", " * ")
-                else # unknown constant coefficient
-                    print(io, "c$ᵢ * ")
-                end
+            if is_grouped(inc.row[1], 1) && v.time_dependent
+                ᵢ = subscript(i - 1)
+                print(io, "$(propto(inc.row[1]::Linearity))t", " * ")
+            else # unknown constant coefficient
+                print(io, propto(v))
             end
         end
         print(io, subscript_state(i))
@@ -233,7 +241,7 @@ function Base.show(io::IO, inc::Incidence)
             else
                 print(io, ", ")
             end
-            !v.nonlinear && print(io, '∝')
+            !v.nonlinear && print(io, propto(v))
             print(io, subscript_state(i))
         end
         if !first_grouped
@@ -242,6 +250,111 @@ function Base.show(io::IO, inc::Incidence)
     end
     print(io, ")")
 end
+
+macro incidence_str(str) generate_incidence(str) end
+
+function generate_incidence(str::String)
+    if startswith(str, "Incidence(") && endswith(str, ')')
+        # Support `incidence"Incidence(...)"` so the user doesn't have to
+        # manually remove the `Incidence` call when copy-pasting.
+        str = str[11:(end - 1)]
+    end
+    str = replace(str, '∝' => '~')
+    ex = Meta.parse(str)
+    generate_incidence(ex)
+end
+
+function generate_incidence(ex)
+    T = nothing
+    if isexpr(ex, :tuple, 2)
+        T, ex = ex.args[1], ex.args[2]
+    end
+    generate_incidence(T, ex)
+end
+
+function generate_incidence(T, ex)
+    if isexpr(ex, :call) && ex.args[1] === :+
+        terms = ex.args[2:end]
+    else
+        terms = Any[ex]
+    end
+    pairs = Dict{Int,Any}()
+    for term in terms
+        if term === :a
+            T === nothing || throw(ArgumentError("The incidence type must not be provided if a constant `Float64` term is already present"))
+            T = Float64
+            continue
+        elseif isa(term, Float64)
+            T === nothing || throw(ArgumentError("The incidence type must not be provided if a literal `Float64` term is already present"))
+            T = Const(term)
+            continue
+        end
+
+        @assert isa(term, Symbol) || isexpr(term, :call)
+
+        ispropto(x) = isexpr(x, :call, 2) && startswith(string(x.args[1]), '~')
+
+        if isa(term, Symbol)
+            i = parse_variable(string(term))
+            pairs[i] = 1.0
+        elseif isexpr(term, :call, 3) && term.args[1] === :*
+            factor = parse(Float64, string(term.args[2]))
+            i = parse_variable(string(term.args[3]))
+            pairs[i] = factor
+        elseif ispropto(term)
+            coefficient, variable = separate_coefficient_and_variable(term)
+            coefficient = parse_coefficient(coefficient)
+            i = parse_variable(variable)
+            pairs[i] = coefficient
+        elseif isexpr(term, :call) && term.args[1] === :f
+            for argument in @view term.args[2:end]
+                if ispropto(argument)
+                    coefficient, variable = separate_coefficient_and_variable(argument)
+                    coefficient = parse_coefficient(coefficient)
+                    i = parse_variable(variable)
+                else
+                    i = parse_variable(string(argument))
+                    coefficient = nonlinear
+                end
+                pairs[i] = coefficient
+            end
+        else
+            throw(ArgumentError("Unrecognized call to function '$(term.args[1])'"))
+        end
+    end
+    values = IncidenceValue[]
+    for i in 1:maximum(keys(pairs); init = 0)
+        val = get(pairs, i, 0.0)
+        isa(val, Pair) && (val = val.second)
+        push!(values, val)
+    end
+    T = something(T, Const(0.0))
+    :(Incidence($T, IncidenceValue[$(values...)]))
+end
+
+function separate_coefficient_and_variable(term::Expr)
+    str = string(term)
+    i = findfirst(in(('t', 'u')), str)::Int
+    @view(str[1:prevind(str, i)]), @view(str[i:end])
+end
+
+function parse_coefficient(coefficient::AbstractString)
+    matched = match(r"^~(ₜ)?(ₛ)?$", coefficient)
+    @assert matched !== nothing
+    time_dependent = matched.captures[1] !== nothing
+    state_dependent = matched.captures[2] !== nothing
+    return Linearity(; time_dependent, state_dependent, nonlinear = false)
+end
+
+function parse_variable(term)
+    term == "t" && return 1
+    matched = match(r"^u([₀₁₂₃₄₅₆₇₈₉]+)$", term)
+    @assert matched !== nothing
+    capture = matched[1]
+    return 1 + parse(Int, map(subscript_to_number, capture))
+end
+
+subscript_to_number(char) = Char(48 + (UInt32(char) - 8320))
 
 _zero_row() = IncidenceVector(MAX_EQS, Int[], IncidenceValue[])
 const _ZERO_ROW = _zero_row()

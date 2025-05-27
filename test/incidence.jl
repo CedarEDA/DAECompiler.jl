@@ -75,55 +75,72 @@ dependencies(row) = sort(rowvals(row) .=> nonzeros(row), by = first)
     @test incidence.typ === Const(1.0)
     @test dependencies(incidence.row) == []
     @test repr(incidence) == "Incidence(1.0)"
+    @test incidence == incidence"1.0"
 
     incidence = Incidence(Float64)
     @test repr(incidence) == "Incidence(a)"
+    @test incidence == incidence"a"
 
     incidence = Incidence(Float64, IncidenceValue[1.0])
     @test dependencies(incidence.row) == [1 => 1]
     @test repr(incidence) == "Incidence(a + t)"
+    @test incidence == incidence"a + t"
 
     incidence = Incidence(String, IncidenceValue[1.0])
     @test repr(incidence) == "Incidence(String, t)"
+    @test incidence == incidence"String, t"
 
     incidence = Incidence(1)
     @test incidence.typ === Const(0.0)
     @test dependencies(incidence.row) == [2 => 1]
     @test repr(incidence) == "Incidence(u₁)"
+    @test incidence == incidence"u₁"
 
     incidence = Incidence(3)
     @test dependencies(incidence.row) == [4 => 1]
     @test repr(incidence) == "Incidence(u₃)"
+    @test incidence == incidence"u₃"
 
     incidence = Incidence(Const(3.0), IncidenceValue[0.0, 0.0, 2.0, 1.0])
     @test repr(incidence) == "Incidence(3.0 + 2.0u₂ + u₃)"
+    @test incidence == incidence"3.0 + 2.0u₂ + u₃"
 
     incidence = Incidence(Const(0.0), IncidenceValue[4.0, 0.0, 2.0])
     @test repr(incidence) == "Incidence(4.0t + 2.0u₂)"
+    @test incidence == incidence"4.0t + 2.0u₂"
 
     incidence = Incidence(Const(0.0), IncidenceValue[nonlinear])
     @test repr(incidence) == "Incidence(f(t))"
+    @test incidence == incidence"f(t)"
 
     incidence = Incidence(Const(0.0), IncidenceValue[linear])
-    @test repr(incidence) == "Incidence(cₜ * t)"
+    @test repr(incidence) == "Incidence(∝t)"
+    @test incidence == incidence"∝t"
 
     incidence = Incidence(Const(0.0), IncidenceValue[1.0, nonlinear])
     @test repr(incidence) == "Incidence(t + f(u₁))"
+    @test incidence == incidence"t + f(u₁)"
 
     incidence = Incidence(Const(0.0), IncidenceValue[1.0, linear])
-    @test repr(incidence) == "Incidence(t + c₁ * u₁)"
+    @test repr(incidence) == "Incidence(t + ∝u₁)"
+    @test incidence == incidence"t + ∝u₁"
 
     incidence = Incidence(Const(0.0), IncidenceValue[linear, linear, linear])
-    @test repr(incidence) == "Incidence(cₜ * t + c₁ * u₁ + c₂ * u₂)"
+    @test repr(incidence) == "Incidence(∝t + ∝u₁ + ∝u₂)"
+    @test incidence == incidence"∝t + ∝u₁ + ∝u₂"
 
     incidence = Incidence(Const(0.0), IncidenceValue[linear_state_dependent, linear_time_dependent, linear])
-    @test repr(incidence) == "Incidence(u₂ + f(∝t, ∝u₁))"
+    @test repr(incidence) == "Incidence(∝u₂ + f(∝ₛt, ∝ₜu₁))"
+    @test incidence == incidence"∝u₂ + f(∝ₛt, ∝ₜu₁)"
+    @test incidence == incidence"Incidence(∝u₂ + f(∝ₛt, ∝ₜu₁))"
 
     incidence = Incidence(Const(0.0), IncidenceValue[linear_state_dependent, linear_time_dependent, nonlinear])
-    @test repr(incidence) == "Incidence(f(∝t, ∝u₁, u₂))"
+    @test repr(incidence) == "Incidence(f(∝ₛt, ∝ₜu₁, u₂))"
+    @test incidence == incidence"f(∝ₛt, ∝ₜu₁, u₂)"
 
     incidence = Incidence(Const(0.0), IncidenceValue[nonlinear, linear_time_dependent, nonlinear])
-    @test repr(incidence) == "Incidence(f(t, ∝u₁, u₂))"
+    @test repr(incidence) == "Incidence(f(t, ∝ₜu₁, u₂))"
+    @test incidence == incidence"f(t, ∝ₜu₁, u₂)"
 
     @test_throws "inconsistent with an absence of time incidence" Incidence(Const(0.0), IncidenceValue[0.0, linear_time_dependent])
     @test_throws "inconsistent with an absence of state incidence" Incidence(Const(0.0), IncidenceValue[linear_state_dependent])
