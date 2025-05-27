@@ -127,3 +127,21 @@ macro insert_node_here(compact, line, ex, reverse_affinity = false)
         insert_node_here!($compact, inst, $reverse_affinity)
     end
 end
+
+"""
+    @sshow stmt
+    @sshow length(ir.stmts) typeof(val)
+
+Drop-in replacement for `@show`, but using `jl_safe_printf` to avoid task switches.
+
+This directly prints to C stdout; `stdout` redirects won't have any effect.
+"""
+macro sshow(exs...)
+    blk = Expr(:block)
+    for ex in exs
+        push!(blk.args, :(Core.println($(sprint(Base.show_unquoted,ex)*" = "),
+                                  repr(begin local value = $(esc(ex)) end))))
+    end
+    isempty(exs) || push!(blk.args, :value)
+    return blk
+end

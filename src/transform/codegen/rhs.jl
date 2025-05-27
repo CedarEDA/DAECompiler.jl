@@ -187,7 +187,7 @@ function rhs_finish!(
                 assgn = var_assignment[varnum]
                 if assgn == nothing
                     display(StateSelection.MatchedSystemStructure(structure, var_eq_matching))
-                    @show varnum
+                    @sshow varnum
                     error("Variable left over in IR that doesn't have an assignment")
                 end
                 (kind, slot) = assgn
