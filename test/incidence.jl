@@ -272,6 +272,26 @@ dependencies(row) = sort(rowvals(row) .=> nonzeros(row), by = first)
   incidence = @infer_incidence _muladd2(u₁, u₂, u₁, u₃)
   @test dependencies(incidence.row) == [2 => nonlinear, 3 => linear_state_dependent, 4 => linear_state_dependent]
   @test incidence == incidence"f(u₁, ∝ₛu₂, ∝ₛu₃)"
+
+  incidence = @infer_incidence exp(u₁)
+  @test dependencies(incidence.row) == [2 => nonlinear]
+  @test incidence == incidence"a + f(u₁)"
+
+  incidence = @infer_incidence t * exp(u₁)
+  @test dependencies(incidence.row) == [1 => linear_state_dependent, 2 => nonlinear]
+  @test incidence == incidence"a + f(∝ₛt, u₁)"
+
+  incidence = @infer_incidence u₁ * exp(t)
+  @test dependencies(incidence.row) == [1 => nonlinear, 2 => linear_time_dependent]
+  @test incidence == incidence"a + f(t, ∝ₜu₁)"
+
+  incidence = @infer_incidence u₁ * exp(t + u₂)
+  @test dependencies(incidence.row) == [1 => nonlinear, 2 => linear_time_and_state_dependent, 3 => nonlinear]
+  @test incidence == incidence"a + f(t, ∝ₜₛu₁, u₂)"
+
+  incidence = @infer_incidence atan(u₁, u₂)
+  @test dependencies(incidence.row) == [2 => nonlinear, 3 => nonlinear]
+  @test incidence == incidence"a + f(u₁, u₂)"
 end;
 
 end

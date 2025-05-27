@@ -109,7 +109,11 @@ function apply_linear_incidence(𝕃, ret::Incidence, caller::Union{CallerMappin
                         end
                         # We'll only be state-dependent if variables from the callee
                         # map to at least one other variable than `j`.
-                        state_dependent |= length(used_caller_variables) - did_use_time > 1
+                        if j == 1 # time
+                            state_dependent |= length(used_caller_variables) > 1
+                        else # state
+                            state_dependent |= length(used_caller_variables) - did_use_time > 1
+                        end
                         # If another state may contain time, we may be time-dependent too.
                         time_dependent |= did_use_time
                     end
