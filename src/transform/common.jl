@@ -60,7 +60,37 @@ function ir_to_src(ir::IRCode)
     src.slotflags = fill(zero(UInt8), nargtypes)
     src.slottypes = copy(ir.argtypes)
     src = Compiler.ir_to_codeinf!(src, ir)
+    if INSERT_STMT_DEBUGINFO[]
+        src.debuginfo = rewrite_debuginfo(src, src.debuginfo)
+    end
     return src
+end
+
+const INSERT_STMT_DEBUGINFO = Threads.Atomic{Bool}(false)
+
+function rewrite_debuginfo(src::CodeInfo, debuginfo)
+    codelocs = Int32[]
+    edges = DebugInfo[]
+    for (i, stmt) in enumerate(src.code)
+        push!(codelocs, i - 1, i, 1)
+        type = isa(src.ssavaluetypes, Vector{Any}) ? get(src.ssavaluetypes, i, nothing) : nothing
+        push!(edges, debuginfo_edge(i, stmt, type))
+    end
+    compressed = ccall(:jl_compress_codelocs, Any, (Int32, Any, Int), 1#=firstline=#, codelocs, length(src.code))
+    if isa(debuginfo, DebugInfo)
+        def, linetable = debuginfo.def, debuginfo.linetable
+    else
+        def, linetable = :IR, nothing
+    end
+    return DebugInfo(def, linetable, Core.svec(edges...), compressed)
+end
+
+function debuginfo_edge(i, stmt, type)
+    annotation = type === nothing ? "" : " (::$type)"
+    filename = Symbol("%$i = $stmt", annotation, ' '^4)
+    codelocs = Int32[1, 0, 0]
+    compressed = ccall(:jl_compress_codelocs, Any, (Int32, Any, Int), 1#=firstline=#, codelocs, 1)
+    DebugInfo(filename, nothing, Core.svec(), compressed)
 end
 
 function cache_dae_ci!(old_ci, src, debuginfo, abi, owner)
