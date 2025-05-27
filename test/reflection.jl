@@ -31,5 +31,7 @@ ir = @code_structure ssrm()
 @test isa(ir, IRCode)
 ir = @code_structure world = Base.get_world_counter() ssrm()
 @test isa(ir, IRCode)
+result = @code_structure result = true ssrm()
+@test isa(result, DAECompiler.DAEIPOResult)
 
 end # module

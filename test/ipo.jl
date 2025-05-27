@@ -2,6 +2,7 @@ module ipo
 
 using Test
 using DAECompiler
+using DAECompiler: refresh
 using DAECompiler.Intrinsics
 using Sundials
 using SciMLBase
@@ -179,5 +180,243 @@ ode_sol = solve(ODECProblem(structured_sicm, (1,) .=> 1), Rodas5(autodiff=false)
 for sol in (dae_sol, ode_sol)
     @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[1, :], 3 .- 2exp.(sol.t)))
 end
+
+#========= Nonlinear Implicit External =========#
+@noinline tanhdu() = tanh(ddt(continuous()))
+@noinline implicitext_nl(x) = always!(x - 0.5)
+
+implicitext_nl() = implicitext_nl(tanhdu())
+
+# ERROR: The system is unbalanced. There are 1 highest order differentiated variable(s) and 2 equation(s).
+@test_broken begin
+    dae_sol = solve(DAECProblem(implicitext_nl, (1,) .=> 1), IDA())
+    ode_sol = solve(ODECProblem(implicitext_nl, (1,) .=> 1), Rodas5(autodiff=false))
+
+    for sol in (dae_sol, ode_sol)
+        @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[1, :], 1 .+ atanh(0.5)sol.t))
+    end
+end
+
+#========= External Equation =========#
+@noinline external() = always()
+@noinline function applyeq(eq)
+    x = continuous()
+    eq(ddt(x) - x)
+end
+implicitexteq() = applyeq(external())
+
+# ERROR: I removed these from StructuralRefiner for conceptual reasons - if we hit these, lets revisit
+@test_broken begin
+    dae_sol = solve(DAECProblem(implicitexteq, (1,) .=> 1), IDA())
+    ode_sol = solve(ODECProblem(implicitexteq, (1,) .=> 1), Rodas5(autodiff=false))
+
+    for sol in (dae_sol, ode_sol)
+        @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[1, :], exp.(sol.t)))
+    end
+end
+
+#========= External Equation (nonlinear) =========#
+@noinline external2() = always()
+@noinline function applyeq_nl(eq)
+    x = continuous()
+    eq(ddt(x) - sin(x))
+end
+implicitexteq_nl() = applyeq_nl(external2())
+
+# ERROR: I removed these from StructuralRefiner for conceptual reasons - if we hit these, lets revisit
+@test_broken begin
+    dae_sol = solve(DAECProblem(implicitexteq_nl, (1,) .=> 1), IDA())
+    ode_sol = solve(ODECProblem(implicitexteq_nl, (1,) .=> 1), Rodas5(autodiff=false))
+
+    for sol in (dae_sol, ode_sol)
+        @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[1, :], 2acot.(exp.(log(cot(0.5)) .- sol.t))))
+    end
+end
+
+#========= External Equation (multiple equations) =========#
+@noinline external3() = (always(), continuous())
+@noinline applyeq2(eq, x) = eq(ddt(x) - 1.)
+@noinline function impliciteqvar()
+    (eq, x) = external3()
+    applyeq2(eq, x)
+    applyeq2(eq, x)
+end
+
+# ERROR: I removed these from StructuralRefiner for conceptual reasons - if we hit these, lets revisit
+@test_broken begin
+    dae_sol = solve(DAECProblem(impliciteqvar, (1,) .=> 1), IDA())
+    ode_sol = solve(ODECProblem(impliciteqvar, (1,) .=> 1), Rodas5(autodiff=false))
+
+    for sol in (dae_sol, ode_sol)
+        @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[1, :], 1 .+ sol.t))
+    end
+end
+
+@noinline external4() = (always(), ddt(continuous()))
+@noinline applyeq3(eq, var) = eq(var)
+@noinline function impliciteqvar2()
+    (eq, var) = external4()
+    applyeq3(eq, var)
+    applyeq3(eq, var)
+end
+
+# ERROR: I removed these from StructuralRefiner for conceptual reasons - if we hit these, lets revisit
+@test_broken begin
+    dae_sol = solve(DAECProblem(impliciteqvar2, (1,) .=> 1), IDA())
+    ode_sol = solve(ODECProblem(impliciteqvar2, (1,) .=> 1), Rodas5(autodiff=false))
+
+    for sol in (dae_sol, ode_sol)
+        @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[1, :], 1 .+ 2sol.t))
+    end
+end
+
+#=================== Scope handling ==================#
+@noinline function scope!(scope)
+    x = continuous(scope)
+    always!(ddt(x) - x + epsilon(scope), scope)
+end
+function scope_outer()
+    scope!(Scope(Scope(), :x1));
+    scope!(Scope(Scope(), :x2));
+    scope!(Scope(Scope(Scope(), :x3), :x4));
+    return nothing
+end
+
+# ERROR: UndefVarError: `is_valid_partial_scope` not defined in `DAECompiler`
+@test_broken begin
+    result = @code_structure result = true scope_outer()
+    @test length(result.varkinds) == 6 # 3 states + their differentials
+    @test length(result.eqkinds) == 3
+    # add test for `result.names`
+end
+
+#=================== GenScope ==================#
+@noinline function genscope!(scope)
+    scope = GenScope(scope, :g)
+    x = continuous(scope)
+    always!(ddt(x) - x + epsilon(scope), scope)
+end
+function genscope()
+    genscope!(Scope(Scope(), :x1))
+    genscope!(Scope(Scope(), :x1))
+    return nothing
+end
+
+# ERROR: AssertionError: ivar == var_num
+@test_broken begin
+    result = @code_structure result = true genscope()
+    @test length(result.varkinds) == 4 # 2 states + their differentials
+    @test length(result.eqkinds) == 2
+    # add test for `result.names`
+end
+#================= Derived Scope ===================#
+@noinline function derived_scope!(scope)
+    vscope = scope(:x)
+    x = continuous(vscope)
+    observed!(x, scope(:xo))
+    always!(ddt(x) - x + epsilon(vscope), vscope)
+end
+function derived_scope()
+    derived_scope!(Scope(Scope(), :x1))
+    derived_scope!(Scope(Scope(), :x2))
+    return nothing
+end
+
+# ERROR: UndefVarError: `is_valid_partial_scope` not defined in `DAECompiler`
+@test_broken begin
+    result = @code_structure result = true derived_scope()
+    @test length(result.varkinds) == 4 # 2 states + their differentials
+    @test length(result.eqkinds) == 2
+    # add test for `result.names`
+end
+
+#================= Equation & scope arguments ===================#
+@noinline function eqscope!(eq, scope)
+    vscope = scope(:x)
+    x = continuous(vscope)
+    observed!(x, scope(:xo))
+    eq(ddt(x) - x + epsilon(vscope))
+end
+function eqscope()
+    e1 = always(Scope(Scope(), :e1))
+    e2 = always(Scope(Scope(), :e2))
+    eqscope!(e1, Scope(Scope(), :x1))
+    eqscope!(e2, Scope(Scope(), :x2))
+    return nothing
+end
+
+# ERROR: UndefVarError: `is_valid_partial_scope` not defined in `DAECompiler`
+@test_broken begin
+    result = @code_structure result = true eqscope()
+    @test length(result.varkinds) == 4 # 2 states + their differentials
+    @test length(result.eqkinds) == 2
+    # add test for `result.names`
+end
+
+#============ ScopedValue ==============#
+using Base.ScopedValues
+const debug_scope = ScopedValue{DAECompiler.Intrinsics.AbstractScope}()
+
+@noinline function scoped_equation()
+    scope = debug_scope[]
+    x = continuous(scope)
+    always!(ddt(x) - x + epsilon(scope), scope)
+end
+function scoped_equation_outer()
+    with(scoped_equation, debug_scope => Scope(Scope(), :x1))
+    with(scoped_equation, debug_scope => Scope(Scope(), :x2))
+    return nothing
+end
+
+# ERROR: UndefVarError: `cur_scope_lattice` not defined in `DAECompiler`
+@test_broken begin
+    result = @code_structure result = true scoped_equation_outer()
+    @test length(result.varkinds) == 4 # 2 states + their differentials
+    @test length(result.eqkinds) == 2
+    # add test for `result.names`
+end
+
+#========= Varargs =========#
+@noinline function varargs_inner!(args...)
+    map(args) do (x, val)
+        always!(ddt(x) - val)
+    end
+end
+
+@noinline function varargs_middle!(args...)
+    # Extra tuple to exercise some of the deeper nesting code paths
+    varargs!(map(x -> (x + epsilon(), 2.0), args)...)
+end
+
+@noinline function varargs_outer!()
+    a = continuous()
+    b = continuous()
+    c = continuous()
+    varargs_middle!(a, b, c)
+end
+
+# ERROR: AssertionError: info === NoCallInfo()
+@test_broken begin
+    result = @code_structure result = true varargs_outer!()
+    @test length(result.varkinds) == 6 # 3 states + their differentials
+    @test length(result.eqkinds) == 3
+end
+
+#========= Internal variable leaking =========#
+@noinline new_variable() = continuous()
+
+@noinline function variable_and_equation()
+    x = new_variable()
+    always!(ddt(x) - x)
+end
+function internal_variable_leaking()
+    variable_and_equation()
+    variable_and_equation()
+    return nothing
+end
+
+result = @code_structure result = true internal_variable_leaking()
+@test length(result.varkinds) == 4 # 2 states + their differentials
+@test length(result.eqkinds) == 2
 
 end

@@ -795,10 +795,10 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
                             cstructure = make_structure_from_ipo(callee_result)
                             cvar_eq_matching = matching_for_key(callee_result, callee_key, cstructure)
                             display(StateSelection.MatchedSystemStructure(cstructure, cvar_eq_matching))
-                            @show eq_orders
-                            @show callee_result.total_incidence[callee_eq]
-                            @show total_incidence[caller_eq]
-                            @show callee_var_schedule
+                            @sshow eq_orders
+                            @sshow callee_result.total_incidence[callee_eq]
+                            @sshow total_incidence[caller_eq]
+                            @sshow callee_var_schedule
                             error("Caller Equation $(caller_eq) (callee equation $(callee_eq)) is not in the callee schedule ($sref)")
                         end
                     end
@@ -868,7 +868,7 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
                 # TODO: Pull this up, if arguments are state-independent
                 continue
             else
-                @show stmt
+                @sshow stmt
                 error()
             end
         else
@@ -953,9 +953,9 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
                 error()
             else
                 if !(lin_var in key.diff_states || lin_var in key.alg_states)
-                    @show lin_var
-                    @show ordinal
-                    @show eq_order
+                    @sshow lin_var
+                    @sshow ordinal
+                    @sshow eq_order
                     display(result.ir)
                     error("Tried to schedule variable $(lin_var) that we do not have a solution to (but our scheduling should have ensured that we do)")
                 end
