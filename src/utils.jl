@@ -136,30 +136,12 @@ Drop-in replacement for `@show`, but using `jl_safe_printf` to avoid task switch
 
 This directly prints to C stdout; `stdout` redirects won't have any effect.
 """
-macro sshow(ex, exs...)
-    static_show(ex, exs...)
-end
-
-safe_printf(arg, args...) = @ccall jl_safe_printf(string(arg, args...)::Cstring)::Cvoid
-
-function static_show(ex)
-    quote
-        ret = $(esc(ex))
-        safe_printf($(string(ex)), " = ", repr(ret), '\n')
-        ret
+macro sshow(exs...)
+    blk = Expr(:block)
+    for ex in exs
+        push!(blk.args, :(Core.println($(sprint(Base.show_unquoted,ex)*" = "),
+                                  repr(begin local value = $(esc(ex)) end))))
     end
-end
-
-function static_show(ex, ex2, exs...)
-    exs = (ex, ex2, exs...)
-    ret = Expr(:block)
-    for (i, ex) in enumerate(exs)
-        args = []
-        i > 1 && push!(args, '\n')
-        push!(args, string(ex), " = ", :(repr($(esc(ex)))))
-        i == length(exs) && push!(args, '\n')
-        push!(ret.args, :(safe_printf($(args...))))
-    end
-    push!(ret.args, nothing)
-    ret
+    isempty(exs) || push!(blk.args, :value)
+    return blk
 end
