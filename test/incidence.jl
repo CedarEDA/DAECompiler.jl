@@ -151,61 +151,61 @@ dependencies(row) = sort(rowvals(row) .=> nonzeros(row), by = first)
   incidence = @infer_incidence t
   @test incidence.typ === Const(0.0)
   @test dependencies(incidence.row) == [1 => 1]
-  @test repr(incidence) == "Incidence(t)"
+  @test incidence == incidence"t"
 
   incidence = @infer_incidence 5. +ᵢ u₁
   @test incidence.typ === Const(5.0)
   @test dependencies(incidence.row) == [2 => 1]
-  @test repr(incidence) == "Incidence(5.0 + u₁)"
+  @test incidence == incidence"5.0 + u₁"
 
   incidence = @infer_incidence 5.0 +ᵢ t +ᵢ u₁
   @test incidence.typ === Const(5.0)
   @test dependencies(incidence.row) == [1 => 1, 2 => 1]
-  @test repr(incidence) == "Incidence(5.0 + t + u₁)"
+  @test incidence == incidence"5.0 + t + u₁"
 
   incidence = @infer_incidence t *ᵢ u₁
   @test incidence.typ === Const(0.0)
   @test dependencies(incidence.row) == [1 => linear_state_dependent, 2 => linear_time_dependent]
-  @test repr(incidence) == "Incidence(f(∝t, ∝u₁))"
+  @test incidence == incidence"f(∝ₛt, ∝ₜu₁)"
 
   incidence = @infer_incidence u₁
   @test incidence.typ === Const(0.0)
   @test dependencies(incidence.row) == [2 => 1]
-  @test repr(incidence) == "Incidence(u₁)"
+  @test incidence == incidence"u₁"
 
   incidence = @infer_incidence u₁ +ᵢ u₂
   @test incidence.typ === Const(0.0)
   @test dependencies(incidence.row) == [2 => 1, 3 => 1]
-  @test repr(incidence) == "Incidence(u₁ + u₂)"
+  @test incidence == incidence"u₁ + u₂"
 
   incidence = @infer_incidence u₁ *ᵢ u₂
   @test incidence.typ === Const(0.0)
   @test dependencies(incidence.row) == [2 => linear_state_dependent, 3 => linear_state_dependent]
-  @test repr(incidence) == "Incidence(f(∝u₁, ∝u₂))"
+  @test incidence == incidence"f(∝ₛu₁, ∝ₛu₂)"
 
   incidence = @infer_incidence (2.0 +ᵢ u₁) *ᵢ (3.0 +ᵢ u₂)
   @test incidence.typ === Const(6.0)
   @test dependencies(incidence.row) == [2 => linear_state_dependent, 3 => linear_state_dependent]
-  @test repr(incidence) == "Incidence(6.0 + f(∝u₁, ∝u₂))"
+  @test incidence == incidence"6.0 + f(∝ₛu₁, ∝ₛu₂)"
 
   incidence = @infer_incidence (2.0 +ᵢ u₁) *ᵢ (3.0 +ᵢ u₁ *ᵢ u₂)
   @test incidence.typ === Const(6.0)
   @test dependencies(incidence.row) == [2 => nonlinear, 3 => linear_state_dependent]
-  @test repr(incidence) == "Incidence(6.0 + f(u₁, ∝u₂))"
+  @test incidence == incidence"6.0 + f(u₁, ∝ₛu₂)"
 
   incidence = @infer_incidence (2.0 +ᵢ u₁) *ᵢ (3.0 +ᵢ u₁ *ᵢ u₂) +ᵢ u₃
   @test incidence.typ === Const(6.0)
   @test dependencies(incidence.row) == [2 => nonlinear, 3 => linear_state_dependent, 4 => 1.0]
-  @test repr(incidence) == "Incidence(6.0 + u₃ + f(u₁, ∝u₂))"
+  @test incidence == incidence"6.0 + u₃ + f(u₁, ∝ₛu₂)"
 
   incidence = @infer_incidence (u₁ +ᵢ u₂) *ᵢ t
   @test incidence.typ === Const(0.0)
   @test dependencies(incidence.row) == [1 => linear_state_dependent, (2:3 .=> linear_time_dependent)...]
-  @test repr(incidence) == "Incidence(f(∝t, ∝u₁, ∝u₂))"
+  @test incidence == incidence"f(∝ₛt, ∝ₜu₁, ∝ₜu₂)"
 
   incidence = @infer_incidence u₁ *ᵢ u₂ +ᵢ (u₁ +ᵢ t) *ᵢ u₃
-  @test dependencies(incidence.row) == [1 => linear_state_dependent, 2 => linear_state_dependent, 3 => linear_state_dependent, 4 => linear_time_and_state_dependent]
-  @test repr(incidence) == "Incidence(f(∝t, ∝u₁, ∝u₂, ∝u₃))"
+  @test dependencies(incidence.row) == [(1:3 .=> linear_state_dependent)..., 4 => linear_time_and_state_dependent]
+  @test incidence == incidence"f(∝ₛt, ∝ₛu₁, ∝ₛu₂, ∝ₜₛu₃)"
 
   # IPO
 
@@ -214,48 +214,48 @@ dependencies(row) = sort(rowvals(row) .=> nonzeros(row), by = first)
 
   incidence = @infer_incidence 1.0t * 3.0
   @test dependencies(incidence.row) == [1 => linear]
-  @test repr(incidence) == "Incidence(a + cₜ * t)"
+  @test incidence == incidence"a + ∝t"
 
   incidence = @infer_incidence (1.0 + u₁ +ᵢ u₂) * 1.0
   @test incidence.typ === Float64
   @test dependencies(incidence.row) == (2:3 .=> linear_state_dependent)
-  @test repr(incidence) == "Incidence(a + f(∝u₁, ∝u₂))"
+  @test incidence == incidence"a + f(∝ₛu₁, ∝ₛu₂)"
 
   incidence = @infer_incidence (2.0 + u₁) * (3.0 + u₂)
   @test dependencies(incidence.row) == [2 => linear_state_dependent, 3 => linear_state_dependent]
-  @test repr(incidence) == "Incidence(a + f(∝u₁, ∝u₂))"
+  @test incidence == incidence"a + f(∝ₛu₁, ∝ₛu₂)"
 
   incidence = @infer_incidence 5.0 + u₁
   @test incidence.typ === Const(5.0)
   @test dependencies(incidence.row) == [2 => 1]
-  @test repr(incidence) == "Incidence(5.0 + u₁)"
+  @test incidence == incidence"5.0 + u₁"
 
   incidence = @infer_incidence u₁ * u₁
   @test dependencies(incidence.row) == [2 => nonlinear]
-  @test repr(incidence) == "Incidence(f(u₁))"
+  @test incidence == incidence"f(u₁)"
 
   incidence = @infer_incidence t * t
   @test dependencies(incidence.row) == [1 => nonlinear]
-  @test repr(incidence) == "Incidence(f(t))"
+  @test incidence == incidence"f(t)"
 
   mul3(a, b, c) = a *ᵢ (b *ᵢ c)
   incidence = @infer_incidence mul3(t, u₁, u₂)
   @test dependencies(incidence.row) == [1 => linear_state_dependent, (2:3 .=> linear_time_and_state_dependent)...]
-  @test repr(incidence) == "Incidence(f(∝t, ∝u₁, ∝u₂))"
+  @test incidence == incidence"f(∝ₛt, ∝ₜₛu₁, ∝ₜₛu₂)"
 
   incidence = @infer_incidence mul3(t, u₁, u₁)
   @test dependencies(incidence.row) == [1 => linear_state_dependent, 2 => nonlinear]
-  @test repr(incidence) == "Incidence(f(∝t, u₁))"
+  @test incidence == incidence"f(∝ₛt, u₁)"
 
   incidence = @infer_incidence mul3(t, u₁, t)
   # If we knew which state is used for state dependence,
   # state should be inferred as linear_time_dependent.
   @test dependencies(incidence.row) == [1 => nonlinear, 2 => linear_time_and_state_dependent]
-  @test repr(incidence) == "Incidence(f(t, ∝u₁))"
+  @test incidence == incidence"f(t, ∝ₜₛu₁)"
 
   incidence = @infer_incidence mul3(u₂, u₁, u₂)
   @test dependencies(incidence.row) == [2 => linear_state_dependent, 3 => nonlinear]
-  @test repr(incidence) == "Incidence(f(∝u₁, u₂))"
+  @test incidence == incidence"f(∝ₛu₁, u₂)"
 
   _muladd(a, b, c) = a +ᵢ b *ᵢ c
   incidence = @infer_incidence _muladd(u₁, u₁, u₂)
@@ -263,7 +263,7 @@ dependencies(row) = sort(rowvals(row) .=> nonzeros(row), by = first)
   # not multiplied by `a := u₁`. The solution would be to see that `a`
   # is linear but state-independent and therefore can't be a factor of `b`.
   @test dependencies(incidence.row) == [2 => nonlinear, 3 => linear_state_dependent]
-  @test repr(incidence) == "Incidence(f(u₁, ∝u₂))"
+  @test incidence == incidence"f(u₁, ∝ₛu₂)"
 
   # Here we still wouldn't be able to use the above solution because `a := u₁` is state-dependent.
   # So `c := u₁` having a state-dependent coefficient might be multiplied by `a` a.k.a itself
@@ -271,7 +271,7 @@ dependencies(row) = sort(rowvals(row) .=> nonzeros(row), by = first)
   _muladd2(a, b, c, d) = d *ᵢ a +ᵢ b *ᵢ c
   incidence = @infer_incidence _muladd2(u₁, u₂, u₁, u₃)
   @test dependencies(incidence.row) == [2 => nonlinear, 3 => linear_state_dependent, 4 => linear_state_dependent]
-  @test repr(incidence) == "Incidence(f(u₁, ∝u₂, ∝u₃))"
+  @test incidence == incidence"f(u₁, ∝ₛu₂, ∝ₛu₃)"
 end;
 
 end
