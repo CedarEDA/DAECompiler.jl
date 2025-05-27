@@ -127,3 +127,39 @@ macro insert_node_here(compact, line, ex, reverse_affinity = false)
         insert_node_here!($compact, inst, $reverse_affinity)
     end
 end
+
+"""
+    @sshow stmt
+    @sshow length(ir.stmts) typeof(val)
+
+Drop-in replacement for `@show`, but using `jl_safe_printf` to avoid task switches.
+
+This directly prints to C stdout; `stdout` redirects won't have any effect.
+"""
+macro sshow(ex, exs...)
+    static_show(ex, exs...)
+end
+
+safe_printf(arg, args...) = @ccall jl_safe_printf(string(arg, args...)::Cstring)::Cvoid
+
+function static_show(ex)
+    quote
+        ret = $(esc(ex))
+        safe_printf($(string(ex)), " = ", repr(ret), '\n')
+        ret
+    end
+end
+
+function static_show(ex, ex2, exs...)
+    exs = (ex, ex2, exs...)
+    ret = Expr(:block)
+    for (i, ex) in enumerate(exs)
+        args = []
+        i > 1 && push!(args, '\n')
+        push!(args, string(ex), " = ", :(repr($(esc(ex)))))
+        i == length(exs) && push!(args, '\n')
+        push!(ret.args, :(safe_printf($(args...))))
+    end
+    push!(ret.args, nothing)
+    ret
+end

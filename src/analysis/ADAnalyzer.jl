@@ -47,8 +47,8 @@ end
         return false
     end
     if isa(src, Compiler.OptimizationState)
-        @show src.linfo
-        @show src.src
+        @sshow src.linfo
+        @sshow src.src
         error()
     end
     if isa(src, AnalyzedSource)

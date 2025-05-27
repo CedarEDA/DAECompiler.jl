@@ -159,7 +159,7 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
         elseif stmt === nothing
             continue
         else
-            @show stmt
+            @sshow stmt
         end
     end
     ir = Compiler.finish(compact)
