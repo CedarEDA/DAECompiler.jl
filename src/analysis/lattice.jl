@@ -139,11 +139,13 @@ struct Incidence
         if is_non_incidence_type(type)
             throw(DomainError(type, "Invalid type for Incidence"))
         end
-        if !isa(row, IncidenceVector)
+        if !isa(row, SparseVector)
             vec, row = row, _zero_row()
             for (i, val) in enumerate(vec)
                 row[i] = val
             end
+        else
+            row = convert(IncidenceVector, row)
         end
         time = row[1]
         if in(time, (linear_time_dependent, linear_time_and_state_dependent))

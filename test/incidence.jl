@@ -23,7 +23,7 @@ postwalk(f, ex) = walk(ex, x -> postwalk(f, x), f)
       x + u₃
     end
     @infer_incidence u₁ + u₂ true    # a second argument of `true` makes it return the IR, not the Incidence
-    @infer_incidence exp(u₂) + u₁    # will create u₂ as the second continuous variable
+    @infer_incidence 1/u₂ + u₁       # will create u₂ as the second continuous variable
 
 Return the `Incidence` object after inferring the structure of the provided code,
 substituting any variables starting by 'u'. Variables are created as `continuous()`
@@ -174,6 +174,11 @@ dependencies(row) = sort(rowvals(row) .=> nonzeros(row), by = first)
     @test dependencies(incidence.row) == [2 => 1]
     @test incidence == incidence"u₁"
 
+    incidence = @infer_incidence 3.0 *ᵢ u₁
+    @test incidence.typ === Const(0.0)
+    @test dependencies(incidence.row) == [2 => 3.0]
+    @test incidence == incidence"3.0u₁"
+
     incidence = @infer_incidence u₁ +ᵢ u₂
     @test incidence.typ === Const(0.0)
     @test dependencies(incidence.row) == [2 => 1, 3 => 1]
@@ -274,26 +279,66 @@ dependencies(row) = sort(rowvals(row) .=> nonzeros(row), by = first)
     @test dependencies(incidence.row) == [2 => nonlinear, 3 => linear_state_dependent, 4 => linear_state_dependent]
     @test incidence == incidence"f(u₁, ∝ₛu₂, ∝ₛu₃)"
 
-    incidence = @infer_incidence exp(u₁)
+    incidence = @infer_incidence 1/u₁
     @test dependencies(incidence.row) == [2 => nonlinear]
     @test incidence == incidence"a + f(u₁)"
 
-    incidence = @infer_incidence t * exp(u₁)
+    incidence = @infer_incidence t * (1/u₁)
     @test dependencies(incidence.row) == [1 => linear_state_dependent, 2 => nonlinear]
     @test incidence == incidence"a + f(∝ₛt, u₁)"
 
-    incidence = @infer_incidence u₁ * exp(t)
+    incidence = @infer_incidence u₁ * (1/t)
     @test dependencies(incidence.row) == [1 => nonlinear, 2 => linear_time_dependent]
     @test incidence == incidence"a + f(t, ∝ₜu₁)"
 
-    incidence = @infer_incidence u₁ * exp(t + u₂)
+    incidence = @infer_incidence u₁ * (1/(t + u₂))
     @test dependencies(incidence.row) == [1 => nonlinear, 2 => linear_time_and_state_dependent, 3 => nonlinear]
     @test incidence == incidence"a + f(t, ∝ₜₛu₁, u₂)"
 
-    incidence = @infer_incidence atan(u₁, u₂)
+    incidence = @infer_incidence 1/(u₁ * u₂)
     @test dependencies(incidence.row) == [2 => nonlinear, 3 => nonlinear]
     @test incidence == incidence"a + f(u₁, u₂)"
   end
-end;
+
+  @testset "Time derivatives" begin
+    incidence = @infer_incidence ddt(3.0 *ᵢ t)
+    @test incidence == incidence"3.0"
+
+    incidence = @infer_incidence ddt(3.0 *ᵢ t +ᵢ 5.0)
+    @test incidence == incidence"3.0"
+
+    incidence = @infer_incidence ddt(3.0 * t)
+    @test incidence == incidence"a"
+
+    incidence = @infer_incidence ddt(u₁)
+    @test incidence == incidence"u₂"
+
+    incidence = @infer_incidence ddt(1.0 +ᵢ u₁)
+    @test incidence == incidence"u₂"
+
+    incidence = @infer_incidence u₁ +ᵢ ddt(u₁)
+    @test incidence == incidence"u₁ + u₂"
+
+    incidence = @infer_incidence ddt(u₁ *ᵢ u₂)
+    @test incidence == incidence"f(∝ₛu₁, ∝ₛu₂, ∝ₛu₃, ∝ₛu₄)"
+
+    incidence = @infer_incidence ddt(u₁ *ᵢ t)
+    @test incidence == incidence"a + ∝u₁ + f(∝ₛt, ∝ₜu₂)"
+
+    incidence = @infer_incidence ddt(u₁ *ᵢ u₁)
+    @test incidence == incidence"a + f(u₁, u₂)"
+    # Note that the constant term may be removed if we
+    # model nonlinear time-independent incidences.
+
+    incidence = @infer_incidence ddt(1/u₁)
+    @test incidence == incidence"a + f(u₁, u₂)"
+
+    incidence = @infer_incidence ddt((2.0 +ᵢ u₁) *ᵢ (3.0 +ᵢ u₂))
+    @test incidence == incidence"f(∝ₛu₁, ∝ₛu₂, ∝ₛu₃, ∝ₛu₄)"
+
+    incidence = @infer_incidence ddt((2.0 +ᵢ u₁) *ᵢ (3.0 +ᵢ t))
+    @test incidence == incidence"a + ∝u₁ + f(∝ₛt, ∝ₜu₂)"
+  end
+end
 
 end

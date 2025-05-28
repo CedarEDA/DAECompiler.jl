@@ -79,8 +79,8 @@ end
 function structural_inc_ddt(var_to_diff::DiffGraph, varclassification::Union{Vector{VarEqClassification}, Nothing}, varkinds::Union{Vector{Intrinsics.VarKind}, Nothing}, inc::Union{Incidence, Const})
     isa(inc, Const) && return Const(zero(inc.val))
     r = _zero_row()
-    function get_or_make_diff(v_offset::Int)
-        v = v_offset - 1
+    function get_or_make_diff(i::Int)
+        v = i - 1
         var_to_diff[v] !== nothing && return var_to_diff[v] + 1
         dv = add_vertex!(var_to_diff)
         if varclassification !== nothing
@@ -94,21 +94,20 @@ function structural_inc_ddt(var_to_diff::DiffGraph, varclassification::Union{Vec
     end
     base = isa(inc.typ, Const) ? Const(zero(inc.typ.val)) : inc.typ
     indices = rowvals(inc.row)
-    for (v_offset, coeff) in zip(indices, nonzeros(inc.row))
-        if v_offset == 1
-            # t
+    for (i, coeff) in zip(indices, nonzeros(inc.row))
+        if i == 1 # time
             if isa(coeff, Float64) # known constant coefficient
-                # Do not set r[v_offset]; d/dt t = 1
+                # Do not set r[i]; d/dt t = 1
                 if isa(base, Const)
                     base = Const(base.val + coeff)
                 end
             elseif coeff.nonlinear
-                r[v_offset] = nonlinear
+                r[i] = nonlinear
             else
                 @assert !coeff.time_dependent # should be nonlinear if time-dependent
                 if coeff.state_dependent # e.g. u₁ * t
                     # State dependence will not be eliminated because of the chain rule.
-                    r[v_offset] = coeff
+                    r[i] = coeff
                 else # unknown constant coefficient
                     if isa(base, Const)
                         # We are adding an unknown but constant value to the
@@ -121,16 +120,30 @@ function structural_inc_ddt(var_to_diff::DiffGraph, varclassification::Union{Vec
         end
         if isa(coeff, Float64)
             # Linear with a known constant coefficient, just add to the derivative
-            r[get_or_make_diff(v_offset)] += coeff
+            r[get_or_make_diff(i)] += coeff
         elseif !coeff.state_dependent && !coeff.time_dependent
             # Linear with an unknown constant coefficient.
-            r[get_or_make_diff(v_offset)] = coeff
+            r[get_or_make_diff(i)] = coeff
         elseif coeff.nonlinear
-            r[v_offset] = nonlinear
-            r[get_or_make_diff(v_offset)] = nonlinear
+            r[i] = nonlinear
+            r[get_or_make_diff(i)] = nonlinear
+            # derivative may yield constant terms (only if time-dependent,
+            # but we conservatively assume nonlinear not to be time-independent)
+            base = widenconst(base)
         else # time- or state-dependent linear coefficient
-            r[v_offset] = coeff
-            r[get_or_make_diff(v_offset)] = coeff
+            if !coeff.state_dependent && coeff.time_dependent && length(nonzeros(inc.row)) == 2 && inc.row[1] ≠ nonlinear
+                # `f(∝t, ∝ₜuᵢ)` is of the form `(a + bt)(c + duᵢ)`, we can simplify to `(a + bt)t∂ₜuᵢ + b(c + duᵢ)`,
+                # yielding `∝ₜ∂uᵢ + bc + ∝uᵢ`. (note that in this case we'll also need to widen `base`, as done further below)
+                r[i] = linear
+                r[get_or_make_diff(i)] = linear_time_dependent
+            else
+                r[i] = coeff
+                r[get_or_make_diff(i)] = coeff
+            end
+            if coeff.time_dependent
+                # The product rule with a time factor may yield constant terms.
+                base = widenconst(base)
+            end
         end
     end
     return Incidence(base, r)
