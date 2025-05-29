@@ -390,7 +390,7 @@ function process_ipo_return!(𝕃, ultimate_rt::Incidence, eqclassification, eqk
         if v != 0 && varclassification[v] != External && coeff === nonlinear
             # nonlinear state variable created within this call tree
             get_nonlinrepl()
-            new_eq_row[v_offset] = nonlinear # XXX: should we refine this to something linear?
+            new_eq_row[v_offset] = nonlinear # we might want to refine this to something linear
         else
             new_row[v_offset] = coeff
             while v != 0 && v !== nothing

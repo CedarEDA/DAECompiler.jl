@@ -41,20 +41,22 @@ Compiler.has_extended_unionsplit(::EqStructureLattice) = true
 
 ############################## Linearity #######################################
 
-# XXX: update docstring
 """
-    struct Linearity
+    Base.@kwdef struct Linearity
+        time_dependent::Bool = true
+        state_dependent::Bool = true
         nonlinear::Bool = true
     end
 
-This struct expresses linearity information: linear or nonlinear.
+Together with `Float64` values in `Incidence`, this struct expresses linearity information:
+- Linear, coefficient is a known constant (a `Float64` value).
+- Linear, coefficient is an unknown constant (`linear`).
+- Linear, coefficient is unknown with a known state or time dependence (`linear_state_dependent`, `linear_time_dependent`).
+- Linear, coefficient is unknown with both state and time dependence (`linear_time_and_state_dependent`).
+- Nonlinear (`nonlinear` - always taints state and time dependence currently).
 
-Nonlinearity is similar to `missing` in that arithmetic with it is
-saturating. When used as a coefficient in the Incidence lattice, it indicates
-that the corresponding variable does not have a (constant) linear coefficient.
-This may either mean that the variable in question has a non-constant linear
-coefficient or that the variable is used non-linearly. We do not currently
-distinguish the two situations.
+A known constant-coefficient contains the highest level of information. `nonlinear` contains the lowest
+(and most conservative) level of information, and should be assumed used by default or if uncertain.
 """
 Base.@kwdef struct Linearity
     time_dependent::Bool = true
@@ -68,10 +70,15 @@ Base.@kwdef struct Linearity
     end
 end
 
+"The variable is used linearly, with an unknown constant."
 const linear = Linearity(time_dependent = false, state_dependent = false, nonlinear = false)
+"The variable is used linearly, with an unknown constant that may depend on time."
 const linear_time_dependent = Linearity(state_dependent = false, nonlinear = false)
+"The variable is used linearly, with an unknown constant that may depend on time and on other states."
 const linear_state_dependent = Linearity(time_dependent = false, nonlinear = false)
+"The variable is used linearly, with an unknown constant that may depend on time and on other states."
 const linear_time_and_state_dependent = Linearity(nonlinear = false)
+"The variable is used nonlinearly, with a possible dependence on time and other states."
 const nonlinear = Linearity()
 
 join_linearity(a::Linearity, b::Real) = a
@@ -128,6 +135,9 @@ elements are defined by subset inclusion. Note that in particular this implies
 that plain `T` lattice elements have unknown incidence and `Const` lattice elements
 have no incidence. A lattice element of type `T` that is known to be state-independent
 would have lattice element `Incidence(T, {})`.
+
+For convenience, you may want to use the `incidence"..."` string macro to construct an
+[`Incidence`](@ref) from its printed representation.
 """
 struct Incidence
     # Considered additive to `row`. In particular, if the `typ` is Float64,
@@ -253,6 +263,11 @@ function Base.show(io::IO, inc::Incidence)
     print(io, ")")
 end
 
+"""
+    incidence"a + f(∝ₛt, u₁)"
+
+Construct an [`Incidence`](@ref) from its printed representation.
+"""
 macro incidence_str(str) generate_incidence(str) end
 
 function generate_incidence(str::String)

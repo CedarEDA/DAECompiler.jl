@@ -80,7 +80,6 @@ function schedule_incidence!(compact, curval, incT::Incidence, var, line; vars=n
             continue
         end
 
-        # XXX: what to do with the linear parts that have an unknown coefficient?
         isa(coeff, Float64) || continue
 
         if lin_var == 0
