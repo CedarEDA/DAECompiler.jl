@@ -234,8 +234,7 @@ function Base.show(io::IO, inc::Incidence)
             !first && print(io, " + ")
             first = false
             if is_grouped(inc.row[1], 1) && v.time_dependent
-                ᵢ = subscript(i - 1)
-                print(io, "$(propto(inc.row[1]::Linearity))t", " * ")
+                print(io, propto(inc.row[1]::Linearity), 't', " * ")
             else # unknown constant coefficient
                 print(io, propto(v))
             end
@@ -265,6 +264,7 @@ end
 
 """
     incidence"a + f(∝ₛt, u₁)"
+    incidence"Incidence(a + f(∝ₛt, u₁))" # you may copy-paste straight from its printed output
 
 Construct an [`Incidence`](@ref) from its printed representation.
 """
