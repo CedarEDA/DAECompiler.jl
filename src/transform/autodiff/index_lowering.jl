@@ -72,7 +72,7 @@ function index_lowering_ad!(state::TransformationState, key::TornCacheKey)
     # Mark all non-trivial `ddt()` statements as ones that we should differentiate
     diff_ssas = Pair{SSAValue,Int}[]
     for i = 1:length(ir.stmts)
-        if is_known_invoke(ir.stmts[i][:stmt], ddt, ir) && !is_const_plus_var_linear(argextype(ir.stmts[i][:stmt].args[end], ir))
+        if is_known_invoke(ir.stmts[i][:stmt], ddt, ir) && !is_const_plus_var_known_linear(argextype(ir.stmts[i][:stmt].args[end], ir))
             push!(diff_ssas, SSAValue(i) => 0)
         end
     end

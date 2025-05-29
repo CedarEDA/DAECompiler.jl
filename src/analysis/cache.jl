@@ -60,7 +60,7 @@ function add_equation_row!(graph, solvable_graph, ieq::Int, inc::Incidence)
     for (v, coeff) in zip(rowvals(inc.row), nonzeros(inc.row))
         v == 1 && continue
         add_edge!(graph, ieq, v-1)
-        coeff !== nonlinear && add_edge!(solvable_graph, ieq, v-1)
+        isa(coeff, Float64) && add_edge!(solvable_graph, ieq, v-1)
     end
 end
 add_equation_row!(graph, solvable_graph, ieq::Int, c::Const) = nothing

@@ -76,7 +76,7 @@ const nonlinear = Linearity()
 
 join_linearity(a::Linearity, b::Real) = a
 join_linearity(a::Real, b::Linearity) = b
-join_linearity(a::Real, b::Real) = a == b ? promote(a, b) : Linearity(time_dependent = false, state_dependent = false, nonlinear = false)
+join_linearity(a::Real, b::Real) = a == b ? a : linear
 function join_linearity(a::Linearity, b::Linearity)
     (a.nonlinear | b.nonlinear) && return nonlinear
     return Linearity(; time_dependent = a.time_dependent | b.time_dependent, state_dependent = a.state_dependent | b.state_dependent, nonlinear = false)
@@ -698,11 +698,7 @@ function Compiler.tmerge(🥬::EqStructureLattice, @nospecialize(a), @nospeciali
             merged_typ = Compiler.tmerge(Compiler.widenlattice(🥬), a.typ, b.typ)
             row = _zero_row()
             for i in union(rowvals(a.row), rowvals(b.row))
-                if a.row[i] == b.row[i]
-                    row[i] = a.row[i]
-                else
-                    row[i] = nonlinear
-                end
+                row[i] = join_linearity(a.row[i], b.row[i])
             end
             return Incidence(merged_typ, row)
         elseif isa(b, Const)

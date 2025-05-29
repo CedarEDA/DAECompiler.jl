@@ -121,12 +121,12 @@ Base.setindex!(rno::RenameOverlayVector, @nospecialize(val), i::Int) =
     Base.setindex!(rno.overlay, val, i)
 Base.size(rno::RenameOverlayVector) = Base.size(rno.base)
 
-is_var_part_linear(incT::Const) = true
-is_var_part_linear(incT::Incidence) = !any(==(nonlinear), incT.row)
-is_const_plus_var_linear(incT) = is_var_part_linear(incT) && isa(incT.typ, Const)
-is_const_plus_var_linear(incT::Const) = true
+is_var_part_known_linear(incT::Const) = true
+is_var_part_known_linear(incT::Incidence) = all(x -> isa(x, Float64), incT.row)
+is_const_plus_var_known_linear(incT) = is_var_part_known_linear(incT) && isa(incT.typ, Const)
+is_const_plus_var_known_linear(incT::Const) = true
 
-is_fully_state_linear(incT, param_vars) = is_const_plus_var_linear(incT) && is_fully_state_linear(incT.typ, param_vars)
+is_fully_state_linear(incT, param_vars) = is_const_plus_var_known_linear(incT) && is_fully_state_linear(incT.typ, param_vars)
 is_fully_state_linear(incT::Const, param_vars) = iszero(incT.val)
 
 function schedule_nonlinear!(compact, param_vars, var_eq_matching, ir, ordinal, val::Union{SSAValue, Argument}, ssa_rename::AbstractVector{Any}; vars, schedule_missing_var! = nothing)
@@ -182,7 +182,7 @@ function schedule_nonlinear!(compact, param_vars, var_eq_matching, ir, ordinal, 
         end
 
         # TODO: SICM
-        if !is_const_plus_var_linear(typ::Incidence)
+        if !is_const_plus_var_known_linear(typ::Incidence)
             this_nonlinear = schedule_nonlinear!(compact, param_vars, var_eq_matching, ir, ordinal, arg, ssa_rename; vars, schedule_missing_var!)
         else
             if @isdefined(result)
@@ -202,7 +202,7 @@ function schedule_nonlinear!(compact, param_vars, var_eq_matching, ir, ordinal, 
         return schedule_incidence!(compact, this_nonlinear, typ, -1, inst[:line]; vars, schedule_missing_var!)[1]
     end
 
-    if is_const_plus_var_linear(incT)
+    if is_const_plus_var_known_linear(incT)
         ret = schedule_incidence!(compact, nothing, info.result.extended_rt, -1, inst[:line]; vars=
             [arg === nothing ? 0.0 : arg for arg in args], schedule_missing_var! = var->error((var, incT, args)))[1]
     else
@@ -329,7 +329,7 @@ function compute_eq_schedule(key::TornCacheKey, total_incidence, result, mss::St
                     i in this_callee_eqs && continue # We already scheduled this
                     callee_incidence = callee_info.result.total_incidence[i]
                     incidence = apply_linear_incidence(nothing, callee_incidence, nothing, callee_info.mapping)
-                    if is_const_plus_var_linear(incidence)
+                    if is_const_plus_var_known_linear(incidence)
                         # No non-linear components - skip it
                         push!(previously_scheduled_or_ignored, i)
                         continue
@@ -364,7 +364,7 @@ function compute_eq_schedule(key::TornCacheKey, total_incidence, result, mss::St
         end
 
         function schedule_eq!(eq; force=false)
-            if is_const_plus_var_linear(total_incidence[eq])
+            if is_const_plus_var_known_linear(total_incidence[eq])
                 # This is a linear equation, we can schedule it now
                 return true
             end
@@ -382,7 +382,7 @@ function compute_eq_schedule(key::TornCacheKey, total_incidence, result, mss::St
                 schedule = get!(callee_schedules, ssa, Vector{Pair{BitSet, BitSet}}())
                 callee_info = result.ir[SSAValue(ssa.id)][:info]::MappingInfo
 
-                if is_const_plus_var_linear(callee_info.result.total_incidence[callee_eq])
+                if is_const_plus_var_known_linear(callee_info.result.total_incidence[callee_eq])
                     # This portion of the calle is linear, we can schedule it
                     continue
                 end
@@ -626,7 +626,7 @@ function matching_for_key(state::TransformationState, key::TornCacheKey)
             invview(var_eq_matching)[eq] = WrongEquation()
             continue
         end
-        if is_const_plus_var_linear(total_incidence[eq]) && invview(var_eq_matching)[eq] === unassigned
+        if is_const_plus_var_known_linear(total_incidence[eq]) && invview(var_eq_matching)[eq] === unassigned
             invview(var_eq_matching)[eq] = FullyLinear()
         end
     end
@@ -787,8 +787,8 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
                         push!(callee_explicit_eqs, callee_eq)
                     else
                         var = invview(var_eq_matching)[caller_eq]
-                        (is_const_plus_var_linear(callee_result.total_incidence[callee_eq]) ||
-                         is_const_plus_var_linear(total_incidence[caller_eq])) && continue
+                        (is_const_plus_var_known_linear(callee_result.total_incidence[callee_eq]) ||
+                         is_const_plus_var_known_linear(total_incidence[caller_eq])) && continue
                         @assert var !== unassigned
                         if !any(out->callee_eq in out[2], callee_var_schedule)
                             display(mss)
@@ -847,7 +847,7 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
                     for var in callee_param_vars
                         varmap = info.mapping.var_coeffs[var]
                         nonlin = nothing
-                        if !is_const_plus_var_linear(varmap)
+                        if !is_const_plus_var_known_linear(varmap)
                             nonlin = schedule_nonlinear!(compact, key.param_vars, var_eq_matching, ir, ordinal, stmt.args[1+var], sicm_rename; vars=var_sols)
                         end
                         (argval, _) = schedule_incidence!(compact,
@@ -901,7 +901,7 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
                 result.eq_callee_mapping[baseeq(result, structure, eq)] === nothing &&
                 eqclassification(result, structure, eq) != External &&
                 eqkind(result, structure, eq) == Intrinsics.Always &&
-                !is_const_plus_var_linear(total_incidence[eq])
+                !is_const_plus_var_known_linear(total_incidence[eq])
             push!(eq_orders[end], eq)
         end
     end
@@ -1000,7 +1000,7 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
                 for var in callee_in_vars
                     nonlin = nothing
                     varmap = info.mapping.var_coeffs[var]
-                    if !is_const_plus_var_linear(varmap)
+                    if !is_const_plus_var_known_linear(varmap)
                         nonlin = schedule_nonlinear!(compact1, key.param_vars, var_eq_matching, ir, ordinal, eqinst[:stmt].args[1+var], ssa_rename; vars=var_sols, schedule_missing_var!)
                     end
                     (argval, _) = schedule_incidence!(compact1,
@@ -1044,7 +1044,7 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
                 var = invview(var_eq_matching)[eq]
 
                 incT = state.total_incidence[eq]
-                anynonlinear = !is_const_plus_var_linear(incT)
+                anynonlinear = !is_const_plus_var_known_linear(incT)
                 nonlinearssa = nothing
                 if anynonlinear
                     if isa(var, Int) && isa(vars[var], SolvedVariable)
@@ -1086,7 +1086,7 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
                 if isa(var, Int)
                     curval = nonlinearssa
                     (curval, thiscoeff) = schedule_incidence!(compact1, curval, incT, var, line; vars=var_sols, schedule_missing_var!)
-                    @assert thiscoeff != nonlinear
+                    @assert isa(thiscoeff, Float64)
                     curval = ir_mul_const!(compact1, line, 1/thiscoeff, curval)
                     var_sols[var] = isa(curval, SSAValue) ? CarriedSSAValue(ordinal, curval.id) : curval
                     insert_solved_var_here!(compact1, var, curval, line)
