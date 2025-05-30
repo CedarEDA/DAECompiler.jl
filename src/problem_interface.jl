@@ -11,6 +11,7 @@ struct DAECProblem{F, I, G, T, K} <: SciMLBase.AbstractDAEProblem{Nothing, Nothi
     guesses::G
     tspan::T
     kwargs::K
+    settings::Settings
     # TODO: `f` and parameters are the same thing, and we derive du0 and u0 from
     # `init`, but DiffEqBase accesses this before hitting get_concrete_problem.
     # Can we adjust upstream do make this nicer?
@@ -19,16 +20,27 @@ struct DAECProblem{F, I, G, T, K} <: SciMLBase.AbstractDAEProblem{Nothing, Nothi
     du0::Nothing
 end
 
-function DAECProblem(f, init::Union{Vector, Tuple{Vararg{Pair}}}, tspan::Tuple{Real, Real} = (0., 1.); guesses = nothing, kwargs...)
-    DAECProblem(f, init, guesses, tspan, kwargs, missing, nothing, nothing)
+function DAECProblem(f, init::Union{Vector, Tuple{Vararg{Pair}}}, tspan::Tuple{Real, Real} = (0., 1.);
+                     guesses = nothing,
+                     force_inline_all=false,
+                     insert_stmt_debuginfo=false,
+                     kwargs...)
+    settings = Settings(; force_inline_all, insert_stmt_debuginfo)
+    DAECProblem(f, init, guesses, tspan, kwargs, settings, missing, nothing, nothing)
 end
 
-function DAECProblem(f, tspan::Tuple{Real, Real} = (0., 1.); guesses = nothing, kwargs...)
-    DAECProblem(f, nothing, guesses, tspan, kwargs, missing, nothing, nothing)
+function DAECProblem(f, tspan::Tuple{Real, Real} = (0., 1.);
+                     guesses = nothing,
+                     force_inline_all=false,
+                     insert_stmt_debuginfo=false,
+                     kwargs...)
+    settings = Settings(; force_inline_all, insert_stmt_debuginfo)
+    DAECProblem(f, nothing, guesses, tspan, kwargs, settings, missing, nothing, nothing)
 end
 
 function DiffEqBase.get_concrete_problem(prob::DAECProblem, isadaptive; kwargs...)
-    (daef, differential_vars) = factory(Val(Settings(mode=prob.init === nothing ? DAE : DAENoInit)), prob.f)
+    settings = Settings(; mode=prob.init === nothing ? DAE : DAENoInit, prob.settings.force_inline_all, prob.settings.insert_stmt_debuginfo)
+    (daef, differential_vars) = factory(Val(settings), prob.f)
 
     u0 = zeros(length(differential_vars))
     du0 = zeros(length(differential_vars))
@@ -50,6 +62,7 @@ struct ODECProblem{F, I, G, T, K} <: SciMLBase.AbstractODEProblem{Nothing, T, tr
     guesses::G
     tspan::T
     kwargs::K
+    settings::Settings
     # TODO: `f` and parameters are the same thing, and we derive u0 from
     # `init`, but DiffEqBase accesses this before hitting get_concrete_problem.
     # Can we adjust upstream do make this nicer?
@@ -57,16 +70,27 @@ struct ODECProblem{F, I, G, T, K} <: SciMLBase.AbstractODEProblem{Nothing, T, tr
     u0::Nothing
 end
 
-function ODECProblem(f, init::Union{Vector, Tuple{Vararg{Pair}}}, tspan::Tuple{Real, Real} = (0., 1.); guesses = nothing, kwargs...)
-    ODECProblem(f, init, guesses, tspan, kwargs, missing, nothing)
+function ODECProblem(f, init::Union{Vector, Tuple{Vararg{Pair}}}, tspan::Tuple{Real, Real} = (0., 1.);
+                     guesses = nothing,
+                     force_inline_all=false,
+                     insert_stmt_debuginfo=false,
+                     kwargs...)
+    settings = Settings(; force_inline_all, insert_stmt_debuginfo)
+    ODECProblem(f, init, guesses, tspan, kwargs, settings, missing, nothing)
 end
 
-function ODECProblem(f, tspan::Tuple{Real, Real} = (0., 1.); guesses = nothing, kwargs...)
-    ODECProblem(f, nothing, guesses, tspan, kwargs, missing, nothing)
+function ODECProblem(f, tspan::Tuple{Real, Real} = (0., 1.);
+                     guesses = nothing,
+                     force_inline_all=false,
+                     insert_stmt_debuginfo=false,
+                     kwargs...)
+    settings = Settings(; force_inline_all, insert_stmt_debuginfo)
+    ODECProblem(f, nothing, guesses, tspan, kwargs, settings, missing, nothing)
 end
 
 function DiffEqBase.get_concrete_problem(prob::ODECProblem, isadaptive; kwargs...)
-    (odef, n) = factory(Val(Settings(mode=prob.init === nothing ? ODE : ODENoInit)), prob.f)
+    settings = Settings(; mode=prob.init === nothing ? ODE : ODENoInit, prob.settings.force_inline_all, prob.settings.insert_stmt_debuginfo)
+    (odef, n) = factory(Val(settings), prob.f)
 
     u0 = zeros(n)
 

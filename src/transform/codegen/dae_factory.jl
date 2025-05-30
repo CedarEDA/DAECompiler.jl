@@ -60,7 +60,7 @@ end
 ```
 
 """
-function dae_factory_gen(state::TransformationState, ci::CodeInstance, key::TornCacheKey, world::UInt, init_key::Union{TornCacheKey, Nothing})
+function dae_factory_gen(state::TransformationState, ci::CodeInstance, key::TornCacheKey, world::UInt, settings::Settings, init_key::Union{TornCacheKey, Nothing})
     result = state.result
     torn_ci = find_matching_ci(ci->isa(ci.owner, TornIRSpec) && ci.owner.key == key, ci.def, world)
     torn_ir = torn_ci.inferred
@@ -87,7 +87,7 @@ function dae_factory_gen(state::TransformationState, ci::CodeInstance, key::Torn
 
     argt = Tuple{Vector{Float64}, Vector{Float64}, Vector{Float64}, SciMLBase.NullParameters, Float64}
 
-    daef_ci = rhs_finish!(state, ci, key, world, 1)
+    daef_ci = rhs_finish!(state, ci, key, world, settings, 1)
 
     # Create a small opaque closure to adapt from SciML ABI to our own internal
     # ABI
@@ -171,6 +171,7 @@ function dae_factory_gen(state::TransformationState, ci::CodeInstance, key::Torn
     insert_node_here!(oc_compact, NewInstruction(ReturnNode(nothing), Union{}, line))
 
     ir_oc = Compiler.finish(oc_compact)
+    maybe_rewrite_debuginfo!(ir_oc, settings)
     resize!(ir_oc.cfg.blocks, 1)
     empty!(ir_oc.cfg.blocks[1].succs)
     Compiler.verify_ir(ir_oc)
@@ -190,7 +191,7 @@ function dae_factory_gen(state::TransformationState, ci::CodeInstance, key::Torn
     differential_states = Bool[v in key.diff_states for v in all_states]
 
     if init_key !== nothing
-        initf = init_uncompress_gen!(compact, result, ci, init_key, key, world)
+        initf = init_uncompress_gen!(compact, result, ci, init_key, key, world, settings)
         daef = insert_node_here!(compact, NewInstruction(Expr(:call, make_daefunction, new_oc, initf),
             DAEFunction, line), true)
     else

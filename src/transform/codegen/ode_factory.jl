@@ -52,7 +52,7 @@ end
 ```
 
 """
-function ode_factory_gen(state::TransformationState, ci::CodeInstance, key::TornCacheKey, world::UInt, init_key::Union{TornCacheKey, Nothing})
+function ode_factory_gen(state::TransformationState, ci::CodeInstance, key::TornCacheKey, world::UInt, settings::Settings, init_key::Union{TornCacheKey, Nothing})
     result = state.result
     torn_ci = find_matching_ci(ci->isa(ci.owner, TornIRSpec) && ci.owner.key == key, ci.def, world)
     torn_ir = torn_ci.inferred
@@ -77,7 +77,7 @@ function ode_factory_gen(state::TransformationState, ci::CodeInstance, key::Torn
         sicm = ()
     end
 
-    odef_ci = rhs_finish!(state, ci, key, world, 1)
+    odef_ci = rhs_finish!(state, ci, key, world, settings, 1)
 
     # Create a small opaque closure to adapt from SciML ABI to our own internal ABI
 
@@ -128,6 +128,7 @@ function ode_factory_gen(state::TransformationState, ci::CodeInstance, key::Torn
     @insert_node_here oc_compact line (return)::Union{}
 
     ir_oc = Compiler.finish(oc_compact)
+    maybe_rewrite_debuginfo!(ir_oc, settings)
     oc = Core.OpaqueClosure(ir_oc)
 
     line = result.ir[SSAValue(1)][:line]
@@ -143,7 +144,7 @@ function ode_factory_gen(state::TransformationState, ci::CodeInstance, key::Torn
     nd = numstates[AssignedDiff] + numstates[UnassignedDiff]
     na = numstates[Algebraic] + numstates[AlgebraicDerivative]
     mass_matrix = na == 0 ? GlobalRef(LinearAlgebra, :I) : @insert_node_here compact line generate_ode_mass_matrix(nd, na)::Matrix{Float64}
-    initf = init_key !== nothing ? init_uncompress_gen!(compact, result, ci, init_key, key, world) : nothing
+    initf = init_key !== nothing ? init_uncompress_gen!(compact, result, ci, init_key, key, world, settings) : nothing
     odef = @insert_node_here compact line make_odefunction(new_oc, mass_matrix, initf)::ODEFunction true
 
     odef_and_n = @insert_node_here compact line tuple(odef, nd + na)::Tuple true

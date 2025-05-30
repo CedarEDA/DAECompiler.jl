@@ -1,4 +1,5 @@
 include("basic.jl")
+include("debugging.jl")
 include("reflection.jl")
 include("incidence.jl")
 include("ipo.jl")

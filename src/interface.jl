@@ -1,27 +1,9 @@
-@enum GenerationMode begin
-    DAE
-    DAENoInit
-
-    ODE
-    ODENoInit
-
-    # These are primarily for debug
-    InitUncompress
-end
-
-struct Settings
-    mode::GenerationMode
-    force_inline_all::Bool
-end
-Settings(; mode::GenerationMode=DAE, force_inline_all::Bool=false) = Settings(mode, force_inline_all)
-
 """
-    factory_gen(world, source, _gen, settings, f)
+    factory_gen(world, source, settings, f)
 
 This is the compile-time entry point for DAECompiler code generation. It drives all other pieces.
 """
-function factory_gen(world::UInt, source::Method, @nospecialize(_gen), settings, @nospecialize(fT))
-    settings = settings.parameters[1]
+function factory_gen(@nospecialize(fT), settings::Settings, world::UInt = Base.get_world_counter())
     factory_mi = get_method_instance(Tuple{typeof(factory),Val{settings},typeof(fT)}, world)
 
     # First, perform ordinary type inference, under the assumption that we may need to AD
@@ -59,30 +41,35 @@ function factory_gen(world::UInt, source::Method, @nospecialize(_gen), settings,
     (diff_key, init_key) = ret
 
     if settings.mode in (DAE, DAENoInit, ODE, ODENoInit)
-        tearing_schedule!(tstate, ci, diff_key, world)
+        tearing_schedule!(tstate, ci, diff_key, world, settings)
     end
     if settings.mode in (InitUncompress, DAE, ODE)
-        tearing_schedule!(tstate, ci, init_key, world)
+        tearing_schedule!(tstate, ci, init_key, world, settings)
     end
 
     # Generate the IR implementation of `factory`, returning the DAEFunction/ODEFunction
     if settings.mode in (DAE, DAENoInit)
-        ir_factory = dae_factory_gen(tstate, ci, diff_key, world, settings.mode == DAE ? init_key : nothing)
+        ir_factory = dae_factory_gen(tstate, ci, diff_key, world, settings, settings.mode == DAE ? init_key : nothing)
     elseif settings.mode in (ODE, ODENoInit)
-        ir_factory = ode_factory_gen(tstate, ci, diff_key, world, settings.mode == ODE ? init_key : nothing)
+        ir_factory = ode_factory_gen(tstate, ci, diff_key, world, settings, settings.mode == ODE ? init_key : nothing)
     elseif settings.mode == InitUncompress
-        ir_factory = init_uncompress_gen(result, ci, init_key, diff_key, world)
+        ir_factory = init_uncompress_gen(result, ci, init_key, diff_key, world, settings)
     else
         return :(error("Unknown generation mode: $(settings.mode)"))
     end
 
-    src = ir_to_src(ir_factory)
+    src = ir_to_src(ir_factory, settings)
     src.ssavaluetypes = length(src.code)
     src.min_world = @atomic ci.min_world
     src.max_world = @atomic ci.max_world
     src.edges = Core.svec(ci.def)
 
     return src
+end
+
+function factory_gen(world::UInt, source::Method, @nospecialize(_gen), settings, @nospecialize(fT))
+    settings = settings.parameters[1]::Settings
+    factory_gen(fT, settings, world)
 end
 
 """

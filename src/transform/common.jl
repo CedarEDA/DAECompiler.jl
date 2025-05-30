@@ -40,10 +40,11 @@ function widen_extra_info!(ir)
     end
 end
 
-function ir_to_src(ir::IRCode)
+function ir_to_src(ir::IRCode, settings::Settings)
     isva = false
     slotnames = nothing
     ir.debuginfo.def === nothing && (ir.debuginfo.def = :var"generated IR for OpaqueClosure")
+    maybe_rewrite_debuginfo!(ir, settings)
     nargtypes = length(ir.argtypes)
     nargs = nargtypes-1
     sig = Compiler.compute_oc_signature(ir, nargs, isva)
@@ -61,6 +62,32 @@ function ir_to_src(ir::IRCode)
     src.slottypes = copy(ir.argtypes)
     src = Compiler.ir_to_codeinf!(src, ir)
     return src
+end
+
+function maybe_rewrite_debuginfo!(ir::IRCode, settings::Settings)
+    settings.insert_stmt_debuginfo && rewrite_debuginfo!(ir)
+    return ir
+end
+
+function rewrite_debuginfo!(ir::IRCode)
+    debuginfo = ir.debuginfo
+    firstline = debuginfo.firstline
+    empty!(debuginfo.edges)
+    empty!(debuginfo.codelocs)
+    for (i, stmt) in enumerate(ir.stmts)
+        push!(debuginfo.codelocs, i, i, 1)
+        inst = stmt[:inst]
+        type = stmt[:type]
+        push!(debuginfo.edges, debuginfo_edge(i, inst, type))
+    end
+end
+
+function debuginfo_edge(i, stmt, type)
+    annotation = type === nothing ? "" : " (inferred type: $type)"
+    filename = Symbol("%$i = $stmt", annotation)
+    codelocs = Int32[1, 0, 0]
+    compressed = ccall(:jl_compress_codelocs, Any, (Int32, Any, Int), 1#=firstline=#, codelocs, 1)
+    DebugInfo(filename, nothing, Core.svec(), compressed)
 end
 
 function cache_dae_ci!(old_ci, src, debuginfo, abi, owner)
