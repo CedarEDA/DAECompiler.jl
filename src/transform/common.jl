@@ -67,14 +67,16 @@ function ir_to_src(ir::IRCode, settings::Settings)
 end
 
 function rewrite_debuginfo(src::CodeInfo, debuginfo)
+    previous_codelocs = ccall(:jl_uncompress_codelocs, Any, (Any, Int), src.debuginfo.codelocs, length(src.code))
+    firstline = first(previous_codelocs)
     codelocs = Int32[]
     edges = DebugInfo[]
     for (i, stmt) in enumerate(src.code)
-        push!(codelocs, i - 1, i, 1)
+        push!(codelocs, firstline + (i - 1), i, 1)
         type = isa(src.ssavaluetypes, Vector{Any}) ? get(src.ssavaluetypes, i, nothing) : nothing
         push!(edges, debuginfo_edge(i, stmt, type))
     end
-    compressed = ccall(:jl_compress_codelocs, Any, (Int32, Any, Int), 1#=firstline=#, codelocs, length(src.code))
+    compressed = ccall(:jl_compress_codelocs, Any, (Int32, Any, Int), firstline, codelocs, length(src.code))
     if isa(debuginfo, DebugInfo)
         def, linetable = debuginfo.def, debuginfo.linetable
     else
