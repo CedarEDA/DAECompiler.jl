@@ -84,7 +84,7 @@ function rewrite_debuginfo(src::CodeInfo, debuginfo)
 end
 
 function debuginfo_edge(i, stmt, type)
-    annotation = type === nothing ? "" : " (::$type)"
+    annotation = type === nothing ? "" : " (inferred type: $type)"
     filename = Symbol("%$i = $stmt", annotation, ' '^4)
     codelocs = Int32[1, 0, 0]
     compressed = ccall(:jl_compress_codelocs, Any, (Int32, Any, Int), 1#=firstline=#, codelocs, 1)
