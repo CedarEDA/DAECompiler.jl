@@ -128,6 +128,7 @@ function ode_factory_gen(state::TransformationState, ci::CodeInstance, key::Torn
     @insert_node_here oc_compact line (return)::Union{}
 
     ir_oc = Compiler.finish(oc_compact)
+    maybe_rewrite_debuginfo!(ir_oc, settings)
     oc = Core.OpaqueClosure(ir_oc)
 
     line = result.ir[SSAValue(1)][:line]

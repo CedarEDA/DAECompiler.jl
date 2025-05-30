@@ -44,6 +44,7 @@ function ir_to_src(ir::IRCode, settings::Settings)
     isva = false
     slotnames = nothing
     ir.debuginfo.def === nothing && (ir.debuginfo.def = :var"generated IR for OpaqueClosure")
+    maybe_rewrite_debuginfo!(ir, settings)
     nargtypes = length(ir.argtypes)
     nargs = nargtypes-1
     sig = Compiler.compute_oc_signature(ir, nargs, isva)
@@ -60,29 +61,25 @@ function ir_to_src(ir::IRCode, settings::Settings)
     src.slotflags = fill(zero(UInt8), nargtypes)
     src.slottypes = copy(ir.argtypes)
     src = Compiler.ir_to_codeinf!(src, ir)
-    if settings.insert_stmt_debuginfo
-        src.debuginfo = rewrite_debuginfo(src, src.debuginfo)
-    end
     return src
 end
 
-function rewrite_debuginfo(src::CodeInfo, debuginfo)
-    previous_codelocs = ccall(:jl_uncompress_codelocs, Any, (Any, Int), src.debuginfo.codelocs, length(src.code))
-    firstline = first(previous_codelocs)
-    codelocs = Int32[]
-    edges = DebugInfo[]
-    for (i, stmt) in enumerate(src.code)
-        push!(codelocs, firstline + (i - 1), i, 1)
-        type = isa(src.ssavaluetypes, Vector{Any}) ? get(src.ssavaluetypes, i, nothing) : nothing
-        push!(edges, debuginfo_edge(i, stmt, type))
+function maybe_rewrite_debuginfo!(ir::IRCode, settings::Settings)
+    settings.insert_stmt_debuginfo && rewrite_debuginfo!(ir)
+    return ir
+end
+
+function rewrite_debuginfo!(ir::IRCode)
+    debuginfo = ir.debuginfo
+    firstline = debuginfo.firstline
+    empty!(debuginfo.edges)
+    empty!(debuginfo.codelocs)
+    for (i, stmt) in enumerate(ir.stmts)
+        push!(debuginfo.codelocs, i, i, 1)
+        inst = stmt[:inst]
+        type = stmt[:type]
+        push!(debuginfo.edges, debuginfo_edge(i, inst, type))
     end
-    compressed = ccall(:jl_compress_codelocs, Any, (Int32, Any, Int), firstline, codelocs, length(src.code))
-    if isa(debuginfo, DebugInfo)
-        def, linetable = debuginfo.def, debuginfo.linetable
-    else
-        def, linetable = :IR, nothing
-    end
-    return DebugInfo(def, linetable, Core.svec(edges...), compressed)
 end
 
 function debuginfo_edge(i, stmt, type)

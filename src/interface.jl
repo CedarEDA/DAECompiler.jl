@@ -1,10 +1,9 @@
 """
-    factory_gen(world, source, _gen, settings, f)
+    factory_gen(world, source, settings, f)
 
 This is the compile-time entry point for DAECompiler code generation. It drives all other pieces.
 """
-function factory_gen(world::UInt, source::Method, @nospecialize(_gen), settings, @nospecialize(fT))
-    settings = settings.parameters[1]
+function factory_gen(@nospecialize(fT), settings::Settings, world::UInt = Base.get_world_counter())
     factory_mi = get_method_instance(Tuple{typeof(factory),Val{settings},typeof(fT)}, world)
 
     # First, perform ordinary type inference, under the assumption that we may need to AD
@@ -66,6 +65,11 @@ function factory_gen(world::UInt, source::Method, @nospecialize(_gen), settings,
     src.edges = Core.svec(ci.def)
 
     return src
+end
+
+function factory_gen(world::UInt, source::Method, @nospecialize(_gen), settings, @nospecialize(fT))
+    settings = settings.parameters[1]::Settings
+    factory_gen(fT, settings, world)
 end
 
 """

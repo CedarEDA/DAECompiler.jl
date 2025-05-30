@@ -171,6 +171,7 @@ function dae_factory_gen(state::TransformationState, ci::CodeInstance, key::Torn
     insert_node_here!(oc_compact, NewInstruction(ReturnNode(nothing), Union{}, line))
 
     ir_oc = Compiler.finish(oc_compact)
+    maybe_rewrite_debuginfo!(ir_oc, settings)
     resize!(ir_oc.cfg.blocks, 1)
     empty!(ir_oc.cfg.blocks[1].succs)
     Compiler.verify_ir(ir_oc)
