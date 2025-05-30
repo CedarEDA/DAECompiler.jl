@@ -139,7 +139,7 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
             if isa(newT, Const) && newT.val === Intrinsics.ScopeIdentity
                 # Allocate the identity now. After inlining, we're guaranteed that
                 # every Expr(:new) uniquely corresponds to a scope identity, so this
-                # is legal here (bug not before)
+                # is legal here (but not before)
                 compact[SSAValue(i)][:stmt] = Intrinsics.ScopeIdentity()
                 compact[SSAValue(i)][:flag] |= Compiler.IR_FLAG_REFINED
             end
@@ -186,6 +186,8 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
     end
 
     # Go through each variable we previously identified and record the (post-propagation scope and kind)
+    # For this we inspect the `kind` and `scope` arguments from `variable(kind, scope)` invokes, then
+    # we turn them into `nothing` when we are done.
     for (ivar, ssa) in enumerate(varssa)
         isa(ssa, SSAValue) || continue
         inst = ir[ssa][:inst]::Union{Nothing, Expr}
@@ -349,7 +351,6 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
     end
     ir = Compiler.finish(compact)
 
-    nimplicitoutpairs = 0
     var_to_diff = StateSelection.complete(var_to_diff)
     ultimate_rt, nimplicitoutpairs = process_ipo_return!(Compiler.typeinf_lattice(refiner), ultimate_rt, eqclassification, eqkinds, varclassification, varkinds,
         var_to_diff, total_incidence, eq_callee_mapping)
@@ -386,9 +387,10 @@ function process_ipo_return!(𝕃, ultimate_rt::Incidence, eqclassification, eqk
     new_eq_row = _zero_row()
     for (v_offset, coeff) in zip(rowvals(ultimate_rt.row), nonzeros(ultimate_rt.row))
         v = v_offset - 1
-        if v != 0 && varclassification[v] != External && coeff == nonlinear
+        if v != 0 && varclassification[v] != External && coeff === nonlinear
+            # nonlinear state variable created within this call tree
             get_nonlinrepl()
-            new_eq_row[v_offset] = nonlinear
+            new_eq_row[v_offset] = nonlinear # we might want to refine this to something linear
         else
             new_row[v_offset] = coeff
             while v != 0 && v !== nothing
@@ -470,7 +472,7 @@ function process_ipo_return!(𝕃, ultimate_rt::Type, eqclassification, eqkinds,
         return ultimate_rt, 0
     end
     # TODO: Keep track of whether we have any time dependence?
-    return Incidence(ultimate_rt, IncidenceVector(MAX_EQS, Int[1:length(varclassification)+1;], Union{Float64, NonLinear}[nonlinear for _ in 1:length(varclassification)+1])), 0
+    return Incidence(ultimate_rt, IncidenceVector(MAX_EQS, Int[1:length(varclassification)+1;], IncidenceValue[nonlinear for _ in 1:length(varclassification)+1])), 0
 end
 
 function process_ipo_return!(𝕃, ultimate_rt::Eq, eqclassification, args...)

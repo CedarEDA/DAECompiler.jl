@@ -1,5 +1,5 @@
 export code_structure_by_type, code_structure, @code_structure,
-       code_ad_by_type, code_ad, @code_ad
+       code_ad_by_type, code_ad, @code_ad, @incidence_str
 
 function code_structure(@nospecialize(f), @nospecialize(types = Base.default_tt(f)); kwargs...)
   tt = Base.signature_type(f, types)
@@ -30,6 +30,7 @@ function code_structure_by_type(@nospecialize(tt::Type); world::UInt = Base.tls_
   ci = _code_ad_by_type(tt; world, kwargs...)
   # Perform or lookup DAECompiler specific analysis for this system.
   _result = structural_analysis!(ci, world)
+  isa(_result, UncompilableIPOResult) && throw(_result.error)
   return result ? _result : _result.ir
 end
 

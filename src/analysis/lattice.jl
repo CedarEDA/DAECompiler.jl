@@ -39,56 +39,89 @@ Compiler.widenlattice(::EqStructureLattice) = Compiler.ConstsLattice()
 Compiler.is_valid_lattice_norec(::EqStructureLattice, @nospecialize(v)) = isa(v, Incidence) || isa(v, Eq) || isa(v, PartialScope) || isa(v, PartialKeyValue)
 Compiler.has_extended_unionsplit(::EqStructureLattice) = true
 
-############################## NonLinear #######################################
+############################## Linearity #######################################
 
 """
-    struct NonLinear
+    Base.@kwdef struct Linearity
+        time_dependent::Bool = true
+        state_dependent::Bool = true
+        nonlinear::Bool = true
+    end
 
-This singleton number is similar to `missing` in that arithmatic with it is
-saturating. When used as a coefficient in the Incidence lattice, it indicates
-that the corresponding variable does not have a (constant) linear coefficient.
-This may either mean that the variable in question has a non-constant linear
-coefficient or that the variable is used non-linearly. We do not currently
-distinguish the two situations.
+Together with `Float64` values in `Incidence`, this struct expresses linearity information:
+- Linear, coefficient is a known constant (a `Float64` value).
+- Linear, coefficient is an unknown constant (`linear`).
+- Linear, coefficient is unknown with a known state or time dependence (`linear_state_dependent`, `linear_time_dependent`).
+- Linear, coefficient is unknown with both state and time dependence (`linear_time_and_state_dependent`).
+- Nonlinear (`nonlinear` - always taints state and time dependence currently).
+
+A known constant-coefficient contains the highest level of information. `nonlinear` contains the lowest
+(and most conservative) level of information, and should be assumed used by default or if uncertain.
 """
-struct NonLinear; end
-Base.iszero(::NonLinear) = false
-Base.zero(::Type{Union{NonLinear, Float64}}) = 0.
-for f in (:+, :-)
-    @eval begin
-        Base.$f(a::Real, b::NonLinear) = b
-        Base.$f(a::NonLinear, b::Real) = a
-        Base.$f(a::NonLinear, b::NonLinear) = nonlinear
-        Base.$f(::NonLinear) = nonlinear
+Base.@kwdef struct Linearity
+    time_dependent::Bool = true
+    state_dependent::Bool = true
+    nonlinear::Bool = true
+    function Linearity(time_dependent, state_dependent, nonlinear)
+        if nonlinear && (!time_dependent || !state_dependent)
+            throw(ArgumentError("Modeling of state or time independence is not supported for nonlinearities"))
+        end
+        new(time_dependent, state_dependent, nonlinear)
     end
 end
 
-Base.:(*)(a::Real, b::NonLinear) = iszero(a) ? a : b
-Base.:(*)(a::NonLinear, b::Real) = iszero(b) ? b : a
-Base.:(*)(a::NonLinear, b::NonLinear) = nonlinear
-Base.div(a::Real, b::NonLinear) = iszero(a) ? a : b
-Base.div(a::NonLinear, b::Real) = a
-Base.div(a::NonLinear, b::NonLinear) = a
-Base.:(/)(a::Real, b::NonLinear) = iszero(a) ? a : b
-Base.:(/)(a::NonLinear, b::Real) = a
-Base.:(/)(a::NonLinear, b::NonLinear) = a
-Base.rem(a::Real, b::NonLinear) = b
-Base.rem(a::NonLinear, b::Real) = a
-Base.rem(a::NonLinear, b::NonLinear) = a
-Base.abs(a::NonLinear) = nonlinear
-Base.isone(a::NonLinear) = false
+"The variable is used linearly, with an unknown constant."
+const linear = Linearity(time_dependent = false, state_dependent = false, nonlinear = false)
+"The variable is used linearly, with an unknown constant that may depend on time."
+const linear_time_dependent = Linearity(state_dependent = false, nonlinear = false)
+"The variable is used linearly, with an unknown constant that may depend on time and on other states."
+const linear_state_dependent = Linearity(time_dependent = false, nonlinear = false)
+"The variable is used linearly, with an unknown constant that may depend on time and on other states."
+const linear_time_and_state_dependent = Linearity(nonlinear = false)
+"The variable is used nonlinearly, with a possible dependence on time and other states."
+const nonlinear = Linearity()
 
-const nonlinear = NonLinear.instance
-Base.Broadcast.broadcastable(::NonLinear) = Ref(nonlinear)
+join_linearity(a::Linearity, b::Real) = a
+join_linearity(a::Real, b::Linearity) = b
+join_linearity(a::Real, b::Real) = a == b ? a : linear
+function join_linearity(a::Linearity, b::Linearity)
+    (a.nonlinear | b.nonlinear) && return nonlinear
+    return Linearity(; time_dependent = a.time_dependent | b.time_dependent, state_dependent = a.state_dependent | b.state_dependent, nonlinear = false)
+end
+
+Base.iszero(::Linearity) = false
+Base.zero(::Type{Union{Linearity, Float64}}) = 0.
+for f in (:+, :-)
+    @eval begin
+        Base.$f(a::Real, b::Linearity) = b
+        Base.$f(a::Linearity, b::Real) = a
+        Base.$f(a::Linearity, b::Linearity) = join_linearity(a, b)
+        Base.$f(a::Linearity) = a
+    end
+end
+
+Base.:(*)(a::Real, b::Linearity) = iszero(a) ? a : b
+Base.:(*)(a::Linearity, b::Real) = iszero(b) ? b : a
+Base.div(a::Real, b::Linearity) = iszero(a) ? a : nonlinear
+Base.div(a::Linearity, b::Real) = a
+Base.div(a::Linearity, b::Linearity) = nonlinear
+Base.:(/)(a::Real, b::Linearity) = iszero(a) ? a : nonlinear
+Base.:(/)(a::Linearity, b::Real) = a
+Base.:(/)(a::Linearity, b::Linearity) = nonlinear
+Base.rem(a::Real, b::Linearity) = b
+Base.rem(a::Linearity, b::Real) = a
+Base.rem(a::Linearity, b::Linearity) = a
+Base.abs(a::Linearity) = nonlinear
+Base.isone(a::Linearity) = false
+
+Base.Broadcast.broadcastable(x::Linearity) = Ref(x)
 
 ############################## Incidence #######################################
 # TODO: Just use Infinities.jl here?
 const MAX_EQS = div(typemax(Int), 2)
 
-# For now, we only track exact, integer linearities, because that's what
-# MTK can handle, so `nonlinear` includes linear operations with floating
-# point values.
-const IncidenceVector = SparseVector{Union{Float64, NonLinear}, Int}
+const IncidenceValue = Union{Float64, Linearity}
+const IncidenceVector = SparseVector{IncidenceValue, Int}
 
 is_non_incidence_type(@nospecialize(type)) = type === Union{} || Base.issingletontype(type)
 
@@ -102,6 +135,9 @@ elements are defined by subset inclusion. Note that in particular this implies
 that plain `T` lattice elements have unknown incidence and `Const` lattice elements
 have no incidence. A lattice element of type `T` that is known to be state-independent
 would have lattice element `Incidence(T, {})`.
+
+For convenience, you may want to use the `incidence"..."` string macro to construct an
+[`Incidence`](@ref) from its printed representation.
 """
 struct Incidence
     # Considered additive to `row`. In particular, if the `typ` is Float64,
@@ -112,6 +148,31 @@ struct Incidence
     function Incidence(@nospecialize(type), row::AbstractVector)
         if is_non_incidence_type(type)
             throw(DomainError(type, "Invalid type for Incidence"))
+        end
+        if !isa(row, SparseVector)
+            vec, row = row, _zero_row()
+            for (i, val) in enumerate(vec)
+                row[i] = val
+            end
+        else
+            row = convert(IncidenceVector, row)
+        end
+        time = row[1]
+        if in(time, (linear_time_dependent, linear_time_and_state_dependent))
+            throw(ArgumentError("Time incidence cannot be both linear and time-dependent, otherwise it would be nonlinear"))
+        end
+        for (i, coeff) in zip(rowvals(row), nonzeros(row))
+            isa(coeff, Linearity) || continue
+            coeff.nonlinear && continue
+            if coeff.time_dependent && !in(1, rowvals(row))
+                throw(ArgumentError("Time-dependent incidence annotation for $(subscript_state(i)) is inconsistent with an absence of time incidence"))
+            end
+            if coeff.state_dependent && !any(x -> x != 1, rowvals(row))
+                throw(ArgumentError("State-dependent incidence annotation for $(subscript_state(i)) is inconsistent with an absence of state incidence"))
+            end
+            if i > 1 && coeff.time_dependent && (isa(time, Float64) || !time.state_dependent)
+                throw(ArgumentError("Time-dependent state incidence for $(subscript_state(i)) is inconsistent with an absence of state dependence for time"))
+            end
         end
         return new(type, row)
     end
@@ -134,47 +195,185 @@ end
 function Base.show(io::IO, inc::Incidence)
     print(io, "Incidence(")
     first = true
+    print_plusminus(io, minus=false) = if first
+        first = false
+        minus && print(io, "-")
+    else
+        print(io, minus ? " - " : " + ")
+    end
     if isa(inc.typ, Const) && isa(inc.typ.val, Float64)
         if !iszero(inc.typ.val)
             print(io, inc.typ.val)
             first = false
         end
-    else inc.typ !== Float64
-        print(io, inc.typ, ", ")
-    end
-    print_plusminus(io, minus=false) = if first
-            first = false
-            minus && print(io, "-")
+    else
+        if inc.typ === Float64
+            print(io, 'a')
+            !isempty(rowvals(inc.row)) && print_plusminus(io)
         else
-            print(io, minus ? " - " : " + ")
+            print(io, inc.typ)
+            !isempty(rowvals(inc.row)) && print(io, ", ")
         end
+    end
+    time = inc.row[1]
+    is_grouped(v, i) = isa(v, Linearity) && (v.state_dependent || (v.time_dependent || i == 1) && in(time, (linear_state_dependent, nonlinear)))
+    function propto(linearity::Linearity)
+        str = "∝"
+        linearity.time_dependent && (str *= 'ₜ')
+        linearity.state_dependent && (str *= 'ₛ')
+        return str
+    end
     for (i, v) in zip(rowvals(inc.row), nonzeros(inc.row))
-        v !== nonlinear || continue
-        print_plusminus(io, v < 0)
-        if abs(v) != 1 || i == 1
-            print(io, abs(v))
+        is_grouped(v, i) && continue
+        if isa(v, Float64)
+            print_plusminus(io, v < 0)
+            if abs(v) != 1
+                print(io, abs(v))
+            end
+        else
+            !first && print(io, " + ")
+            first = false
+            if is_grouped(inc.row[1], 1) && v.time_dependent
+                print(io, propto(inc.row[1]::Linearity), 't', " * ")
+            else # unknown constant coefficient
+                print(io, propto(v))
+            end
         end
         print(io, subscript_state(i))
     end
-    first_nonlinear = true
-    for (i, v) in zip(rowvals(inc.row), nonzeros(inc.row))
-        v === nonlinear || continue
-        if first_nonlinear
-            print_plusminus(io)
-            first_nonlinear = false
-            print(io, "f(")
-        else
-            print(io, ", ")
+    first_grouped = true
+    if any(i -> is_grouped(inc.row[i], i), rowvals(inc.row))
+        for (i, v) in zip(rowvals(inc.row), nonzeros(inc.row))
+            !is_grouped(v, i) && continue
+            if first_grouped
+                print_plusminus(io)
+                first_grouped = false
+                print(io, "f(")
+            else
+                print(io, ", ")
+            end
+            !v.nonlinear && print(io, propto(v))
+            print(io, subscript_state(i))
         end
-        print(io, i == 1 ? "t" : subscript_state(i))
-    end
-    if !first_nonlinear
-        print(io, ")")
+        if !first_grouped
+            print(io, ")")
+        end
     end
     print(io, ")")
 end
 
-_zero_row() = IncidenceVector(MAX_EQS, Int[], Union{Float64, NonLinear}[])
+"""
+    incidence"a + f(∝ₛt, u₁)"
+    incidence"Incidence(a + f(∝ₛt, u₁))" # you may copy-paste straight from its printed output
+
+Construct an [`Incidence`](@ref) from its printed representation.
+"""
+macro incidence_str(str) generate_incidence(str) end
+
+function generate_incidence(str::String)
+    if startswith(str, "Incidence(") && endswith(str, ')')
+        # Support `incidence"Incidence(...)"` so the user doesn't have to
+        # manually remove the `Incidence` call when copy-pasting.
+        str = str[11:(end - 1)]
+    end
+    str = replace(str, '∝' => '~')
+    ex = Meta.parse(str)
+    generate_incidence(ex)
+end
+
+function generate_incidence(ex)
+    T = nothing
+    if isexpr(ex, :tuple, 2)
+        T, ex = ex.args[1], ex.args[2]
+    end
+    generate_incidence(T, ex)
+end
+
+function generate_incidence(T, ex)
+    if isexpr(ex, :call) && ex.args[1] === :+
+        terms = ex.args[2:end]
+    else
+        terms = Any[ex]
+    end
+    pairs = Dict{Int,Any}()
+    for term in terms
+        if term === :a
+            T === nothing || throw(ArgumentError("The incidence type must not be provided if a constant `Float64` term is already present"))
+            T = Float64
+            continue
+        elseif isa(term, Float64)
+            T === nothing || throw(ArgumentError("The incidence type must not be provided if a literal `Float64` term is already present"))
+            T = Const(term)
+            continue
+        end
+
+        @assert isa(term, Symbol) || isexpr(term, :call)
+
+        ispropto(x) = isexpr(x, :call, 2) && startswith(string(x.args[1]), '~')
+
+        if isa(term, Symbol)
+            i = parse_variable(string(term))
+            pairs[i] = 1.0
+        elseif isexpr(term, :call, 3) && term.args[1] === :*
+            factor = parse(Float64, string(term.args[2]))
+            i = parse_variable(string(term.args[3]))
+            pairs[i] = factor
+        elseif ispropto(term)
+            coefficient, variable = separate_coefficient_and_variable(term)
+            coefficient = parse_coefficient(coefficient)
+            i = parse_variable(variable)
+            pairs[i] = coefficient
+        elseif isexpr(term, :call) && term.args[1] === :f
+            for argument in @view term.args[2:end]
+                if ispropto(argument)
+                    coefficient, variable = separate_coefficient_and_variable(argument)
+                    coefficient = parse_coefficient(coefficient)
+                    i = parse_variable(variable)
+                else
+                    i = parse_variable(string(argument))
+                    coefficient = nonlinear
+                end
+                pairs[i] = coefficient
+            end
+        else
+            throw(ArgumentError("Unrecognized call to function '$(term.args[1])'"))
+        end
+    end
+    values = IncidenceValue[]
+    for i in 1:maximum(keys(pairs); init = 0)
+        val = get(pairs, i, 0.0)
+        isa(val, Pair) && (val = val.second)
+        push!(values, val)
+    end
+    T = something(T, Const(0.0))
+    :(Incidence($T, IncidenceValue[$(values...)]))
+end
+
+function separate_coefficient_and_variable(term::Expr)
+    str = string(term)
+    i = findfirst(in(('t', 'u')), str)::Int
+    @view(str[1:prevind(str, i)]), @view(str[i:end])
+end
+
+function parse_coefficient(coefficient::AbstractString)
+    matched = match(r"^~(ₜ)?(ₛ)?$", coefficient)
+    @assert matched !== nothing
+    time_dependent = matched.captures[1] !== nothing
+    state_dependent = matched.captures[2] !== nothing
+    return Linearity(; time_dependent, state_dependent, nonlinear = false)
+end
+
+function parse_variable(term)
+    term == "t" && return 1
+    matched = match(r"^u([₀₁₂₃₄₅₆₇₈₉]+)$", term)
+    @assert matched !== nothing
+    capture = matched[1]
+    return 1 + parse(Int, map(subscript_to_number, capture))
+end
+
+subscript_to_number(char) = Char(48 + (UInt32(char) - 8320))
+
+_zero_row() = IncidenceVector(MAX_EQS, Int[], IncidenceValue[])
 const _ZERO_ROW = _zero_row()
 const _ZERO_CONST = Const(0.0)
 Base.zero(::Type{Incidence}) = Incidence(_ZERO_CONST, _zero_row())
@@ -514,11 +713,7 @@ function Compiler.tmerge(🥬::EqStructureLattice, @nospecialize(a), @nospeciali
             merged_typ = Compiler.tmerge(Compiler.widenlattice(🥬), a.typ, b.typ)
             row = _zero_row()
             for i in union(rowvals(a.row), rowvals(b.row))
-                if a.row[i] == b.row[i]
-                    row[i] = a.row[i]
-                else
-                    row[i] = nonlinear
-                end
+                row[i] = join_linearity(a.row[i], b.row[i])
             end
             return Incidence(merged_typ, row)
         elseif isa(b, Const)
@@ -590,17 +785,14 @@ function _aggressive_incidence_join(@nospecialize(rt), argtypes::Vector{Any})
             for (i, v) in zip(rowvals(a.row), nonzeros(a.row))
                 # as long as they are equal then it is correct for both so nothing to do
                 if inci.row[i] != v
-                    # Otherwise it can't be either but must allow both. We would ideally represent this as
-                    # `LinearUnion{rr[i], v}` or `Linear`, but we don't have lattice elements like that
-                    # `NonLinear` is our more general representation
-                    inci.row[i] = nonlinear
+                    # Otherwise it can't be either but must allow both.
+                    inci.row[i] = join_linearity(inci.row[i], v)
                 end
             end
             # and the the other way: catch places that `rr` is nonzero but `aa` is zero
             for (i, v) in zip(rowvals(inci.row), nonzeros(inci.row))
                 if a.row[i] != v
-                    # mix of nonlinear and linear, or again: a mix of two different linear coefficients
-                    inci.row[i] = nonlinear
+                    inci.row[i] = join_linearity(a.row[i], v)
                 end
             end
         end
