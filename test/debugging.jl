@@ -32,7 +32,7 @@ end
         @test contains(output, "inferred type: SubArray{Float64")
     end
 
-    # use an empty `u0` to trigger a stacktrace
+    # use a short `u0` to trigger an error and get a stacktrace
     u0 = Float64[0.0]
 
     settings = DAECompiler.Settings(; mode = DAECompiler.ODENoInit, insert_stmt_debuginfo = true)
