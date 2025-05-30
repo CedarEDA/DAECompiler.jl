@@ -40,7 +40,7 @@ function widen_extra_info!(ir)
     end
 end
 
-function ir_to_src(ir::IRCode)
+function ir_to_src(ir::IRCode, settings::Settings)
     isva = false
     slotnames = nothing
     ir.debuginfo.def === nothing && (ir.debuginfo.def = :var"generated IR for OpaqueClosure")
@@ -60,13 +60,11 @@ function ir_to_src(ir::IRCode)
     src.slotflags = fill(zero(UInt8), nargtypes)
     src.slottypes = copy(ir.argtypes)
     src = Compiler.ir_to_codeinf!(src, ir)
-    if INSERT_STMT_DEBUGINFO[]
+    if settings.insert_stmt_debuginfo
         src.debuginfo = rewrite_debuginfo(src, src.debuginfo)
     end
     return src
 end
-
-const INSERT_STMT_DEBUGINFO = Threads.Atomic{Bool}(false)
 
 function rewrite_debuginfo(src::CodeInfo, debuginfo)
     codelocs = Int32[]

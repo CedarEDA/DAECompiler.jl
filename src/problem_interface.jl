@@ -27,8 +27,8 @@ function DAECProblem(f, tspan::Tuple{Real, Real} = (0., 1.); guesses = nothing, 
     DAECProblem(f, nothing, guesses, tspan, kwargs, missing, nothing, nothing)
 end
 
-function DiffEqBase.get_concrete_problem(prob::DAECProblem, isadaptive; kwargs...)
-    (daef, differential_vars) = factory(Val(Settings(mode=prob.init === nothing ? DAE : DAENoInit)), prob.f)
+function DiffEqBase.get_concrete_problem(prob::DAECProblem, isadaptive; force_inline_all=false, insert_stmt_debuginfo=false, kwargs...)
+    (daef, differential_vars) = factory(Val(Settings(; mode=prob.init === nothing ? DAE : DAENoInit, force_inline_all, insert_stmt_debuginfo)), prob.f)
 
     u0 = zeros(length(differential_vars))
     du0 = zeros(length(differential_vars))

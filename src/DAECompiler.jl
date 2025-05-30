@@ -15,6 +15,7 @@ module DAECompiler
 
     include("utils.jl")
     include("intrinsics.jl")
+    include("settings.jl")
     include("analysis/utils.jl")
     include("analysis/lattice.jl")
     include("analysis/ADAnalyzer.jl")

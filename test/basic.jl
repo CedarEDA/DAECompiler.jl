@@ -24,6 +24,10 @@ sol = solve(DAECProblem(oneeq!, (1,) .=> 1.), IDA())
 sol = solve(ODECProblem(oneeq!, (1,) .=> 1.), Rodas5(autodiff=false))
 @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol.u[:, 1], exp.(sol.t)))
 
+# Cover the `debuginfo` rewrite.
+sol = solve(DAECProblem(oneeq!, (1,) .=> 1.), IDA(), insert_stmt_debuginfo = true)
+@test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol.u[:, 1], exp.(sol.t)))
+
 #= + parameterized =#
 struct parameterized
     param::Float64

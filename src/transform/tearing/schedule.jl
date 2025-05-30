@@ -633,10 +633,10 @@ function matching_for_key(state::TransformationState, key::TornCacheKey)
     return var_eq_matching
 end
 
-function tearing_schedule!(result::DAEIPOResult, ci::CodeInstance, key::TornCacheKey, world::UInt)
+function tearing_schedule!(result::DAEIPOResult, ci::CodeInstance, key::TornCacheKey, world::UInt, settings::Settings)
     structure = make_structure_from_ipo(result)
     tstate = TransformationState(result, structure, copy(result.total_incidence))
-    return tearing_schedule!(tstate, ci, key, world)
+    return tearing_schedule!(tstate, ci, key, world, settings)
 end
 
 struct DummyOptInterp <: Compiler.AbstractInterpreter;
@@ -645,7 +645,7 @@ end
 Compiler.optimizer_lattice(::DummyOptInterp) = Compiler.PartialsLattice(EqStructureLattice())
 Compiler.get_inference_world(interp::DummyOptInterp) = interp.world
 
-function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::TornCacheKey, world::UInt)
+function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::TornCacheKey, world::UInt, settings::Settings)
     result_ci = find_matching_ci(ci->isa(ci.owner, SICMSpec) && ci.owner.key == key, ci.def, world)
     if result_ci !== nothing
         return result_ci
@@ -830,7 +830,7 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
                     callee_codeinst = Compiler.get(Compiler.code_cache(interp), callee_codeinst, nothing)
                 end
                 callee_result = structural_analysis!(callee_codeinst, world)
-                callee_sicm_ci = tearing_schedule!(callee_result, callee_codeinst, callee_key, world)
+                callee_sicm_ci = tearing_schedule!(callee_result, callee_codeinst, callee_key, world, settings)
 
                 inst[:type] = Any
                 inst[:flag] = UInt32(0)
@@ -1194,7 +1194,7 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
         empty!(ir_sicm.argtypes)
         push!(ir_sicm.argtypes, Tuple)
         Compiler.verify_ir(ir_sicm)
-        src = ir_to_src(ir_sicm)
+        src = ir_to_src(ir_sicm, settings)
         sig = Tuple{Tuple}
         debuginfo = src.debuginfo
     end
