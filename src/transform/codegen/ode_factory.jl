@@ -143,7 +143,7 @@ function ode_factory_gen(state::TransformationState, ci::CodeInstance, key::Torn
     nd = numstates[AssignedDiff] + numstates[UnassignedDiff]
     na = numstates[Algebraic] + numstates[AlgebraicDerivative]
     mass_matrix = na == 0 ? GlobalRef(LinearAlgebra, :I) : @insert_node_here compact line generate_ode_mass_matrix(nd, na)::Matrix{Float64}
-    initf = init_key !== nothing ? init_uncompress_gen!(compact, result, ci, init_key, key, world) : nothing
+    initf = init_key !== nothing ? init_uncompress_gen!(compact, result, ci, init_key, key, world, settings) : nothing
     odef = @insert_node_here compact line make_odefunction(new_oc, mass_matrix, initf)::ODEFunction true
 
     odef_and_n = @insert_node_here compact line tuple(odef, nd + na)::Tuple true

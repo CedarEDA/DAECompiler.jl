@@ -190,7 +190,7 @@ function dae_factory_gen(state::TransformationState, ci::CodeInstance, key::Torn
     differential_states = Bool[v in key.diff_states for v in all_states]
 
     if init_key !== nothing
-        initf = init_uncompress_gen!(compact, result, ci, init_key, key, world)
+        initf = init_uncompress_gen!(compact, result, ci, init_key, key, world, settings)
         daef = insert_node_here!(compact, NewInstruction(Expr(:call, make_daefunction, new_oc, initf),
             DAEFunction, line), true)
     else
