@@ -68,6 +68,7 @@ Parameters:
 - `result::Bool = false`: if `true`, return the full [`DAEIPOResult`](@ref) instead of just the `IRCode`.
 - `matched::Bool = false`: if `true`, return the [`MatchedSystemStructure`](@ref) after top-level state selection
   for visualization purposes.
+- `mode::GenerationMode = DAE`: specifies the generation mode to use for the compilation pipeline. Only used when `matched` is `true`.
 
 !!! warning
     This will cache analysis results. You might want to invalidate with `DAECompiler.refresh()` between calls to `@code_structure`.
