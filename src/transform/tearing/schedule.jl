@@ -645,6 +645,28 @@ end
 Compiler.optimizer_lattice(::DummyOptInterp) = Compiler.PartialsLattice(EqStructureLattice())
 Compiler.get_inference_world(interp::DummyOptInterp) = interp.world
 
+function StateSelection.SSAUses(result::DAEIPOResult)
+    eq_callees = Union{Nothing, StructuralSSARef}[]
+    var_callees_dict = Dict{Int,Vector{StructuralSSARef}}()
+    for value in result.eq_callee_mapping
+        if value === nothing
+            push!(eq_callees, nothing)
+            continue
+        end
+        callee = only(unique(first.(value)))
+        push!(eq_callees, callee)
+        for (_, var) in value
+            push!(get!(Vector{StructuralSSARef}, var_callees_dict, var), callee)
+        end
+    end
+    var_callees = [get(var_callees_dict, i, nothing) for i in 1:maximum(keys(var_callees_dict); init = 0)]
+    return StateSelection.SSAUses(CalleeInfo.(eq_callees), CalleeInfo.(var_callees))
+end
+
+function StateSelection.MatchedSystemStructure(result::DAEIPOResult, structure, var_eq_matching)
+    StateSelection.MatchedSystemStructure(structure, var_eq_matching, StateSelection.SSAUses(result))
+end
+
 function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::TornCacheKey, world::UInt, settings::Settings)
     result_ci = find_matching_ci(ci->isa(ci.owner, SICMSpec) && ci.owner.key == key, ci.def, world)
     if result_ci !== nothing
@@ -656,7 +678,7 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
 
     var_eq_matching = matching_for_key(state, key)
 
-    mss = StateSelection.MatchedSystemStructure(structure, var_eq_matching)
+    mss = StateSelection.MatchedSystemStructure(result, structure, var_eq_matching)
     (eq_orders, callee_schedules) = compute_eq_schedule(key, total_incidence, result, mss)
 
     ir = index_lowering_ad!(state, key)
@@ -793,7 +815,7 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
                             display(mss)
                             cstructure = make_structure_from_ipo(callee_result)
                             cvar_eq_matching = matching_for_key(callee_result, callee_key, cstructure)
-                            display(StateSelection.MatchedSystemStructure(cstructure, cvar_eq_matching))
+                            display(StateSelection.MatchedSystemStructure(callee_result, cstructure, cvar_eq_matching))
                             @sshow eq_orders
                             @sshow callee_result.total_incidence[callee_eq]
                             @sshow total_incidence[caller_eq]

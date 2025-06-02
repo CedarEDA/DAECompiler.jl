@@ -26,18 +26,35 @@ end
 code_ad_by_type(@nospecialize(tt::Type); kwargs...) =
   _code_ad_by_type(tt; kwargs...).inferred.ir
 
-function code_structure_by_type(@nospecialize(tt::Type); world::UInt = Base.tls_world_age(), result = false, kwargs...)
+function code_structure_by_type(@nospecialize(tt::Type); world::UInt = Base.tls_world_age(), result = false, matched = false, mode = DAE, kwargs...)
   ci = _code_ad_by_type(tt; world, kwargs...)
-  # Perform or lookup DAECompiler specific analysis for this system.
   _result = structural_analysis!(ci, world)
   isa(_result, UncompilableIPOResult) && throw(_result.error)
-  return result ? _result : _result.ir
-end
+  !matched && return result ? _result : _result.ir
+  result = _result
 
+  structure = make_structure_from_ipo(result)
+
+  tstate = TransformationState(result, structure, copy(result.total_incidence))
+  err = StateSelection.check_consistency(tstate, nothing)
+  err !== nothing && throw(err)
+
+  ret = top_level_state_selection!(tstate)
+  isa(ret, UncompilableIPOResult) && throw(ret.error)
+
+  (diff_key, init_key) = ret
+  key = in(mode, (DAE, DAENoInit, ODE, ODENoInit)) ? diff_key : init_key
+
+  # Removing `@invokelatest` segfaults in LLVM with "Unexpected instruction".
+  var_eq_matching = @invokelatest matching_for_key(tstate, key)
+  return StateSelection.MatchedSystemStructure(result, structure, var_eq_matching)
+end
 
 """
     @code_structure ssrm()
     @code_structure world = UInt(1) [other_parameters...] ssrm()
+    @code_structure result = true ssrm() # returns DAEIPOResult
+    @code_structure matched = true ssrm() # returns MatchedSystemStructure
 
 Return the IR after structural analysis of the passed function call.
 
@@ -48,6 +65,9 @@ then goes through structural analysis, and the resulting IR is returned.
 Parameters:
 - `world::UInt = Base.get_world_counter()`: the world in which to operate.
 - `force_inline_all::Bool = false`: if `true`, make inlining heuristics choose to always inline where possible.
+- `result::Bool = false`: if `true`, return the full [`DAEIPOResult`](@ref) instead of just the `IRCode`.
+- `matched::Bool = false`: if `true`, return the [`MatchedSystemStructure`](@ref) after top-level state selection
+  for visualization purposes.
 
 !!! warning
     This will cache analysis results. You might want to invalidate with `DAECompiler.refresh()` between calls to `@code_structure`.
