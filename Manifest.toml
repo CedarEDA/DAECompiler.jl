@@ -2039,9 +2039,9 @@ weakdeps = ["ChainRulesCore"]
 
 [[deps.StateSelection]]
 deps = ["DocStringExtensions", "FindFirstFunctions", "Graphs", "LinearAlgebra", "Setfield", "SparseArrays", "UnPack"]
-git-tree-sha1 = "b767bdaf84d6d0f3b8b9568ff6e4e3d53a6bcad4"
-repo-rev = "add-ssa-uses"
-repo-url = "https://github.com/serenity4/StateSelection.jl"
+git-tree-sha1 = "e77065f876d178339a04947200593b12122724f0"
+repo-rev = "main"
+repo-url = "https://github.com/JuliaComputing/StateSelection.jl"
 uuid = "64909d44-ed92-46a8-bbd9-f047dfbdc84b"
 version = "0.2.1"
 
