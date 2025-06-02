@@ -36,7 +36,7 @@ ir = @code_structure world = Base.get_world_counter() ssrm()
 result = @code_structure result = true ssrm()
 @test isa(result, DAECompiler.DAEIPOResult)
 result = @code_structure matched = true ssrm()
-@test isa(result, DAECompiler.MatchedSystemStructure)
+@test isa(result, DAECompiler.StateSelection.MatchedSystemStructure)
 @test contains(sprint(show, result), r"%\d+")
 
 end # module

@@ -65,7 +65,7 @@ Parameters:
 - `world::UInt = Base.get_world_counter()`: the world in which to operate.
 - `force_inline_all::Bool = false`: if `true`, make inlining heuristics choose to always inline where possible.
 - `result::Bool = false`: if `true`, return the full [`DAEIPOResult`](@ref) instead of just the `IRCode`.
-- `matched::Bool = false`: if `true`, return the [`MatchedSystemStructure`](@ref) after top-level state selection
+- `matched::Bool = false`: if `true`, return the `MatchedSystemStructure` after top-level state selection
   for visualization purposes.
 - `mode::GenerationMode = DAE`: specifies the generation mode to use for the compilation pipeline. Only used when `matched` is `true`.
 
