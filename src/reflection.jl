@@ -45,8 +45,7 @@ function code_structure_by_type(@nospecialize(tt::Type); world::UInt = Base.tls_
   (diff_key, init_key) = ret
   key = in(mode, (DAE, DAENoInit, ODE, ODENoInit)) ? diff_key : init_key
 
-  # Removing `@invokelatest` segfaults in LLVM with "Unexpected instruction".
-  var_eq_matching = @invokelatest matching_for_key(tstate, key)
+  var_eq_matching = matching_for_key(tstate, key)
   return StateSelection.MatchedSystemStructure(result, structure, var_eq_matching)
 end
 
