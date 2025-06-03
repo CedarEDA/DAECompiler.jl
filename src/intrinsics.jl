@@ -261,6 +261,7 @@ module Intrinsics
             error("Internal ERROR: Equation was replaced, but equation call was not.")
         end
         Base.donotdelete(val)
+        return nothing
     end
     const m_eq_intro = first(methods(equation))
     const m_eq_eval = first(methods(placeholder_equation))
@@ -338,14 +339,14 @@ module InternalIntrinsics
                         mass matrix) entry corresponding to the derivative will be used for one of the remaining unassigned equations.
                         In DAE form, the corresponding `du` entry will be directly used for the algebraic variable.
 
-    - `Algebraic`:      An algebraic variable that is not the derivative of a differential variable. In ODE form, these are appended to the
-                        `u` array (with the correponding mass matrix row being `0`). In DAE form, these are also appended to the `u` array,
-                        with the corresponding entry of `differential_vars` being `false`.
-                    
     - `AlgebraicDerivative`:
                         An algebraic variable that is the derivative of a differential variable. In ODE form, these are appended to the `u`
                         array (like ordinary `Algebraic` variables). In DAE form, these are appended to the `du` array as described above.
-        
+
+    - `Algebraic`:      An algebraic variable that is not the derivative of a differential variable. In ODE form, these are appended to the
+                        `u` array (with the correponding mass matrix row being `0`). In DAE form, these are also appended to the `u` array,
+                        with the corresponding entry of `differential_vars` being `false`.
+
     In order to support both SciML ABIs, the DAECompiler ABI, passes separate views for each of these kinds of variables. The ordering in this
     enum corresponds to the ordering in the arguments of the DAECompiler internal ABI.
     """
@@ -403,6 +404,18 @@ module InternalIntrinsics
         Base.inferencebarrier(error)("Internal placeholder left in final code")
         return nothing
     end
+
+    """
+        assign_var(var, val)
+
+    Generally equivalent to `val - var`, except that `var` and val need not be of Float64 type.
+    Used to rewrite complicated non-linear expressions to give them a numbered identity.
+    """
+    @noinline function assign_var(var, val)
+        Base.inferencebarrier(error)("Internal placeholder left in final code")
+        return val
+    end
+
 
     """
         contribution!(slot::Int, kind::EquationStateKind, val)

@@ -32,13 +32,13 @@ end
 
 struct DAEIPOResult
     ir::IRCode
+    opaque_eligible::Bool
     extended_rt::Any
     argtypes
     nexternalargvars::Int # total vars is length(var_to_diff)
     nsysmscopes::Int
     nexternaleqs::Int
     ncallees::Int
-    nimplicitoutpairs::Int
     var_to_diff::DiffGraph
     varclassification::Vector{VarEqClassification}
     total_incidence::Vector{Any}

@@ -48,17 +48,16 @@ macro infer_incidence(ex, return_ir = false)
     return subex
   end
   sort!(variables, by = string)
-  prelude = Expr(:block, [:($(esc(var)) = continuous()) for var in variables]...)
+  prelude = Expr(:block)
   uses_time && pushfirst!(prelude.args, :($(esc(:t)) = sim_time()))
   quote
-    function incidence()
+    function incidence($(map(esc, variables)...))
       $prelude
       $(esc(ex))
     end
-    ir = code_structure_by_type(Tuple{typeof(incidence)})
+    ir = code_structure_by_type(Tuple{typeof(incidence), $(((Float64 for _ in variables)...,))...})
     $return_ir ? ir : begin
-      ssa = SSAValue(length(ir.stmts) - 1)
-      ir[ssa][:type]::Incidence
+      DAECompiler.Compiler.argextype((ir[SSAValue(length(ir.stmts))][:stmt]::Core.ReturnNode).val, ir)::Incidence
     end
   end
 end

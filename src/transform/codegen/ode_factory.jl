@@ -110,25 +110,33 @@ function ode_factory_gen(state::TransformationState, ci::CodeInstance, key::Torn
     # Zero the output
     @insert_node_here oc_compact line zero!(du)::VectorViewType
 
-    # out_du_mm, out_eq, in_u_mm, in_u_unassgn, in_alg, in_alg_derv
     nassgn = numstates[AssignedDiff]
+    nunassgn = numstates[UnassignedDiff]
     ntotalstates = numstates[AssignedDiff] + numstates[UnassignedDiff] + numstates[Algebraic] + numstates[AlgebraicDerivative]
-    out_du_mm = @insert_node_here oc_compact line view(du, 1:nassgn)::VectorViewType
-    out_eq = @insert_node_here oc_compact line view(du, (nassgn+1):ntotalstates)::VectorViewType
 
     (in_u_mm, in_u_unassgn, in_alg, in_alg_derv) = sciml_ode_split_u!(oc_compact, line, u, numstates)
+    out_du_mm = @insert_node_here oc_compact line view(du, 1:nassgn)::VectorViewType
+    out_du_unassgn = @insert_node_here oc_compact line view(du, (nassgn+1):(nassgn+nunassgn))::VectorViewType
+    out_eq = @insert_node_here oc_compact line view(du, (nassgn+nunassgn+1):ntotalstates)::VectorViewType
 
     # Call DAECompiler-generated RHS with internal ABI
     oc_sicm = @insert_node_here oc_compact line getfield(self, 1)::Tuple
 
     # N.B: The ordering of arguments should match the ordering in the StateKind enum
-    @insert_node_here oc_compact line (:invoke)(odef_ci, oc_sicm, (), in_u_mm, in_u_unassgn, in_alg, in_alg_derv, out_du_mm, out_eq, t)::Nothing
+    @insert_node_here oc_compact line (:invoke)(odef_ci, oc_sicm, (), in_u_mm, in_u_unassgn, in_alg_derv, in_alg, out_du_mm, out_eq, t)::Nothing
+
+    # Assign the algebraic derivatives to the their corresponding variables
+    bc = insert_node_here!(oc_compact,
+        NewInstruction(Expr(:call, Base.Broadcast.broadcasted, identity, in_alg_derv), Any, line))
+    insert_node_here!(oc_compact,
+        NewInstruction(Expr(:call, Base.Broadcast.materialize!, out_du_unassgn, bc), Nothing, line))
 
     # Return
     @insert_node_here oc_compact line (return)::Union{}
 
     ir_oc = Compiler.finish(oc_compact)
     maybe_rewrite_debuginfo!(ir_oc, settings)
+    Compiler.verify_ir(ir_oc)
     oc = Core.OpaqueClosure(ir_oc)
 
     line = result.ir[SSAValue(1)][:line]

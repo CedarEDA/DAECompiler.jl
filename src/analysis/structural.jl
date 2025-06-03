@@ -30,6 +30,16 @@ function structural_analysis!(ci::CodeInstance, world::UInt)
     return result
 end
 
+struct EqVarState
+    var_to_diff
+    varclassification
+    varkinds
+    total_incidence
+    eqclassification
+    eqkinds
+    eq_callee_mapping
+end
+
 function _structural_analysis!(ci::CodeInstance, world::UInt)
     # Variables
     var_to_diff = DiffGraph(0)
@@ -262,6 +272,7 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
     handler_info = Compiler.compute_trycatch(ir)
     ncallees = 0
     compact = IncrementalCompact(ir)
+    opaque_eligible = isempty(total_incidence) && all(==(External), varclassification)
     for ((old_idx, i), stmt) in compact
         stmt === nothing && continue
         # No need to process error paths - even if they were to contain intrinsics, such intrinsics would have
@@ -323,15 +334,12 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
             inst[:info] = info = MappingInfo(info, result, mapping)
         end
 
-        # Determine whether this call is eligible for opaque treatement
-        if isa(result.extended_rt, Incidence) && isempty(result.total_incidence)
-            # For now, turn this into a call.
-            # TODO: We should keep the native code instance and use that
-            # TODO: Additional conditions:
-            #  - Does not introduce new variables
+        if result.opaque_eligible
             compact[SSAValue(i)] = nothing
             compact[SSAValue(i)] = Expr(:call, stmt.args[2:end]...)
             continue
+        else
+            opaque_eligible = false
         end
 
         # Rewrite to flattened ABI
@@ -349,19 +357,39 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
             return UncompilableIPOResult(warnings, UnsupportedIRException(err, ir))
         end
     end
+
+    eqvars = EqVarState(var_to_diff, varclassification, varkinds,
+        total_incidence, eqclassification, eqkinds, eq_callee_mapping)
+
+    # Replace non linear return by a new variable and return that variable
+    if !opaque_eligible
+        last_ssa = SSAValue(compact.result_idx - 1)
+        ret_stmt_inst = compact[last_ssa]
+        ret_stmt = ret_stmt_inst[:stmt]
+        @assert isa(ret_stmt, ReturnNode)
+        line = ret_stmt_inst[:line]
+        Compiler.delete_inst_here!(compact)
+
+        (new_ret, ultimate_rt) = rewrite_ipo_return!(Compiler.typeinf_lattice(refiner), compact, line, ret_stmt.val, ultimate_rt, eqvars)
+        insert_node_here!(compact, NewInstruction(ReturnNode(new_ret), ultimate_rt, Compiler.NoCallInfo(), line, Compiler.IR_FLAG_REFINED), true)
+    elseif isa(ultimate_rt, Type)
+        # If we don't have any internal variables (in which case we might have to to do a more aggressive rewrite), strengthen the incidence
+        # by demoting to full incidence over the argument variables. Incidence is not allowed to propagate through global mutable state, so
+        # the incidence of the return type is bounded by the incidence of the arguments in this case.
+        ultimate_rt = Incidence(ultimate_rt,
+            IncidenceVector(MAX_EQS, Int[1:length(varclassification)+1;], IncidenceValue[nonlinear for _ in 1:length(varclassification)+1]))
+    end
+
     ir = Compiler.finish(compact)
 
     var_to_diff = StateSelection.complete(var_to_diff)
-    ultimate_rt, nimplicitoutpairs = process_ipo_return!(Compiler.typeinf_lattice(refiner), ultimate_rt, eqclassification, eqkinds, varclassification, varkinds,
-        var_to_diff, total_incidence, eq_callee_mapping)
 
     names = OrderedDict{Any, ScopeDictEntry}()
-    return DAEIPOResult(ir, ultimate_rt, argtypes,
+    return DAEIPOResult(ir, opaque_eligible, ultimate_rt, argtypes,
         nexternalargvars,
         nsysmscopes,
         nexternaleqs,
         ncallees,
-        nimplicitoutpairs,
         var_to_diff,
         varclassification,
         total_incidence, eqclassification, eq_callee_mapping,
@@ -371,50 +399,66 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
         warnings)
 end
 
-function process_ipo_return!(𝕃, ultimate_rt::Incidence, eqclassification, eqkinds, varclassification, varkinds, var_to_diff, total_incidence, eq_callee_mapping)
-    nonlinrepl = nothing
-    nimplicitoutpairs = 0
-    function get_nonlinrepl()
-        if nonlinrepl === nothing
-            nonlinrepl = add_vertex!(var_to_diff)
-            push!(varclassification, External)
-            push!(varkinds, Intrinsics.RemovedVar)
-            nimplicitoutpairs += 1
-        end
-        return nonlinrepl
-    end
-    new_row = _zero_row()
-    new_eq_row = _zero_row()
-    for (v_offset, coeff) in zip(rowvals(ultimate_rt.row), nonzeros(ultimate_rt.row))
-        v = v_offset - 1
-        if v != 0 && varclassification[v] != External && coeff === nonlinear
-            # nonlinear state variable created within this call tree
-            get_nonlinrepl()
-            new_eq_row[v_offset] = nonlinear # we might want to refine this to something linear
-        else
-            new_row[v_offset] = coeff
-            while v != 0 && v !== nothing
-                varclassification[v] = External
-                v = invview(var_to_diff)[v]
-            end
-        end
-    end
-    #=
-    if ultimate_rt.typ === Float64
-        get_nonlinrepl()
-    end
-    =#
-    if nonlinrepl !== nothing
-        new_eq_row[get_nonlinrepl()+1] = -1.
-        new_row[get_nonlinrepl()+1] = 1.
-        ultimate_rt = Incidence(Const(0.0), new_row)
-        push!(total_incidence, Incidence(ultimate_rt.typ, new_eq_row))
-        push!(eq_callee_mapping, nothing)
-        push!(eqclassification, Owned)
-        push!(eqkinds, Intrinsics.Always)
+function rewrite_ipo_return!(𝕃, compact::IncrementalCompact, line, ssa, ultimate_rt::Any, eqvars::EqVarState)
+    if isa(ultimate_rt, Eq)
+        error()
     end
 
-    return ultimate_rt, nimplicitoutpairs
+    if isa(ultimate_rt, PartialStruct)
+        new_fields = Any[]
+        new_types = Any[]
+        for i = 1:length(ultimate_rt.fields)
+            ssa_type = Compiler.getfield_tfunc(𝕃, ultimate_rt, Const(i))
+            ssa_field = insert_node_here!(compact,
+                NewInstruction(Expr(:call, getfield, variable), ssa_type, Compiler.NoCallInfo(), line, Compiler.IR_FLAG_REFINED), true)
+
+            (new_field, new_type) = rewrite_ipo_return!(𝕃, compact, line, ssa_field, ssa_type, eqvars)
+            push!(new_fields, new_field)
+            push!(new_types, new_type)
+        end
+        newT = Compiler.PartialStruct(ultimate_rt.typ, new_types)
+        if widenconst(ultimate_rt) <: Tuple
+            retssa = insert_node_here!(compact,
+                NewInstruction(Expr(:call, tuple, new_fields...), newT, Compiler.NoCallInfo(), line, Compiler.IR_FLAG_REFINED), true)
+        else
+            T = insert_node_here!(compact,
+                NewInstruction(Expr(:call, typeof, ssa), Type, Compiler.NoCallInfo(), line, Compiler.IR_FLAG_REFINED), true)
+            retssa = insert_node_here!(compact,
+                NewInstruction(Expr(:new, T, new_fields...), newT, Compiler.NoCallInfo(), line, Compiler.IR_FLAG_REFINED), true)
+        end
+        return Pair{Any, Any}(retssa, newT)
+    end
+
+    if !isa(ultimate_rt, Incidence) || (nnz(ultimate_rt.row) <= 1 && only(nonzeros(ultimate_rt.row)) != nonlinear)
+        return Pair{Any, Any}(ssa, ultimate_rt)
+    end
+
+    nonlinrepl = add_vertex!(eqvars.var_to_diff)
+    push!(eqvars.varclassification, External)
+    push!(eqvars.varkinds, Intrinsics.Continuous)
+
+    new_var_ssa = insert_node_here!(compact,
+        NewInstruction(Expr(:invoke, nothing, variable), Incidence(nonlinrepl), Compiler.NoCallInfo(), line, Compiler.IR_FLAG_REFINED), true)
+
+    eq_incidence = ultimate_rt - Incidence(nonlinrepl)
+    push!(eqvars.total_incidence, eq_incidence)
+    push!(eqvars.eq_callee_mapping, nothing)
+    push!(eqvars.eqclassification, Owned)
+    push!(eqvars.eqkinds, Intrinsics.Always)
+    new_eq = length(eqvars.total_incidence)
+
+    new_eq_ssa = insert_node_here!(compact,
+        NewInstruction(Expr(:invoke, nothing, equation), Eq(new_eq), Compiler.NoCallInfo(), line, Compiler.IR_FLAG_REFINED), true)
+
+    eq_val_ssa = insert_node_here!(compact,
+        NewInstruction(Expr(:call, InternalIntrinsics.assign_var, new_var_ssa, ssa), eq_incidence, Compiler.NoCallInfo(), line, Compiler.IR_FLAG_REFINED), true)
+
+    eq_call_ssa = insert_node_here!(compact,
+        NewInstruction(Expr(:invoke, nothing, new_eq_ssa, eq_val_ssa), Nothing, Compiler.NoCallInfo(), line, Compiler.IR_FLAG_REFINED), true)
+
+    T = widenconst(ultimate_rt)
+    # TODO: We don't have a way to express that the return value is directly this variable for arbitrary types
+    return Pair{Any, Any}(new_var_ssa, T === Float64 ? Incidence(nonlinrepl) : Incidence(T, nonlinrepl))
 end
 
 function add_internal_equations_to_structure!(refiner::StructuralRefiner, eqkinds::Vector{Intrinsics.EqKind}, eqclassification::Vector{VarEqClassification}, total_incidence,
@@ -462,31 +506,4 @@ function add_internal_equations_to_structure!(refiner::StructuralRefiner, eqkind
     end
 
     return true
-end
-
-function process_ipo_return!(𝕃, ultimate_rt::Type, eqclassification, eqkinds, varclassification, varkinds, var_to_diff, total_incidence, eq_callee_mapping)
-    # If we don't have any internal variables (in which case we might have to to do a more aggressive rewrite), strengthen the incidence
-    # by demoting to full incidence over the argument variables. Incidence is not allowed to propagate through global mutable state, so
-    # the incidence of the return type is bounded by the incidence of the arguments in this case.
-    if !all(==(External), varclassification)
-        return ultimate_rt, 0
-    end
-    # TODO: Keep track of whether we have any time dependence?
-    return Incidence(ultimate_rt, IncidenceVector(MAX_EQS, Int[1:length(varclassification)+1;], IncidenceValue[nonlinear for _ in 1:length(varclassification)+1])), 0
-end
-
-function process_ipo_return!(𝕃, ultimate_rt::Eq, eqclassification, args...)
-    eqclassification[ultimate_rt.id] = External
-    return ultimate_rt, 0
-end
-process_ipo_return!(𝕃, ultimate_rt::Union{Type, PartialScope, PartialKeyValue, Const}, args...) = ultimate_rt, 0
-function process_ipo_return!(𝕃, ultimate_rt::PartialStruct, args...)
-    nimplicitoutpairs = 0
-    fields = Any[]
-    for f in ultimate_rt.fields
-        (rt, n) = process_ipo_return!(𝕃, f, args...)
-        nimplicitoutpairs += n
-        push!(fields, rt)
-    end
-    return PartialStruct(𝕃, ultimate_rt.typ, fields), nimplicitoutpairs
 end
