@@ -389,6 +389,7 @@ end
 Base.:(==)(a::Incidence, b::Incidence) = a.typ === b.typ &&
     a.row.nzind == b.row.nzind && a.row.nzval == b.row.nzval
 Base.:(+)(a::Incidence, b::Incidence) = tfunc(Val{Core.Intrinsics.add_float}(), a, b)
+Base.:(-)(a::Incidence, b::Incidence) = tfunc(Val{Core.Intrinsics.sub_float}(), a, b)
 Base.:(+)(a::Const, b::Incidence) = tfunc(Val{Core.Intrinsics.add_float}(), a, b)
 Base.:(+)(a::Incidence, b::Const) = tfunc(Val{Core.Intrinsics.add_float}(), a, b)
 

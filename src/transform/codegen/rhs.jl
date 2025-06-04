@@ -126,7 +126,6 @@ function rhs_finish!(
         t = Argument(last(arg_range)+1)
         push!(ir.argtypes, Float64)  #  t
 
-
         processed_variables = BitSet()
 
         diff_states_in_callee = BitSet()

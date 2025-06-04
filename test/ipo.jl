@@ -187,14 +187,11 @@ end
 
 implicitext_nl() = implicitext_nl(tanhdu())
 
-# ERROR: The system is unbalanced. There are 1 highest order differentiated variable(s) and 2 equation(s).
-@test_broken begin
-    dae_sol = solve(DAECProblem(implicitext_nl, (1,) .=> 1), IDA())
-    ode_sol = solve(ODECProblem(implicitext_nl, (1,) .=> 1), Rodas5(autodiff=false))
+dae_sol = solve(DAECProblem(implicitext_nl, (1,) .=> 1), IDA())
+ode_sol = solve(ODECProblem(implicitext_nl, (1,) .=> 1), Rodas5(autodiff=false))
 
-    for sol in (dae_sol, ode_sol)
-        @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[1, :], 1 .+ atanh(0.5)sol.t))
-    end
+for sol in (dae_sol, ode_sol)
+    @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[1, :], 1 .+ atanh(0.5)sol.t))
 end
 
 #========= External Equation =========#
@@ -309,6 +306,7 @@ end
     @test length(result.eqkinds) == 2
     # add test for `result.names`
 end
+
 #================= Derived Scope ===================#
 @noinline function derived_scope!(scope)
     vscope = scope(:x)
@@ -418,5 +416,11 @@ end
 result = @code_structure result = true internal_variable_leaking()
 @test length(result.varkinds) == 4 # 2 states + their differentials
 @test length(result.eqkinds) == 2
+
+dae_sol = solve(DAECProblem(internal_variable_leaking, (1, 2) .=> 1.), IDA())
+ode_sol = solve(ODECProblem(internal_variable_leaking, (1, 2) .=> 1.), Rodas5(autodiff=false))
+for (sol, i) in Iterators.product((dae_sol, ode_sol), 1:2)
+    @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[i, :], exp.(sol.t)))
+end
 
 end
