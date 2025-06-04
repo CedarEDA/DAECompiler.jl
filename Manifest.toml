@@ -1927,7 +1927,6 @@ weakdeps = ["SparseArrays", "StaticArraysCore"]
 [[deps.SciMLSensitivity]]
 deps = ["ADTypes", "Accessors", "Adapt", "ArrayInterface", "ChainRulesCore", "DiffEqBase", "DiffEqCallbacks", "DiffEqNoiseProcess", "Distributions", "FastBroadcast", "FiniteDiff", "ForwardDiff", "FunctionProperties", "FunctionWrappersWrappers", "Functors", "GPUArraysCore", "LinearAlgebra", "LinearSolve", "Markdown", "OrdinaryDiffEqCore", "PreallocationTools", "QuadGK", "Random", "RandomNumbers", "RecursiveArrayTools", "Reexport", "ReverseDiff", "SciMLBase", "SciMLJacobianOperators", "SciMLOperators", "SciMLStructures", "StaticArrays", "StaticArraysCore", "Statistics", "SymbolicIndexingInterface", "Tracker", "Zygote"]
 git-tree-sha1 = "a8a6e5e1bfb889c392d67245911fd4e1ad0ba562"
-path = "/home/keno/.julia/dev/SciMLSensitivity"
 repo-rev = "kf/mindep4"
 repo-url = "https://github.com/CedarEDA/SciMLSensitivity.jl"
 uuid = "1ed8b502-d754-442c-8d5d-10ac956f44a1"
@@ -2040,9 +2039,9 @@ weakdeps = ["ChainRulesCore"]
 
 [[deps.StateSelection]]
 deps = ["DocStringExtensions", "FindFirstFunctions", "Graphs", "LinearAlgebra", "Setfield", "SparseArrays", "UnPack"]
-git-tree-sha1 = "bdb37d184a0a529c307875a6bc066f561e0c25f6"
+git-tree-sha1 = "e77065f876d178339a04947200593b12122724f0"
 repo-rev = "main"
-repo-url = "https://github.com/JuliaComputing/StateSelection.jl.git"
+repo-url = "https://github.com/JuliaComputing/StateSelection.jl"
 uuid = "64909d44-ed92-46a8-bbd9-f047dfbdc84b"
 version = "0.2.1"
 
