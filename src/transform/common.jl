@@ -136,14 +136,13 @@ function replace_call!(ir::Union{IRCode,IncrementalCompact}, idx::SSAValue, new_
 end
 
 function insert_new_lineinfo!(debuginfo::Compiler.DebugInfoStream, lineno::LineNumberNode, i, previous = nothing)
-    # @assert previous === nothing
-    previous === nothing || return previous
-    if previous === nothing
-        edge = new_debuginfo_edge(lineno)
-        push!(debuginfo.edges, edge)
-        edge_index = length(debuginfo.edges)
-        return Int32.((i, edge_index, 1))
-    end
+    # XXX: try to preserve previous `debuginfo` information
+    # previous !== nothing && return previous
+
+    edge = new_debuginfo_edge(lineno)
+    push!(debuginfo.edges, edge)
+    edge_index = length(debuginfo.edges)
+    return Int32.((i, edge_index, 1))
 end
 
 function new_debuginfo_edge((; file, line)::LineNumberNode)
