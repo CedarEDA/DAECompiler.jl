@@ -65,7 +65,7 @@ function ir_to_src(ir::IRCode, settings::Settings)
 end
 
 function maybe_rewrite_debuginfo!(ir::IRCode, settings::Settings)
-    settings.insert_stmt_debuginfo && rewrite_debuginfo!(ir)
+    settings.insert_ssa_debuginfo && rewrite_debuginfo!(ir)
     return ir
 end
 
@@ -76,15 +76,14 @@ function rewrite_debuginfo!(ir::IRCode)
     empty!(debuginfo.codelocs)
     for (i, stmt) in enumerate(ir.stmts)
         push!(debuginfo.codelocs, i, i, 1)
-        inst = stmt[:inst]
-        type = stmt[:type]
-        push!(debuginfo.edges, debuginfo_edge(i, inst, type))
+        push!(debuginfo.edges, stmt_debuginfo_edge(i, stmt))
     end
 end
 
-function debuginfo_edge(i, stmt, type)
+function stmt_debuginfo_edge(i, stmt)
+    type = stmt[:type]
     annotation = type === nothing ? "" : " (inferred type: $type)"
-    filename = Symbol("%$i = $stmt", annotation)
+    filename = Symbol("%$i = $(stmt[:inst])", annotation)
     codelocs = Int32[1, 0, 0]
     compressed = ccall(:jl_compress_codelocs, Any, (Int32, Any, Int), 1#=firstline=#, codelocs, 1)
     DebugInfo(filename, nothing, Core.svec(), compressed)
@@ -101,12 +100,58 @@ function cache_dae_ci!(old_ci, src, debuginfo, abi, owner)
     return daef_ci
 end
 
-function replace_call!(ir::Union{IRCode,IncrementalCompact}, idx::SSAValue, new_call::Expr)
+macro replace_call!(ir, idx, new_call, settings)
+    source = :(LineNumberNode($(__source__.line), $(QuoteNode(__source__.file))))
+    :(replace_call!($(esc(ir)), $(esc(idx)), $(esc(new_call)); settings = $(esc(settings)), source = $source))
+end
+
+function replace_call!(ir::Union{IRCode,IncrementalCompact}, idx::SSAValue, new_call::Expr; settings::Union{Nothing, Settings} = nothing, source = nothing)
     @assert !isa(ir[idx][:inst], PhiNode)
     ir[idx][:inst] = new_call
     ir[idx][:type] = Any
     ir[idx][:info] = Compiler.NoCallInfo()
     ir[idx][:flag] |= Compiler.IR_FLAG_REFINED
+    @sshow source
+    source === nothing && return new_call
+    settings === nothing && return new_call
+    settings.insert_stmt_debuginfo || return new_call
+    debuginfo = isa(ir, IncrementalCompact) ? ir.ir.debuginfo : ir.debuginfo
+    if isa(source, Tuple)
+        ir[idx][:line] = source
+    else
+    for (i, stmt) in enumerate(ir.stmts)
+        push!(debuginfo.codelocs, i, i, 1)
+        push!(debuginfo.edges, stmt_debuginfo_edge(i, stmt))
+    end
+        i = idx.id
+        @sshow typeof(ir)
+        line = insert_new_lineinfo!(debuginfo, source, i, ir[idx][:line])
+        @sshow line
+        length(debuginfo.codelocs) ≥ 3i || resize!(debuginfo.codelocs, 3i)
+        debuginfo.codelocs[3(i - 1) + 1] = line[1]
+        debuginfo.codelocs[3(i - 1) + 2] = line[2]
+        debuginfo.codelocs[3(i - 1) + 3] = line[3]
+        ir[idx][:line] = line
+    end
+    return new_call
+end
+
+function insert_new_lineinfo!(debuginfo::Compiler.DebugInfoStream, lineno::LineNumberNode, i, previous = nothing)
+    # @assert previous === nothing
+    previous === nothing || return previous
+    if previous === nothing
+        edge = new_debuginfo_edge(lineno)
+        push!(debuginfo.edges, edge)
+        edge_index = length(debuginfo.edges)
+        return Int32.((i, edge_index, 1))
+    end
+end
+
+function new_debuginfo_edge((; file, line)::LineNumberNode)
+    codelocs = Int32[line, 0, 0]
+    firstline = codelocs[1]
+    compressed = ccall(:jl_compress_codelocs, Any, (Int32, Any, Int), firstline, codelocs, 1)
+    DebugInfo(@something(file, :(var"")), nothing, Core.svec(), compressed)
 end
 
 is_solved_variable(stmt) = isexpr(stmt, :call) && stmt.args[1] == solved_variable ||
@@ -133,7 +178,7 @@ If doing an ODE, then can put `nothing` for `du` argument as we know it will not
 If `var_assignment` is `nothing`, all variables are assumed unassigned. In this
 case `u` and `du` may be `nothing` as well.
 """
-function replace_if_intrinsic!(compact, ssa, du, u, p, t, var_assignment)
+function replace_if_intrinsic!(compact, settings, ssa, du, u, p, t, var_assignment)
     inst = compact[ssa]
     stmt = inst[:inst]
     # Transform references to `Argument(1)` into `p`
@@ -161,7 +206,7 @@ function replace_if_intrinsic!(compact, ssa, du, u, p, t, var_assignment)
             inst[:inst] = GlobalRef(DAECompiler.Intrinsics, :_VARIABLE_UNASSIGNED)
         else
             source = in_du ? du : u
-            replace_call!(compact, ssa, Expr(:call, getindex, source, var_idx))
+            @replace_call!(compact, ssa, Expr(:call, getindex, source, var_idx), settings)
         end
     elseif is_known_invoke_or_call(stmt, sim_time, compact)
         inst[:inst] = t

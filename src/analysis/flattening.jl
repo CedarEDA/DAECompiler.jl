@@ -17,8 +17,7 @@ function _flatten_parameter!(𝕃, compact, argtypes, ntharg, line)
                 continue
             end
             this = ntharg(argn)
-            nthfield(i) = insert_node_here!(compact,
-                NewInstruction(Expr(:call, getfield, this, i), Compiler.getfield_tfunc(𝕃, argextype(this, compact), Const(i)), line))
+            nthfield(i) = @insert_node_here compact line getfield(this, i)::Compiler.getfield_tfunc(𝕃, argextype(this, compact), Const(i))
             if isa(argt, PartialStruct)
                 fields = _flatten_parameter!(𝕃, compact, argt.fields, nthfield, line)
             else
@@ -31,8 +30,7 @@ function _flatten_parameter!(𝕃, compact, argtypes, ntharg, line)
 end
 
 function flatten_parameter!(𝕃, compact, argtypes, ntharg, line)
-    return insert_node_here!(compact,
-        NewInstruction(Expr(:call, tuple, _flatten_parameter!(𝕃, compact, argtypes, ntharg, line)...), Tuple, line))
+    return @insert_node_here compact line tuple(_flatten_parameter!(𝕃, compact, argtypes, ntharg, line)...)::Tuple
 end
 
 # Needs to match flatten_arguments!
@@ -75,16 +73,16 @@ function flatten_argument!(compact::Compiler.IncrementalCompact, argt, offset, a
         push!(argtypes, argt)
         return Pair{Any, Int}(Argument(offset+1), offset+1)
     elseif isabstracttype(argt) || ismutabletype(argt) || (!isa(argt, DataType) && !isa(argt, PartialStruct))
-        ssa = insert_node_here!(compact, NewInstruction(Expr(:call, error, "Cannot IPO model arg type $argt"), Union{}, compact[Compiler.OldSSAValue(1)][:line]))
+        ssa = @insert_node_here compact compact[Compiler.OldSSAValue(1)][:line] error("Cannot IPO model arg type $argt")::Union{}
         return Pair{Any, Int}(ssa, offset)
     else
         if !isa(argt, PartialStruct) && Base.datatype_fieldcount(argt) === nothing
-            ssa = insert_node_here!(compact, NewInstruction(Expr(:call, error, "Cannot IPO model arg type $argt"), Union{}, compact[Compiler.OldSSAValue(1)][:line]))
+            ssa = @insert_node_here compact compact[Compiler.OldSSAValue(1)][:line] error("Cannot IPO model arg type $argt")::Union{}
             return Pair{Any, Int}(ssa, offset)
         end
         (args, _, offset) = flatten_arguments!(compact, isa(argt, PartialStruct) ? argt.fields : fieldtypes(argt), offset, argtypes)
         this = Expr(:new, isa(argt, PartialStruct) ? argt.typ : argt, args...)
-        ssa = insert_node_here!(compact, NewInstruction(this, argt, compact[Compiler.OldSSAValue(1)][:line]))
+        ssa = @insert_node_here compact compact[Compiler.OldSSAValue(1)][:line] this::argt
         return Pair{Any, Int}(ssa, offset)
     end
 end

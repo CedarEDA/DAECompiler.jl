@@ -131,7 +131,7 @@ function dae_factory_gen(state::TransformationState, ci::CodeInstance, key::Torn
 
     # Call DAECompiler-generated RHS with internal ABI
     oc_sicm = insert_node_here!(oc_compact,
-        NewInstruction(Expr(:call, getfield, Argument(1), 1), Tuple, line))
+        NewInstruction(Expr(:call, getfield, Argument(1), 1), Core.OpaqueClosure, line))
 
     # N.B: The ordering of arguments should match the ordering in the StateKind enum
     insert_node_here!(oc_compact,

@@ -81,7 +81,7 @@ function init_uncompress_gen!(compact::Compiler.IncrementalCompact, result::DAEI
 
     # Call DAECompiler-generated RHS with internal ABI
     oc_sicm = insert_node_here!(oc_compact,
-        NewInstruction(Expr(:call, getfield, Argument(1), 1), Tuple, line))
+        NewInstruction(Expr(:call, getfield, Argument(1), 1), Core.OpaqueClosure, line))
     insert_node_here!(oc_compact,
         NewInstruction(Expr(:invoke, daef_ci, oc_sicm, (), out_u_mm, out_u_unassgn, out_du_unassgn, out_alg, in_nlsol_u, 0.0), Nothing, line))
 

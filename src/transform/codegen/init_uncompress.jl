@@ -139,16 +139,11 @@ function gen_init_uncompress!(
                     replace_call!(ir, SSAValue(i), Expr(:call, Base.setindex!, which, argval, slotidx))
                 end
             else
-                replace_if_intrinsic!(ir, SSAValue(i), nothing, nothing, Argument(1), t, var_assignment)
+                replace_if_intrinsic!(ir, settings, SSAValue(i), nothing, nothing, Argument(1), t, var_assignment)
             end
         end
 
         # Just before the end of the function
-        idx = length(ir.stmts)
-        function ir_add!(a, b)
-            ni = NewInstruction(Expr(:call, +, a, b), Any, ir[SSAValue(idx)][:line])
-            insert_node!(ir, idx, ni)
-        end
         ir = Compiler.compact!(ir)
         Compiler.verify_ir(ir)
 

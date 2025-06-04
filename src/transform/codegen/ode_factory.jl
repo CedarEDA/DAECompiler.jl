@@ -119,7 +119,7 @@ function ode_factory_gen(state::TransformationState, ci::CodeInstance, key::Torn
     (in_u_mm, in_u_unassgn, in_alg, in_alg_derv) = sciml_ode_split_u!(oc_compact, line, u, numstates)
 
     # Call DAECompiler-generated RHS with internal ABI
-    oc_sicm = @insert_node_here oc_compact line getfield(self, 1)::Tuple
+    oc_sicm = @insert_node_here oc_compact line getfield(self, 1)::Core.OpaqueClosure
 
     # N.B: The ordering of arguments should match the ordering in the StateKind enum
     @insert_node_here oc_compact line (:invoke)(odef_ci, oc_sicm, (), in_u_mm, in_u_unassgn, in_alg, in_alg_derv, out_du_mm, out_eq, t)::Nothing

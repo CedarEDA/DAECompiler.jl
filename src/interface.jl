@@ -97,5 +97,6 @@ function refresh()
         $(Expr(:meta, :generated_only))
         $(Expr(:meta, :generated, factory_gen))
     end
+    return nothing
 end
 refresh()
