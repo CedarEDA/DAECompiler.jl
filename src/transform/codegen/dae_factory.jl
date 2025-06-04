@@ -211,5 +211,6 @@ function dae_factory_gen(state::TransformationState, ci::CodeInstance, key::Torn
     empty!(ir_factory.cfg.blocks[1].succs)
     Compiler.verify_ir(ir_factory)
 
-    return ir_factory
+    slotnames = [[:factory, :settings]; Symbol.(:arg, 1:(length(ir_factory.argtypes) - 2))]
+    return ir_factory, slotnames
 end

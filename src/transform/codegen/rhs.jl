@@ -116,6 +116,13 @@ function rhs_finish!(
         empty!(ir.argtypes)
         push!(ir.argtypes, Tuple)  # SICM State
         push!(ir.argtypes, Tuple)  # in vars
+        if in(settings.mode, (ODE, ODENoInit))
+            slotnames = [:sicm_state, :vars, :in_u_mm, :in_u_unassgn, :in_alg, :in_alg_derv, :out_du_mm, :out_eq, :t]
+        elseif in(settings.mode, (DAE, DAENoInit))
+            slotnames = [:sicm_state, :vars, :in_u_mm, :in_u_unassgn, :in_du_unassgn, :in_alg, :out_du_mm, :out_eq, :t]
+        else
+            slotnames = nothing # XXX: define slotnames for `InitUncompress`
+        end
 
         arg_range = 3:8
         @assert length(arg_range) == Int(LastEquationStateKind)
@@ -227,7 +234,7 @@ function rhs_finish!(
 
         widen_extra_info!(ir)
         Compiler.verify_ir(ir)
-        src = ir_to_src(ir, settings)
+        src = ir_to_src(ir, settings; slotnames)
 
         abi = Tuple{Tuple, Tuple, (VectorViewType for _ in arg_range)..., Float64}
         daef_ci = cache_dae_ci!(ci, src, src.debuginfo, abi, RHSSpec(key, ir_ordinal))

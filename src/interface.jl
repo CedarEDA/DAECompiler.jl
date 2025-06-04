@@ -48,17 +48,18 @@ function factory_gen(@nospecialize(fT), settings::Settings, world::UInt = Base.g
     end
 
     # Generate the IR implementation of `factory`, returning the DAEFunction/ODEFunction
+    slotnames = nothing
     if settings.mode in (DAE, DAENoInit)
-        ir_factory = dae_factory_gen(tstate, ci, diff_key, world, settings, settings.mode == DAE ? init_key : nothing)
+        ir_factory, slotnames = dae_factory_gen(tstate, ci, diff_key, world, settings, settings.mode == DAE ? init_key : nothing)
     elseif settings.mode in (ODE, ODENoInit)
-        ir_factory = ode_factory_gen(tstate, ci, diff_key, world, settings, settings.mode == ODE ? init_key : nothing)
+        ir_factory, slotnames = ode_factory_gen(tstate, ci, diff_key, world, settings, settings.mode == ODE ? init_key : nothing)
     elseif settings.mode == InitUncompress
         ir_factory = init_uncompress_gen(result, ci, init_key, diff_key, world, settings)
     else
         return :(error("Unknown generation mode: $(settings.mode)"))
     end
 
-    src = ir_to_src(ir_factory, settings)
+    src = ir_to_src(ir_factory, settings; slotnames)
     src.ssavaluetypes = length(src.code)
     src.min_world = @atomic ci.min_world
     src.max_world = @atomic ci.max_world

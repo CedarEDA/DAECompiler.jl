@@ -40,9 +40,8 @@ function widen_extra_info!(ir)
     end
 end
 
-function ir_to_src(ir::IRCode, settings::Settings)
+function ir_to_src(ir::IRCode, settings::Settings; slotnames = nothing)
     isva = false
-    slotnames = nothing
     ir.debuginfo.def === nothing && (ir.debuginfo.def = :var"generated IR for OpaqueClosure")
     maybe_rewrite_debuginfo!(ir, settings)
     nargtypes = length(ir.argtypes)

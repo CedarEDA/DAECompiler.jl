@@ -153,5 +153,6 @@ function ode_factory_gen(state::TransformationState, ci::CodeInstance, key::Torn
     ir_factory = Compiler.finish(compact)
     Compiler.verify_ir(ir_factory)
 
-    return ir_factory
+    slotnames = [[:factory, :settings]; Symbol.(:arg, 1:(length(ir_factory.argtypes) - 2))]
+    return ir_factory, slotnames
 end
