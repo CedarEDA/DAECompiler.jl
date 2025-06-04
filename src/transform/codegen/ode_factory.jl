@@ -57,24 +57,23 @@ function ode_factory_gen(state::TransformationState, ci::CodeInstance, key::Torn
     torn_ci = find_matching_ci(ci->isa(ci.owner, TornIRSpec) && ci.owner.key == key, ci.def, world)
     torn_ir = torn_ci.inferred
 
-    (;ir_sicm) = torn_ir
+    sicm_ir = torn_ir.ir_sicm
 
-    ir_factory = copy(ci.inferred.ir)
-    pushfirst!(ir_factory.argtypes, Settings)
-    pushfirst!(ir_factory.argtypes, typeof(factory))
-    compact = IncrementalCompact(ir_factory)
+    returned_ir = copy(ci.inferred.ir)
+    pushfirst!(returned_ir.argtypes, Settings)
+    pushfirst!(returned_ir.argtypes, typeof(factory))
+    returned_ic = IncrementalCompact(returned_ir)
 
     local line
-    if ir_sicm !== nothing
+    if sicm_ir !== nothing
         sicm_ci = find_matching_ci(ci->isa(ci.owner, SICMSpec) && ci.owner.key == key, ci.def, world)
         @assert sicm_ci !== nothing
 
         line = result.ir[SSAValue(1)][:line]
-        param_list = flatten_parameter!(Compiler.fallback_lattice, compact, ci.inferred.ir.argtypes[1:end], argn->Argument(2+argn), line)
-        sicm = insert_node_here!(compact,
-            NewInstruction(Expr(:call, invoke, param_list, sicm_ci), Tuple, line))
+        param_list = flatten_parameter!(Compiler.fallback_lattice, returned_ic, ci.inferred.ir.argtypes[1:end], argn->Argument(2+argn), line)
+        sicm_state = @insert_node_here returned_ic line (:call)(invoke, param_list, sicm_ci)::Tuple
     else
-        sicm = ()
+        sicm_state = ()
     end
 
     odef_ci = rhs_finish!(state, ci, key, world, settings, 1)
@@ -91,68 +90,68 @@ function ode_factory_gen(state::TransformationState, ci::CodeInstance, key::Torn
         (kind != AlgebraicDerivative) && push!(all_states, var)
     end
 
-    ir_oc = copy(ci.inferred.ir)
-    empty!(ir_oc.argtypes)
+    interface_ir = copy(ci.inferred.ir)
+    empty!(interface_ir.argtypes)
     argt = Tuple{Vector{Float64}, Vector{Float64}, SciMLBase.NullParameters, Float64}
-    push!(ir_oc.argtypes, Tuple)
-    append!(ir_oc.argtypes, fieldtypes(argt))
-    Compiler.verify_ir(ir_oc)
+    push!(interface_ir.argtypes, Tuple)
+    append!(interface_ir.argtypes, fieldtypes(argt))
+    Compiler.verify_ir(interface_ir)
 
-    oc_compact = IncrementalCompact(ir_oc)
+    interface_ic = IncrementalCompact(interface_ir)
     self = Argument(1)
     du = Argument(2)
     u = Argument(3)
     p = Argument(4)
     t = Argument(5)
 
-    line = ir_oc[SSAValue(1)][:line]
+    line = interface_ir[SSAValue(1)][:line]
 
     # Zero the output
-    @insert_node_here oc_compact line zero!(du)::VectorViewType
+    @insert_node_here interface_ic line zero!(du)::VectorViewType
 
     # out_du_mm, out_eq, in_u_mm, in_u_unassgn, in_alg, in_alg_derv
     nassgn = numstates[AssignedDiff]
     ntotalstates = numstates[AssignedDiff] + numstates[UnassignedDiff] + numstates[Algebraic] + numstates[AlgebraicDerivative]
-    out_du_mm = @insert_node_here oc_compact line view(du, 1:nassgn)::VectorViewType
-    out_eq = @insert_node_here oc_compact line view(du, (nassgn+1):ntotalstates)::VectorViewType
+    out_du_mm = @insert_node_here interface_ic line view(du, 1:nassgn)::VectorViewType
+    out_eq = @insert_node_here interface_ic line view(du, (nassgn+1):ntotalstates)::VectorViewType
 
-    (in_u_mm, in_u_unassgn, in_alg, in_alg_derv) = sciml_ode_split_u!(oc_compact, line, u, numstates)
+    (in_u_mm, in_u_unassgn, in_alg, in_alg_derv) = sciml_ode_split_u!(interface_ic, line, u, numstates)
 
     # Call DAECompiler-generated RHS with internal ABI
-    oc_sicm = @insert_node_here oc_compact line getfield(self, 1)::Core.OpaqueClosure
+    sicm_oc = @insert_node_here interface_ic line getfield(self, 1)::Core.OpaqueClosure
 
     # N.B: The ordering of arguments should match the ordering in the StateKind enum
-    @insert_node_here oc_compact line (:invoke)(odef_ci, oc_sicm, (), in_u_mm, in_u_unassgn, in_alg, in_alg_derv, out_du_mm, out_eq, t)::Nothing
+    @insert_node_here interface_ic line (:invoke)(odef_ci, sicm_oc, (), in_u_mm, in_u_unassgn, in_alg, in_alg_derv, out_du_mm, out_eq, t)::Nothing
 
     # Return
-    @insert_node_here oc_compact line (return)::Union{}
+    @insert_node_here interface_ic line (return)::Union{}
 
-    ir_oc = Compiler.finish(oc_compact)
-    maybe_rewrite_debuginfo!(ir_oc, settings)
-    oc = Core.OpaqueClosure(ir_oc)
+    interface_ir = Compiler.finish(interface_ic)
+    maybe_rewrite_debuginfo!(interface_ir, settings)
+    interface_oc = Core.OpaqueClosure(interface_ir; slotnames = [:self, :du, :u, :p, :t])
 
     line = result.ir[SSAValue(1)][:line]
 
-    oc_source_method = oc.source
+    interface_method = interface_oc.source
     # Sketchy, but not clear that we have something better for the time being
-    oc_ci = oc_source_method.specializations.cache
-    @atomic oc_ci.max_world = @atomic ci.max_world
-    @atomic oc_ci.min_world = 1 # @atomic ci.min_world
+    interface_ci = interface_method.specializations.cache
+    @atomic interface_ci.max_world = @atomic ci.max_world
+    @atomic interface_ci.min_world = 1 # @atomic ci.min_world
 
-    new_oc = @insert_node_here compact line (:new_opaque_closure)(argt, Union{}, Nothing, true, oc_source_method, sicm)::Core.OpaqueClosure true
+    new_oc = @insert_node_here returned_ic line (:new_opaque_closure)(argt, Union{}, Nothing, true, interface_method, sicm_state)::Core.OpaqueClosure true
 
     nd = numstates[AssignedDiff] + numstates[UnassignedDiff]
     na = numstates[Algebraic] + numstates[AlgebraicDerivative]
-    mass_matrix = na == 0 ? GlobalRef(LinearAlgebra, :I) : @insert_node_here compact line generate_ode_mass_matrix(nd, na)::Matrix{Float64}
-    initf = init_key !== nothing ? init_uncompress_gen!(compact, result, ci, init_key, key, world, settings) : nothing
-    odef = @insert_node_here compact line make_odefunction(new_oc, mass_matrix, initf)::ODEFunction true
+    mass_matrix = na == 0 ? GlobalRef(LinearAlgebra, :I) : @insert_node_here returned_ic line generate_ode_mass_matrix(nd, na)::Matrix{Float64}
+    initf = init_key !== nothing ? init_uncompress_gen!(returned_ic, result, ci, init_key, key, world, settings) : nothing
+    odef = @insert_node_here returned_ic line make_odefunction(new_oc, mass_matrix, initf)::ODEFunction true
 
-    odef_and_n = @insert_node_here compact line tuple(odef, nd + na)::Tuple true
-    @insert_node_here compact line (return odef_and_n)::Core.OpaqueClosure true
+    odef_and_n = @insert_node_here returned_ic line tuple(odef, nd + na)::Tuple true
+    @insert_node_here returned_ic line (return odef_and_n)::Core.OpaqueClosure true
 
-    ir_factory = Compiler.finish(compact)
-    Compiler.verify_ir(ir_factory)
+    returned_ir = Compiler.finish(returned_ic)
+    Compiler.verify_ir(returned_ir)
 
-    slotnames = [[:factory, :settings]; Symbol.(:arg, 1:(length(ir_factory.argtypes) - 2))]
-    return ir_factory, slotnames
+    slotnames = [[:factory, :settings]; Symbol.(:arg, 1:(length(returned_ir.argtypes) - 2))]
+    return returned_ir, slotnames
 end
