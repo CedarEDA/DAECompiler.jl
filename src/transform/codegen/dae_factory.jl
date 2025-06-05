@@ -96,6 +96,7 @@ function dae_factory_gen(state::TransformationState, ci::CodeInstance, key::Torn
 
     all_states = Int[]
     for var = 1:length(result.var_to_diff)
+        varkind(state, var) == Intrinsics.Continuous || continue
         kind = classify_var(result.var_to_diff, key, var)
         kind == nothing && continue
         numstates[kind] += 1

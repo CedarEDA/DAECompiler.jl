@@ -155,12 +155,13 @@ function apply_linear_incidence(𝕃, ret::PartialStruct, caller::CallerMappingS
     return PartialStruct(𝕃, ret.typ, Any[apply_linear_incidence(𝕃, f, caller, mapping) for f in ret.fields])
 end
 
-function CalleeMapping(𝕃::Compiler.AbstractLattice, argtypes::Vector{Any}, callee_result::DAEIPOResult, template_argtypes)
+function CalleeMapping(𝕃::Compiler.AbstractLattice, argtypes::Vector{Any}, callee_ci::CodeInstance, callee_result::DAEIPOResult, template_argtypes)
     applied_scopes = Any[]
     coeffs = Vector{Any}(undef, length(callee_result.var_to_diff))
     eq_mapping = fill(0, length(callee_result.total_incidence))
 
-    process_template!(𝕃, coeffs, eq_mapping, applied_scopes, argtypes, template_argtypes)
+    va_argtypes = Compiler.va_process_argtypes(𝕃, argtypes, callee_ci.inferred.nargs, callee_ci.inferred.isva)
+    process_template!(𝕃, coeffs, eq_mapping, applied_scopes, va_argtypes, template_argtypes)
 
     return CalleeMapping(coeffs, eq_mapping, applied_scopes)
 end

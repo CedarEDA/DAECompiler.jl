@@ -383,7 +383,7 @@ end
 
 @noinline function varargs_middle!(args...)
     # Extra tuple to exercise some of the deeper nesting code paths
-    varargs!(map(x -> (x + epsilon(), 2.0), args)...)
+    varargs_inner!(map(x -> (x + epsilon(), 2.0), args)...)
 end
 
 @noinline function varargs_outer!()
@@ -393,11 +393,13 @@ end
     varargs_middle!(a, b, c)
 end
 
-# ERROR: AssertionError: info === NoCallInfo()
-@test_broken begin
-    result = @code_structure result = true varargs_outer!()
-    @test length(result.varkinds) == 6 # 3 states + their differentials
-    @test length(result.eqkinds) == 3
+result = @code_structure result = true varargs_outer!()
+@test length(result.varkinds) == 12 # (3 variables + 3 epsilon) + their differentials
+@test length(result.eqkinds) == 3
+dae_sol = solve(DAECProblem(varargs_outer!, (1, 2, 3) .=> 1.), IDA())
+ode_sol = solve(ODECProblem(varargs_outer!, (1, 2, 3) .=> 1.), Rodas5(autodiff=false))
+for (sol, i) in Iterators.product((dae_sol, ode_sol), 1:3)
+    @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[i, :], 1. .+ 2sol.t))
 end
 
 #========= Internal variable leaking =========#

@@ -80,6 +80,7 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
     empty!(ir.argtypes)
     (arg_replacements, new_argtypes, nexternalargvars) = flatten_arguments!(compact, old_argtypes, 0, ir.argtypes)
     for i = 1:nexternalargvars
+        # TODO: Need to handle different var kinds for IPO
         add_variable!(Argument(i))
     end
     argtypes = Any[Incidence(new_argtypes[i], i) for i = 1:nexternalargvars]
@@ -212,6 +213,12 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
             return UncompilableIPOResult(warnings, UnsupportedIRException("Saw invalid variable kind (`$kind`)  for variable $(var_num) (SSA $ssa)", ir))
         end
         varkinds[var_num] = kind.val
+        dv = var_num
+        while true
+            dv = var_to_diff[dv]
+            dv === nothing && break
+            varkinds[dv] = kind.val
+        end
 
         scope = argextype(inst.args[4], ir)
         if (!isa(scope, Const) || !isa(scope.val, Intrinsics.AbstractScope)) && !is_valid_partial_scope(scope)
@@ -330,7 +337,7 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
             end
 
             callee_argtypes = Any[argextype(stmt.args[i], compact) for i in 2:length(stmt.args)]
-            mapping = CalleeMapping(Compiler.optimizer_lattice(refiner), callee_argtypes, result, callee_codeinst.inferred.ir.argtypes)
+            mapping = CalleeMapping(Compiler.optimizer_lattice(refiner), callee_argtypes, callee_codeinst, result, callee_codeinst.inferred.ir.argtypes)
             inst[:info] = info = MappingInfo(info, result, mapping)
         end
 
