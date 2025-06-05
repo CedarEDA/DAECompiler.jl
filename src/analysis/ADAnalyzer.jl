@@ -27,7 +27,10 @@ struct ADAnalyzer <: Compiler.AbstractInterpreter
 end
 
 Compiler.InferenceParams(interp::ADAnalyzer) = Compiler.InferenceParams()
-Compiler.OptimizationParams(interp::ADAnalyzer) = Compiler.OptimizationParams()
+Compiler.OptimizationParams(interp::ADAnalyzer) = Compiler.OptimizationParams(;
+        assume_fatal_throw = true,
+        compilesig_invokes = false
+    )
 Compiler.get_inference_world(interp::ADAnalyzer) = interp.world
 Compiler.get_inference_cache(interp::ADAnalyzer) = interp.inf_cache
 Compiler.cache_owner(::ADAnalyzer) = ADCache()
@@ -60,6 +63,8 @@ end
 struct AnalyzedSource
     ir::Compiler.IRCode
     inline_cost::Compiler.InlineCostType
+    nargs::UInt
+    isva::Bool
 end
 
 @override function Compiler.result_edges(interp::ADAnalyzer, caller::InferenceState)
@@ -70,7 +75,7 @@ end
 @override function Compiler.transform_result_for_cache(interp::ADAnalyzer, result::InferenceResult, edges::SimpleVector)
     ir = result.src.optresult.ir
     params = Compiler.OptimizationParams(interp)
-    return AnalyzedSource(ir, Compiler.compute_inlining_cost(interp, result))
+    return AnalyzedSource(ir, Compiler.compute_inlining_cost(interp, result), result.src.src.nargs, result.src.src.isva)
 end
 
 @override function Compiler.transform_result_for_local_cache(interp::ADAnalyzer, result::InferenceResult)
@@ -79,7 +84,7 @@ end
     end
     ir = result.src.optresult.ir
     params = Compiler.OptimizationParams(interp)
-    return AnalyzedSource(ir, Compiler.compute_inlining_cost(interp, result))
+    return AnalyzedSource(ir, Compiler.compute_inlining_cost(interp, result), result.src.src.nargs, result.src.src.isva)
 end
 
 function Compiler.retrieve_ir_for_inlining(ci::CodeInstance, result::AnalyzedSource)

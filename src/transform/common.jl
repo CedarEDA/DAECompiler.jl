@@ -101,7 +101,7 @@ function cache_dae_ci!(old_ci, src, debuginfo, abi, owner; rettype=Tuple)
     return daef_ci
 end
 
-function replace_call!(ir::Union{IRCode,IncrementalCompact}, idx::SSAValue, new_call::Expr)
+function replace_call!(ir::Union{IRCode,IncrementalCompact}, idx::SSAValue, @nospecialize(new_call))
     @assert !isa(ir[idx][:inst], PhiNode)
     ir[idx][:inst] = new_call
     ir[idx][:type] = Any

@@ -127,8 +127,18 @@ end
 dae_sol = solve(DAECProblem(sicm_vars(1.0), (1,) .=> 1.), IDA())
 ode_sol = solve(ODECProblem(sicm_vars(1.0), (1,) .=> 1.), Rodas5(autodiff=false))
 for sol in (dae_sol, ode_sol)
-    @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol.u[:, 1], 1. .+ sol.t))
+    @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol.u[1, :], 1. .+ sol.t))
 end
 
+#= epsilon =#
+function simple_eps()
+    x = continuous()
+    always!(ddt(x) -ᵢ x +ᵢ epsilon())
+end
+dae_sol = solve(DAECProblem(simple_eps, (1,) .=> 1.), IDA())
+ode_sol = solve(ODECProblem(simple_eps, (1,) .=> 1.), Rodas5(autodiff=false))
+for sol in (dae_sol, ode_sol)
+    @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[1, :], exp.(sol.t)))
+end
 
 end
