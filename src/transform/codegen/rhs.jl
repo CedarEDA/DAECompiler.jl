@@ -16,13 +16,13 @@ function Base.StackTraces.show_custom_spec_sig(io::IO, owner::RHSSpec, linfo::Co
     return Base.StackTraces.show_spec_sig(io, mi.def, mi.specTypes)
 end
 
-function handle_contribution!(ir::Compiler.IRCode, settings::Settings, inst::Compiler.Instruction, kind, slot, arg_range, red)
+function handle_contribution!(ir::Compiler.IRCode, settings::Settings, source, inst::Compiler.Instruction, kind, slot, arg_range, red)
     pos = SSAValue(inst.idx)
     @assert Int(LastStateKind) < Int(kind) <= Int(LastEquationStateKind)
     which = Argument(arg_range[Int(kind)])
     prev = insert_node!(ir, pos, NewInstruction(inst; stmt=Expr(:call, Base.getindex, which, slot), type=Float64))
     sum = insert_node!(ir, pos, NewInstruction(inst; stmt=Expr(:call, +, prev, red), type=Float64))
-    @replace_call!(ir, pos, Expr(:call, Base.setindex!, which, sum, slot), settings)
+    replace_call!(ir, pos, Expr(:call, Base.setindex!, which, sum, slot), settings, source)
 end
 
 function compute_slot_ranges(caller_state::TransformationState, info::MappingInfo, callee_key, var_assignment, eq_assignment)
@@ -193,7 +193,7 @@ function rhs_finish!(
                 varnum = idnum(ir.stmts.type[i])
                 kind = varkind(state, varnum)
                 if kind == Intrinsics.Epsilon
-                    replace_call!(ir, SSAValue(i), 0.)
+                    replace_call!(ir, SSAValue(i), 0., settings, @__SOURCE__)
                     continue
                 end
                 @assert kind == Intrinsics.Continuous
@@ -207,14 +207,14 @@ function rhs_finish!(
                 (kind, slot) = assgn
                 @assert 1 <= Int(kind) <= Int(LastStateKind)
                 which = Argument(arg_range[Int(kind)])
-                @replace_call!(ir, SSAValue(i), Expr(:call, Base.getindex, which, slot), settings)
+                replace_call!(ir, SSAValue(i), Expr(:call, Base.getindex, which, slot), settings, @__SOURCE__)
             elseif is_known_invoke_or_call(stmt, InternalIntrinsics.contribution!, ir)
                 eq = stmt.args[end-2]::Int
                 kind = stmt.args[end-1]::EquationStateKind
                 (eqkind, slot) = eq_assignment[eq]::Pair
                 @assert eqkind == kind
                 red = stmt.args[end]
-                handle_contribution!(ir, settings, inst, kind, slot, arg_range, red)
+                handle_contribution!(ir, settings, @__SOURCE__(), inst, kind, slot, arg_range, red)
             elseif is_known_invoke(stmt, equation, ir)
                 # Equation - used, but only as an arg to equation call, which will all get
                 # eliminated by the end of this loop, so we can delete this statement, as
@@ -224,7 +224,7 @@ function rhs_finish!(
                 var = stmt.args[end-1]
                 vint = invview(structure.var_to_diff)[var]
                 if vint !== nothing && key.diff_states !== nothing && (vint in key.diff_states) && !(var in diff_states_in_callee)
-                    handle_contribution!(ir, settings, inst, StateDiff, var_assignment[vint][2], arg_range, stmt.args[end])
+                    handle_contribution!(ir, settings, @__SOURCE__(), inst, StateDiff, var_assignment[vint][2], arg_range, stmt.args[end])
                 else
                     ir[SSAValue(i)] = nothing
                 end

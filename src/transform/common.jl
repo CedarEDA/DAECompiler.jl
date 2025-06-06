@@ -91,19 +91,8 @@ function cache_dae_ci!(old_ci, src, debuginfo, abi, owner; rettype=Tuple)
     return daef_ci
 end
 
-macro replace_call!(ir, idx, new_call, settings)
-    source = :(LineNumberNode($(__source__.line), $(QuoteNode(__source__.file))))
-    :(replace_call!($(esc(ir)), $(esc(idx)), $(esc(new_call)); settings = $(esc(settings)), source = $source))
-end
-
-function replace_call!(ir::Union{IRCode,IncrementalCompact}, idx::SSAValue, @nospecialize(new_call); settings::Union{Nothing, Settings} = nothing, source = nothing)
-    @assert !isa(ir[idx][:inst], PhiNode)
-    ir[idx][:inst] = new_call
-    ir[idx][:type] = Any
-    ir[idx][:info] = Compiler.NoCallInfo()
-    ir[idx][:flag] |= Compiler.IR_FLAG_REFINED
-    source === nothing && return new_call
-    settings === nothing && return new_call
+function replace_call!(ir::Union{IRCode,IncrementalCompact}, idx::SSAValue, @nospecialize(new_call), settings::Settings, source)
+    replace_call!(ir, idx, new_call)
     settings.insert_stmt_debuginfo || return new_call
     debuginfo = isa(ir, IncrementalCompact) ? ir.ir.debuginfo : ir.debuginfo
     if isa(source, Tuple)
@@ -112,6 +101,15 @@ function replace_call!(ir::Union{IRCode,IncrementalCompact}, idx::SSAValue, @nos
         line = maybe_insert_debuginfo!(debuginfo, settings, idx.id, source, ir[idx][:line])
         ir[idx][:line] = line
     end
+    return new_call
+end
+
+function replace_call!(ir::Union{IRCode,IncrementalCompact}, idx::SSAValue, @nospecialize(new_call))
+    @assert !isa(ir[idx][:inst], PhiNode)
+    ir[idx][:inst] = new_call
+    ir[idx][:type] = Any
+    ir[idx][:info] = Compiler.NoCallInfo()
+    ir[idx][:flag] |= Compiler.IR_FLAG_REFINED
     return new_call
 end
 
@@ -214,7 +212,7 @@ function replace_if_intrinsic!(compact, settings, ssa, du, u, p, t, var_assignme
             inst[:inst] = GlobalRef(DAECompiler.Intrinsics, :_VARIABLE_UNASSIGNED)
         else
             source = in_du ? du : u
-            @replace_call!(compact, ssa, Expr(:call, getindex, source, var_idx), settings)
+            replace_call!(compact, ssa, Expr(:call, getindex, source, var_idx), settings, @__SOURCE__)
         end
     elseif is_known_invoke_or_call(stmt, sim_time, compact)
         inst[:inst] = t

@@ -136,7 +136,7 @@ function gen_init_uncompress!(
                 else
                     (kind, slotidx) = slot
                     which = kind == AssignedDiff ? out_u_mm : error()
-                    replace_call!(ir, SSAValue(i), Expr(:call, Base.setindex!, which, argval, slotidx))
+                    replace_call!(ir, SSAValue(i), Expr(:call, Base.setindex!, which, argval, slotidx), settings, @__SOURCE__)
                 end
             else
                 replace_if_intrinsic!(ir, settings, SSAValue(i), nothing, nothing, Argument(1), t, var_assignment)
