@@ -64,7 +64,7 @@ function ir_to_src(ir::IRCode, settings::Settings; slotnames = nothing)
 end
 
 function maybe_rewrite_debuginfo!(ir::IRCode, settings::Settings)
-    settings.insert_ssa_debuginfo && rewrite_debuginfo!(ir)
+    settings.insert_stmt_debuginfo && rewrite_debuginfo!(ir)
     return ir
 end
 
@@ -77,8 +77,6 @@ function rewrite_debuginfo!(ir::IRCode)
         filename = Symbol("%$i = $(stmt[:inst])", annotation)
         lineno = LineNumberNode(1, filename)
         stmt[:line] = insert_new_lineinfo!(ir.debuginfo, lineno, i, stmt[:line])
-        # push!(debuginfo.codelocs, i, i, 1)
-        # push!(debuginfo.edges, new_debuginfo_edge(line, prev_edge, prev_index))
     end
 end
 
@@ -112,15 +110,11 @@ function replace_call!(ir::Union{IRCode,IncrementalCompact}, idx::SSAValue, @nos
     if isa(source, Tuple)
         ir[idx][:line] = source
     else
-        # for (i, stmt) in enumerate(ir.stmts)
-        #     push!(debuginfo.codelocs, i, i, 1)
-        #     push!(debuginfo.edges, stmt_debuginfo_edge(i, stmt))
-        # end
         i = idx.id
         @sshow typeof(ir)
         line = insert_new_lineinfo!(debuginfo, source, i, ir[idx][:line])
         @sshow line
-        ir[idx][:line] = line 
+        ir[idx][:line] = line
     end
     return new_call
 end
