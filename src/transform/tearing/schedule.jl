@@ -696,7 +696,7 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
     mss = StateSelection.MatchedSystemStructure(result, structure, var_eq_matching)
     (eq_orders, callee_schedules) = compute_eq_schedule(key, total_incidence, result, mss)
 
-    ir = index_lowering_ad!(state, key)
+    ir = index_lowering_ad!(state, key, settings)
     ir = Compiler.sroa_pass!(ir, Compiler.InliningState(DummyOptInterp(world)))
     ir = Compiler.compact!(ir)
 
