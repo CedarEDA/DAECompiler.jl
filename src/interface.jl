@@ -14,9 +14,19 @@ function factory_gen(@nospecialize(fT), settings::Settings, world::UInt = Base.g
     result = structural_analysis!(ci, world)
 
     if isa(result, UncompilableIPOResult)
-        return Base.generated_body_to_codeinfo(
-            Expr(:lambda, Any[:var"#self", :settings, :f], Expr(:block, Expr(:return, Expr(:call, throw, result.error)))),
-            @__MODULE__, false)
+        if isa(result.error, FunctionErrorsException)
+            # If the issue is that the function always errors, just call the function itself in the factory -
+            # we'll probably see what the error is.
+            # TODO: We may still want to transform the function to drop any errors that may be conditional on
+            # variable state.
+            return Base.generated_body_to_codeinfo(
+                Expr(:lambda, Any[:var"#self", :settings, :f], Expr(:block, Expr(:return, Expr(:call, :f)))),
+                @__MODULE__, false)
+        else
+            return Base.generated_body_to_codeinfo(
+                Expr(:lambda, Any[:var"#self", :settings, :f], Expr(:block, Expr(:return, Expr(:call, throw, result.error)))),
+                @__MODULE__, false)
+        end
     end
 
     structure = make_structure_from_ipo(result)

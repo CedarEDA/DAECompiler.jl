@@ -416,6 +416,16 @@ module InternalIntrinsics
         return val
     end
 
+    """
+        external_equation()
+
+    Generally equivalent to `equation`. Used to give an SSA representation to external equations
+    in argument lists that will in general get dropped from the ABI
+    """
+    @noinline function external_equation()
+        Base.inferencebarrier(error)("Internal placeholder left in final code")
+        return Intrinsics.placeholder_equation
+    end
 
     """
         contribution!(slot::Int, kind::EquationStateKind, val)

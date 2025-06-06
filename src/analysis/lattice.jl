@@ -81,6 +81,14 @@ const linear_time_and_state_dependent = Linearity(nonlinear = false)
 "The variable is used nonlinearly, with a possible dependence on time and other states."
 const nonlinear = Linearity()
 
+function Base.show(io::IO, lin::Linearity)
+    if lin === nonlinear
+        print(io, "nonlinear")
+    else
+        invoke(Base.show, Tuple{IO, Any}, io, lin)
+    end
+end
+
 join_linearity(a::Linearity, b::Real) = a
 join_linearity(a::Real, b::Linearity) = b
 join_linearity(a::Real, b::Real) = a == b ? a : linear

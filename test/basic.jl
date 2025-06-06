@@ -141,4 +141,8 @@ for sol in (dae_sol, ode_sol)
     @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[1, :], exp.(sol.t)))
 end
 
+#= error timing =#
+error_preserve() = error("Should preserve this error text")
+@test_throws ErrorException solve(DAECProblem(error_preserve), IDA())
+
 end

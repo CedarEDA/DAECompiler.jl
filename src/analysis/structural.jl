@@ -75,25 +75,31 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
     # Get the IR
     ir = copy(ci.inferred.ir)
 
+    # IR Warnings - this tracks cases of malformed optional information. The system
+    # is still malformed, but something is likely wrong. These will get printed if
+    # a system that requires this function is run, but will not be fatal.
+    warnings = BadDAECompilerInputException[]
+
     compact = IncrementalCompact(ir)
     old_argtypes = copy(ir.argtypes)
     empty!(ir.argtypes)
-    (arg_replacements, new_argtypes, nexternalargvars) = flatten_arguments!(compact, old_argtypes, 0, ir.argtypes)
+    (arg_replacements, new_argtypes, nexternalargvars, nexternaleqs) = flatten_arguments!(compact, old_argtypes, 0, 0, ir.argtypes)
+    if nexternalargvars == -1
+        return UncompilableIPOResult(warnings, UnsupportedIRException("Unhandled argument types", Compiler.finish(compact)))
+    end
     for i = 1:nexternalargvars
         # TODO: Need to handle different var kinds for IPO
         add_variable!(Argument(i))
     end
+    for i = 1:nexternaleqs
+        # Not technically an argument, but let's use it for now
+        add_equation!(Argument(i))
+    end
     argtypes = Any[Incidence(new_argtypes[i], i) for i = 1:nexternalargvars]
 
     # Allocate variable and equation numbers of any incoming arguments
-    refiner = StructuralRefiner(world, var_to_diff, varkinds, varclassification)
+    refiner = StructuralRefiner(world, var_to_diff, varkinds, varclassification, eqkinds, eqclassification)
     nexternalargvars = length(var_to_diff)
-    nexternaleqs = length(eqssas)
-
-    # IR Warnings - this tracks cases of malformed optional information. The system
-    # is still malformed, but something is likely wrong. These will get printed if
-    # a system that requires this function is run, but will not be fatal.
-    warnings = UnsupportedIRException[]
 
     # Go through the IR, annotating each intrinsic with an appropriate taint
     # source lattice element.
@@ -184,7 +190,7 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
     ultimate_rt, _ = Compiler.ir_abstract_constant_propagation(refiner, irsv; externally_refined)
 
     if ultimate_rt === Union{}
-        return UncompilableIPOResult(warnings, UnsupportedIRException("Function was discovered to unconditionally error", ir))
+        return UncompilableIPOResult(warnings, FunctionErrorsException())
     end
 
     # For easier debugging, delete all the statements that are dead, but don't renumber things
@@ -240,6 +246,7 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
 
     # Do the same for equations
     for (ieq, ssa) in enumerate(eqssas)
+        isa(ssa, Argument) && continue
         inst = ir[ssa][:inst]::Union{Nothing, Expr}
         inst === nothing && continue # equation unused and was deleted
         @assert is_known_invoke(inst, equation, ir)
@@ -272,10 +279,10 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
     end
 
     # Now record the association of (::equation)() calls with the equations that they originate from
-    total_incidence = Vector{Any}(undef, length(eqssas))
+    total_incidence = Vector{Any}(undef, length(eqkinds))
 
     # Now go through and incorporate the structural information from any interior calls
-    eq_callee_mapping = Vector{Union{Nothing, Vector{Pair{StructuralSSARef, Int}}}}(nothing, length(eqssas))
+    eq_callee_mapping = Vector{Union{Nothing, Vector{Pair{StructuralSSARef, Int}}}}(nothing, length(eqkinds))
     handler_info = Compiler.compute_trycatch(ir)
     ncallees = 0
     compact = IncrementalCompact(ir)
@@ -288,6 +295,7 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
         isexpr(stmt, :invoke) || continue
         is_known_invoke(stmt, variable, compact) && continue
         is_known_invoke(stmt, equation, compact) && continue
+        is_known_invoke(stmt, InternalIntrinsics.external_equation, compact) && continue
         is_known_invoke(stmt, sim_time, compact) && continue
         is_known_invoke(stmt, ddt, compact) && continue
         if is_equation_call(stmt, compact)
@@ -358,7 +366,8 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
                 NewInstruction(Expr(:invoke, (StructuralSSARef(compact.result_idx), callee_codeinst), new_args...), stmtype, info, line, stmtflags))
         compact.ssa_rename[compact.idx - 1] = new_call
 
-        err = add_internal_equations_to_structure!(refiner, eqkinds, eqclassification, total_incidence, eq_callee_mapping, StructuralSSARef(new_call.id),
+        cms = CallerMappingState(result, refiner.var_to_diff, refiner.varclassification, refiner.varkinds, eqclassification, eqkinds)
+        err = add_internal_equations_to_structure!(refiner, cms, total_incidence, eq_callee_mapping, StructuralSSARef(new_call.id),
             result, mapping)
         if err !== true
             return UncompilableIPOResult(warnings, UnsupportedIRException(err, ir))
@@ -408,7 +417,7 @@ end
 
 function rewrite_ipo_return!(𝕃, compact::IncrementalCompact, line, ssa, ultimate_rt::Any, eqvars::EqVarState)
     if isa(ultimate_rt, Eq)
-        error()
+        return Pair{Any, Any}(ssa, ultimate_rt)
     end
 
     if isa(ultimate_rt, PartialStruct)
@@ -468,9 +477,8 @@ function rewrite_ipo_return!(𝕃, compact::IncrementalCompact, line, ssa, ultim
     return Pair{Any, Any}(new_var_ssa, T === Float64 ? Incidence(nonlinrepl) : Incidence(T, nonlinrepl))
 end
 
-function add_internal_equations_to_structure!(refiner::StructuralRefiner, eqkinds::Vector{Intrinsics.EqKind}, eqclassification::Vector{VarEqClassification}, total_incidence,
+function add_internal_equations_to_structure!(refiner::StructuralRefiner, cms::CallerMappingState, total_incidence,
         eq_callee_mapping::Vector{Union{Nothing, Vector{Pair{StructuralSSARef, Int}}}}, thisssa::StructuralSSARef, callee_result::DAEIPOResult, callee_mapping::CalleeMapping)
-    cms = CallerMappingState(callee_result, refiner.var_to_diff, refiner.varclassification, refiner.varkinds, eqclassification)
     for i in 1:length(callee_mapping.var_coeffs)
         if !isassigned(callee_mapping.var_coeffs, i)
             compute_missing_coeff!(callee_mapping.var_coeffs, cms, i)
@@ -485,6 +493,11 @@ function add_internal_equations_to_structure!(refiner::StructuralRefiner, eqkind
     for eq = 1:length(callee_result.eqclassification)
         mapped_eq = callee_mapping.eqs[eq]
         mapped_eq == 0 && continue
+        if !isassigned(callee_result.total_incidence, eq)
+            # This equation has no contributions in the callee - the only reason
+            # we're here is because it leaked an explicit reference.
+            continue
+        end
         mapped_inc = apply_linear_incidence(Compiler.typeinf_lattice(refiner), callee_result.total_incidence[eq], cms, callee_mapping)
         if isassigned(total_incidence, mapped_eq)
             total_incidence[mapped_eq] = tfunc(Val(Core.Intrinsics.add_float),
@@ -499,16 +512,19 @@ function add_internal_equations_to_structure!(refiner::StructuralRefiner, eqkind
         push!(eq_callee_mapping[mapped_eq], thisssa=>eq)
     end
 
-    for (ieq, inc) in enumerate(callee_result.total_incidence[(callee_result.nexternaleqs+1):end])
+    for ieq in 1:length(callee_result.total_incidence)
         callee_mapping.eqs[ieq] == 0 || continue
+        callee_result.eqclassification[ieq] === External && continue
+        isassigned(callee_result.total_incidence, ieq) || continue
+        inc = callee_result.total_incidence[ieq]
         extinc = apply_linear_incidence(Compiler.typeinf_lattice(refiner), inc, cms, callee_mapping)
         if !isa(extinc, Incidence) && !isa(extinc, Const)
             return "Failed to map internal incidence for equation $ieq (internal result $inc) - got $extinc while processing $thisssa"
         end
         push!(total_incidence, extinc)
         push!(eq_callee_mapping, [thisssa=>ieq])
-        push!(eqclassification, CalleeInternal)
-        push!(eqkinds, callee_result.eqkinds[ieq])
+        push!(cms.caller_eqclassification, CalleeInternal)
+        push!(cms.caller_eqkinds, callee_result.eqkinds[ieq])
         callee_mapping.eqs[ieq] = length(total_incidence)
     end
 

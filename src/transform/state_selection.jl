@@ -200,6 +200,7 @@ function top_level_state_selection!(tstate)
 
     for (eq, match) in enumerate(invview(var_eq_matching))
         match === unassigned || continue
+        always_eq_filter(tstate)(eq) || continue
         push!(explicit_eqs, eq)
     end
 
