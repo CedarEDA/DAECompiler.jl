@@ -123,7 +123,7 @@ function ode_factory_gen(state::TransformationState, ci::CodeInstance, key::Torn
     sicm_oc = @insert_node_here interface_ic line getfield(self, 1)::Core.OpaqueClosure
 
     # N.B: The ordering of arguments should match the ordering in the StateKind enum
-    @insert_node_here interface_ic line (:invoke)(odef_ci, oc_sicm, (), in_u_mm, in_u_unassgn, in_alg_derv, in_alg, out_du_mm, out_eq, t)::Nothing
+    @insert_node_here interface_ic line (:invoke)(odef_ci, sicm_oc, (), in_u_mm, in_u_unassgn, in_alg_derv, in_alg, out_du_mm, out_eq, t)::Nothing
 
     # Assign the algebraic derivatives to the their corresponding variables
     bc = @insert_node_here interface_ic line Base.Broadcast.broadcasted(identity, in_alg_derv)::Any

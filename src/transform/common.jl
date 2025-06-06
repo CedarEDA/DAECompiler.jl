@@ -71,21 +71,15 @@ end
 function rewrite_debuginfo!(ir::IRCode)
     debuginfo = ir.debuginfo
     firstline = debuginfo.firstline
-    empty!(debuginfo.edges)
-    empty!(debuginfo.codelocs)
     for (i, stmt) in enumerate(ir.stmts)
-        push!(debuginfo.codelocs, i, i, 1)
-        push!(debuginfo.edges, stmt_debuginfo_edge(i, stmt))
+        type = stmt[:type]
+        annotation = type === nothing ? "" : " (inferred type: $type)"
+        filename = Symbol("%$i = $(stmt[:inst])", annotation)
+        lineno = LineNumberNode(1, filename)
+        stmt[:line] = insert_new_lineinfo!(ir.debuginfo, lineno, i, stmt[:line])
+        # push!(debuginfo.codelocs, i, i, 1)
+        # push!(debuginfo.edges, new_debuginfo_edge(line, prev_edge, prev_index))
     end
-end
-
-function stmt_debuginfo_edge(i, stmt)
-    type = stmt[:type]
-    annotation = type === nothing ? "" : " (inferred type: $type)"
-    filename = Symbol("%$i = $(stmt[:inst])", annotation)
-    codelocs = Int32[1, 0, 0]
-    compressed = ccall(:jl_compress_codelocs, Any, (Int32, Any, Int), 1#=firstline=#, codelocs, 1)
-    DebugInfo(filename, nothing, Core.svec(), compressed)
 end
 
 function cache_dae_ci!(old_ci, src, debuginfo, abi, owner; rettype=Tuple)
@@ -118,38 +112,56 @@ function replace_call!(ir::Union{IRCode,IncrementalCompact}, idx::SSAValue, @nos
     if isa(source, Tuple)
         ir[idx][:line] = source
     else
-    for (i, stmt) in enumerate(ir.stmts)
-        push!(debuginfo.codelocs, i, i, 1)
-        push!(debuginfo.edges, stmt_debuginfo_edge(i, stmt))
-    end
+        # for (i, stmt) in enumerate(ir.stmts)
+        #     push!(debuginfo.codelocs, i, i, 1)
+        #     push!(debuginfo.edges, stmt_debuginfo_edge(i, stmt))
+        # end
         i = idx.id
         @sshow typeof(ir)
         line = insert_new_lineinfo!(debuginfo, source, i, ir[idx][:line])
         @sshow line
-        length(debuginfo.codelocs) ≥ 3i || resize!(debuginfo.codelocs, 3i)
-        debuginfo.codelocs[3(i - 1) + 1] = line[1]
-        debuginfo.codelocs[3(i - 1) + 2] = line[2]
-        debuginfo.codelocs[3(i - 1) + 3] = line[3]
-        ir[idx][:line] = line
+        ir[idx][:line] = line 
     end
     return new_call
 end
 
 function insert_new_lineinfo!(debuginfo::Compiler.DebugInfoStream, lineno::LineNumberNode, i, previous = nothing)
-    # XXX: try to preserve previous `debuginfo` information
-    # previous !== nothing && return previous
-
-    edge = new_debuginfo_edge(lineno)
+    if previous !== nothing && isa(previous, Tuple)
+        prev_edge_index, prev_edge_line = previous[2], previous[3]
+    else
+        ref = get(debuginfo.codelocs, 3(j - 1) + 1, nothing)
+        j = i - 1
+        while ref == 0 && j > 1
+            ref = get(debuginfo.codelocs, 3(j - 1) + 1, nothing)
+            j -= 1
+        end
+        prev_edge_index = get(debuginfo.codelocs, 3(j - 1) + 2, nothing)
+        prev_edge_line = get(debuginfo.codelocs, 3(j - 1) + 3, nothing)
+    end
+    prev_edge = prev_edge_index === nothing ? nothing : get(debuginfo.edges, prev_edge_index, nothing)
+    edge = new_debuginfo_edge(lineno, prev_edge, prev_edge_line)
     push!(debuginfo.edges, edge)
     edge_index = length(debuginfo.edges)
-    return Int32.((i, edge_index, 1))
+    line = Int32.((i, edge_index, 1))
+    length(debuginfo.codelocs) ≥ 3i || resize!(debuginfo.codelocs, 3i)
+    debuginfo.codelocs[3(i - 1) + 1] = line[1]
+    debuginfo.codelocs[3(i - 1) + 2] = line[2]
+    debuginfo.codelocs[3(i - 1) + 3] = line[3]
+    return line
 end
 
-function new_debuginfo_edge((; file, line)::LineNumberNode)
-    codelocs = Int32[line, 0, 0]
+function new_debuginfo_edge((; file, line)::LineNumberNode, prev_edge, prev_edge_line)
+    if prev_edge !== nothing && prev_edge_line !== nothing
+        @sshow prev_edge_line
+        codelocs = Int32[line, 1, prev_edge_line]
+        edges = Core.svec(prev_edge)
+    else
+        codelocs = [line, 0, 0]
+        edges = Core.svec()
+    end
     firstline = codelocs[1]
     compressed = ccall(:jl_compress_codelocs, Any, (Int32, Any, Int), firstline, codelocs, 1)
-    DebugInfo(@something(file, :(var"")), nothing, Core.svec(), compressed)
+    DebugInfo(@something(file, :(var"")), nothing, edges, compressed)
 end
 
 is_solved_variable(stmt) = isexpr(stmt, :call) && stmt.args[1] == solved_variable ||
