@@ -6,7 +6,7 @@ module DAECompiler
     using Diffractor
     using OrderedCollections
     using Compiler
-    using Compiler: IRCode, IncrementalCompact, argextype, singleton_type, isexpr, widenconst
+    using Compiler: IRCode, IncrementalCompact, DebugInfoStream, argextype, singleton_type, isexpr, widenconst
     using Core.IR
     using SciMLBase
     using AutoHashEquals

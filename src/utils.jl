@@ -101,13 +101,24 @@ macro defintrmethod(name, fdef)
     end)
 end
 
+"Get the current file location as a `LineNumberNode`."
+macro __SOURCE__()
+    :(LineNumberNode($(__source__.line), $(QuoteNode(__source__.file))))
+end
+
 """
-    @insert_node_here compact line make_odefunction(f)::ODEFunction
-    @insert_node_here compact line make_odefunction(f)::ODEFunction true
-    @insert_node_here compact line (:invoke)(ci, args...)::Int true
-    @insert_node_here compact line (return x)::Int true
+    @insert_node_here compact line settings make_odefunction(f)::ODEFunction
+    @insert_node_here compact line settings make_odefunction(f)::ODEFunction true
+    @insert_node_here compact line settings (:invoke)(ci, args...)::Int true
+    @insert_node_here compact line settings (return x)::Int true
 """
-macro insert_node_here(compact, line, ex, reverse_affinity = false)
+macro insert_node_here(compact, line, settings, ex, reverse_affinity = false)
+    source = :(LineNumberNode($(__source__.line), $(QuoteNode(__source__.file))))
+    line = :($DAECompiler.maybe_insert_debuginfo!($compact, $settings, $source, $line, $compact.result_idx))
+    generate_insert_node_here(compact, line, ex, reverse_affinity)
+end
+
+function generate_insert_node_here(compact, line, ex, reverse_affinity)
     isexpr(ex, :(::), 2) || throw(ArgumentError("Expected type-annotated expression, got $ex"))
     ex, type = ex.args
     if isexpr(ex, :call) && isa(ex.args[1], QuoteNode)
@@ -117,14 +128,16 @@ macro insert_node_here(compact, line, ex, reverse_affinity = false)
     compact = esc(compact)
     line = esc(line)
     type = esc(type)
-    if isexpr(ex, :return)
+    if isa(ex, Symbol)
+        inst_ex = ex
+    elseif isexpr(ex, :return)
         inst_ex = :(ReturnNode($(ex.args...)))
     else
         inst_ex = :(Expr($(QuoteNode(ex.head)), $(ex.args...)))
     end
-    quote
+    return quote
         inst = NewInstruction($(esc(inst_ex)), $type, $line)
-        insert_node_here!($compact, inst, $reverse_affinity)
+        insert_node_here!($compact, inst, $(esc(reverse_affinity)))
     end
 end
 

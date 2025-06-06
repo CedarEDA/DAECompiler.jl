@@ -13,5 +13,8 @@ struct Settings
     mode::GenerationMode
     force_inline_all::Bool
     insert_stmt_debuginfo::Bool
+    function Settings(mode, force_inline_all, insert_stmt_debuginfo)
+        new(mode, force_inline_all, insert_stmt_debuginfo)
+    end
 end
 Settings(; mode::GenerationMode=DAE, force_inline_all::Bool=false, insert_stmt_debuginfo::Bool=false) = Settings(mode, force_inline_all, insert_stmt_debuginfo)
