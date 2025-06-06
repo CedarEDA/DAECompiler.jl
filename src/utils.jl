@@ -101,6 +101,11 @@ macro defintrmethod(name, fdef)
     end)
 end
 
+"Get the current file location as a `LineNumberNode`."
+macro __SOURCE__()
+    :(LineNumberNode($(__source__.line), $(QuoteNode(__source__.file))))
+end
+
 """
     @insert_node_here compact line settings make_odefunction(f)::ODEFunction
     @insert_node_here compact line settings make_odefunction(f)::ODEFunction true
@@ -109,11 +114,11 @@ end
 """
 macro insert_node_here(compact, line, settings, ex, reverse_affinity = false)
     source = :(LineNumberNode($(__source__.line), $(QuoteNode(__source__.file))))
-    line = :($settings.insert_stmt_debuginfo ? $line : $DAECompiler.insert_new_lineinfo!($compact.ir.debuginfo, $source, $compact.result_idx, $line))
-    insert_node_here(compact, line, ex, reverse_affinity)
+    line = :($DAECompiler.maybe_insert_debuginfo!($compact, $settings, $source, $compact.result_idx, $line))
+    generate_insert_node_here(compact, line, ex, reverse_affinity)
 end
 
-function insert_node_here(compact, line, ex, reverse_affinity)
+function generate_insert_node_here(compact, line, ex, reverse_affinity)
     isexpr(ex, :(::), 2) || throw(ArgumentError("Expected type-annotated expression, got $ex"))
     ex, type = ex.args
     if isexpr(ex, :call) && isa(ex.args[1], QuoteNode)

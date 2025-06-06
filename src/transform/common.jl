@@ -76,7 +76,7 @@ function rewrite_debuginfo!(ir::IRCode)
         annotation = type === nothing ? "" : " (inferred type: $type)"
         filename = Symbol("%$i = $(stmt[:inst])", annotation)
         lineno = LineNumberNode(1, filename)
-        stmt[:line] = insert_new_lineinfo!(ir.debuginfo, lineno, i, stmt[:line])
+        stmt[:line] = insert_debuginfo!(ir.debuginfo, lineno, i, stmt[:line])
     end
 end
 
@@ -110,18 +110,27 @@ function replace_call!(ir::Union{IRCode,IncrementalCompact}, idx::SSAValue, @nos
         ir[idx][:line] = source
     else
         i = idx.id
-        line = insert_new_lineinfo!(debuginfo, source, i, ir[idx][:line])
+        line = maybe_insert_debuginfo!(debuginfo, settings, source, i, ir[idx][:line])
         ir[idx][:line] = line
     end
     return new_call
 end
 
-function insert_new_lineinfo!(debuginfo::Compiler.DebugInfoStream, lineno::LineNumberNode, i, previous = nothing)
+function maybe_insert_debuginfo!(compact::IncrementalCompact, settings::Settings, source::LineNumberNode, previous = nothing, idx = compact.result_idx)
+    insert_debuginfo!(compact.ir.debuginfo, source, compact.result_idx, previous)
+end
+
+function maybe_insert_debuginfo!(debuginfo::DebugInfoStream, settings::Settings, source::LineNumberNode, previous, i)
+    settings.insert_stmt_debuginfo || return previous
+    insert_debuginfo!(debuginfo, source, i, previous)
+end
+
+function insert_debuginfo!(debuginfo::DebugInfoStream, source::LineNumberNode, i::Integer, previous)
     if previous !== nothing && isa(previous, Tuple)
         prev_edge_index, prev_edge_line = previous[2], previous[3]
     else
-        ref = get(debuginfo.codelocs, 3(j - 1) + 1, nothing)
         j = i - 1
+        ref = get(debuginfo.codelocs, 3(j - 1) + 1, nothing)
         while ref == 0 && j > 1
             ref = get(debuginfo.codelocs, 3(j - 1) + 1, nothing)
             j -= 1
@@ -130,7 +139,7 @@ function insert_new_lineinfo!(debuginfo::Compiler.DebugInfoStream, lineno::LineN
         prev_edge_line = get(debuginfo.codelocs, 3(j - 1) + 3, nothing)
     end
     prev_edge = prev_edge_index === nothing ? nothing : get(debuginfo.edges, prev_edge_index, nothing)
-    edge = new_debuginfo_edge(lineno, prev_edge, prev_edge_line)
+    edge = new_debuginfo_edge(source, prev_edge, prev_edge_line)
     push!(debuginfo.edges, edge)
     edge_index = length(debuginfo.edges)
     line = Int32.((i, edge_index, 1))
