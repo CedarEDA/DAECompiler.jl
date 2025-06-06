@@ -159,15 +159,6 @@ function ode_factory_gen(state::TransformationState, ci::CodeInstance, key::Torn
     returned_ir = Compiler.finish(returned_ic)
     Compiler.verify_ir(returned_ir)
 
-    @async @eval Main begin
-        f_src = $ci.inferred
-        sicm_ir = $sicm_ir
-        interface_ir = $interface_ir
-        odef_ci = $odef_ci
-        odef_src = odef_ci.inferred
-        src = odef_src
-    end
-
     slotnames = [[:factory, :settings]; Symbol.(:arg, 1:(length(returned_ir.argtypes) - 2))]
     return returned_ir, slotnames
 end
