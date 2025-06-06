@@ -187,14 +187,11 @@ end
 
 implicitext_nl() = implicitext_nl(tanhdu())
 
-# ERROR: The system is unbalanced. There are 1 highest order differentiated variable(s) and 2 equation(s).
-@test_broken begin
-    dae_sol = solve(DAECProblem(implicitext_nl, (1,) .=> 1), IDA())
-    ode_sol = solve(ODECProblem(implicitext_nl, (1,) .=> 1), Rodas5(autodiff=false))
+dae_sol = solve(DAECProblem(implicitext_nl, (1,) .=> 1), IDA())
+ode_sol = solve(ODECProblem(implicitext_nl, (1,) .=> 1), Rodas5(autodiff=false))
 
-    for sol in (dae_sol, ode_sol)
-        @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[1, :], 1 .+ atanh(0.5)sol.t))
-    end
+for sol in (dae_sol, ode_sol)
+    @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[1, :], 1 .+ atanh(0.5)sol.t))
 end
 
 #========= External Equation =========#
@@ -205,14 +202,11 @@ end
 end
 implicitexteq() = applyeq(external())
 
-# ERROR: I removed these from StructuralRefiner for conceptual reasons - if we hit these, lets revisit
-@test_broken begin
-    dae_sol = solve(DAECProblem(implicitexteq, (1,) .=> 1), IDA())
-    ode_sol = solve(ODECProblem(implicitexteq, (1,) .=> 1), Rodas5(autodiff=false))
+dae_sol = solve(DAECProblem(implicitexteq, (1,) .=> 1), IDA())
+ode_sol = solve(ODECProblem(implicitexteq, (1,) .=> 1), Rodas5(autodiff=false))
 
-    for sol in (dae_sol, ode_sol)
-        @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[1, :], exp.(sol.t)))
-    end
+for sol in (dae_sol, ode_sol)
+    @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[1, :], exp.(sol.t)))
 end
 
 #========= External Equation (nonlinear) =========#
@@ -223,14 +217,11 @@ end
 end
 implicitexteq_nl() = applyeq_nl(external2())
 
-# ERROR: I removed these from StructuralRefiner for conceptual reasons - if we hit these, lets revisit
-@test_broken begin
-    dae_sol = solve(DAECProblem(implicitexteq_nl, (1,) .=> 1), IDA())
-    ode_sol = solve(ODECProblem(implicitexteq_nl, (1,) .=> 1), Rodas5(autodiff=false))
+dae_sol = solve(DAECProblem(implicitexteq_nl, (1,) .=> 1), IDA())
+ode_sol = solve(ODECProblem(implicitexteq_nl, (1,) .=> 1), Rodas5(autodiff=false))
 
-    for sol in (dae_sol, ode_sol)
-        @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[1, :], 2acot.(exp.(log(cot(0.5)) .- sol.t))))
-    end
+for sol in (dae_sol, ode_sol)
+    @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[1, :], 2acot.(exp.(log(cot(0.5)) .- sol.t))))
 end
 
 #========= External Equation (multiple equations) =========#
@@ -242,32 +233,43 @@ end
     applyeq2(eq, x)
 end
 
-# ERROR: I removed these from StructuralRefiner for conceptual reasons - if we hit these, lets revisit
-@test_broken begin
-    dae_sol = solve(DAECProblem(impliciteqvar, (1,) .=> 1), IDA())
-    ode_sol = solve(ODECProblem(impliciteqvar, (1,) .=> 1), Rodas5(autodiff=false))
+dae_sol = solve(DAECProblem(impliciteqvar, (1,) .=> 1), IDA())
+ode_sol = solve(ODECProblem(impliciteqvar, (1,) .=> 1), Rodas5(autodiff=false))
 
-    for sol in (dae_sol, ode_sol)
-        @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[1, :], 1 .+ sol.t))
-    end
+for sol in (dae_sol, ode_sol)
+    @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[1, :], 1 .+ sol.t))
 end
 
+#========= External Equation (multiple equations + constant) =========#
 @noinline external4() = (always(), ddt(continuous()))
 @noinline applyeq3(eq, var) = eq(var)
 @noinline function impliciteqvar2()
     (eq, var) = external4()
     applyeq3(eq, var)
     applyeq3(eq, var)
+    applyeq3(eq, -4.)
 end
 
-# ERROR: I removed these from StructuralRefiner for conceptual reasons - if we hit these, lets revisit
-@test_broken begin
-    dae_sol = solve(DAECProblem(impliciteqvar2, (1,) .=> 1), IDA())
-    ode_sol = solve(ODECProblem(impliciteqvar2, (1,) .=> 1), Rodas5(autodiff=false))
+dae_sol = solve(DAECProblem(impliciteqvar2, (1,) .=> 1), IDA())
+ode_sol = solve(ODECProblem(impliciteqvar2, (1,) .=> 1), Rodas5(autodiff=false))
 
-    for sol in (dae_sol, ode_sol)
-        @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[1, :], 1 .+ 2sol.t))
-    end
+for sol in (dae_sol, ode_sol)
+    @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[1, :], 1 .+ 2sol.t))
+end
+
+#========= External Equation (multiple equations + external nonlinear) =========#
+@noinline function impliciteqvar3()
+    (eq, var) = external3()
+    applyeq3(eq, 0.5ddt(var))
+    applyeq3(eq, 0.5ddt(var))
+    applyeq3(eq, -sin(var))
+end
+
+dae_sol = solve(DAECProblem(impliciteqvar3, (1,) .=> 1), IDA())
+ode_sol = solve(ODECProblem(impliciteqvar3, (1,) .=> 1), Rodas5(autodiff=false))
+
+for sol in (dae_sol, ode_sol)
+    @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[1, :], 2acot.(exp.(-sol.t).*cot(1/2))))
 end
 
 #=================== Scope handling ==================#
@@ -309,6 +311,7 @@ end
     @test length(result.eqkinds) == 2
     # add test for `result.names`
 end
+
 #================= Derived Scope ===================#
 @noinline function derived_scope!(scope)
     vscope = scope(:x)
@@ -385,7 +388,7 @@ end
 
 @noinline function varargs_middle!(args...)
     # Extra tuple to exercise some of the deeper nesting code paths
-    varargs!(map(x -> (x + epsilon(), 2.0), args)...)
+    varargs_inner!(map(x -> (x + epsilon(), 2.0), args)...)
 end
 
 @noinline function varargs_outer!()
@@ -395,11 +398,13 @@ end
     varargs_middle!(a, b, c)
 end
 
-# ERROR: AssertionError: info === NoCallInfo()
-@test_broken begin
-    result = @code_structure result = true varargs_outer!()
-    @test length(result.varkinds) == 6 # 3 states + their differentials
-    @test length(result.eqkinds) == 3
+result = @code_structure result = true varargs_outer!()
+@test length(result.varkinds) == 12 # (3 variables + 3 epsilon) + their differentials
+@test length(result.eqkinds) == 3
+dae_sol = solve(DAECProblem(varargs_outer!, (1, 2, 3) .=> 1.), IDA())
+ode_sol = solve(ODECProblem(varargs_outer!, (1, 2, 3) .=> 1.), Rodas5(autodiff=false))
+for (sol, i) in Iterators.product((dae_sol, ode_sol), 1:3)
+    @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[i, :], 1. .+ 2sol.t))
 end
 
 #========= Internal variable leaking =========#
@@ -418,5 +423,11 @@ end
 result = @code_structure result = true internal_variable_leaking()
 @test length(result.varkinds) == 4 # 2 states + their differentials
 @test length(result.eqkinds) == 2
+
+dae_sol = solve(DAECProblem(internal_variable_leaking, (1, 2) .=> 1.), IDA())
+ode_sol = solve(ODECProblem(internal_variable_leaking, (1, 2) .=> 1.), Rodas5(autodiff=false))
+for (sol, i) in Iterators.product((dae_sol, ode_sol), 1:2)
+    @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[i, :], exp.(sol.t)))
+end
 
 end

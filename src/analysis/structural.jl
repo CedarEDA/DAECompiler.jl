@@ -30,6 +30,16 @@ function structural_analysis!(ci::CodeInstance, world::UInt)
     return result
 end
 
+struct EqVarState
+    var_to_diff
+    varclassification
+    varkinds
+    total_incidence
+    eqclassification
+    eqkinds
+    eq_callee_mapping
+end
+
 function _structural_analysis!(ci::CodeInstance, world::UInt)
     # Variables
     var_to_diff = DiffGraph(0)
@@ -65,24 +75,31 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
     # Get the IR
     ir = copy(ci.inferred.ir)
 
+    # IR Warnings - this tracks cases of malformed optional information. The system
+    # is still malformed, but something is likely wrong. These will get printed if
+    # a system that requires this function is run, but will not be fatal.
+    warnings = BadDAECompilerInputException[]
+
     compact = IncrementalCompact(ir)
     old_argtypes = copy(ir.argtypes)
     empty!(ir.argtypes)
-    (arg_replacements, new_argtypes, nexternalargvars) = flatten_arguments!(compact, old_argtypes, 0, ir.argtypes)
+    (arg_replacements, new_argtypes, nexternalargvars, nexternaleqs) = flatten_arguments!(compact, old_argtypes, 0, 0, ir.argtypes)
+    if nexternalargvars == -1
+        return UncompilableIPOResult(warnings, UnsupportedIRException("Unhandled argument types", Compiler.finish(compact)))
+    end
     for i = 1:nexternalargvars
+        # TODO: Need to handle different var kinds for IPO
         add_variable!(Argument(i))
+    end
+    for i = 1:nexternaleqs
+        # Not technically an argument, but let's use it for now
+        add_equation!(Argument(i))
     end
     argtypes = Any[Incidence(new_argtypes[i], i) for i = 1:nexternalargvars]
 
     # Allocate variable and equation numbers of any incoming arguments
-    refiner = StructuralRefiner(world, var_to_diff, varkinds, varclassification)
+    refiner = StructuralRefiner(world, var_to_diff, varkinds, varclassification, eqkinds, eqclassification)
     nexternalargvars = length(var_to_diff)
-    nexternaleqs = length(eqssas)
-
-    # IR Warnings - this tracks cases of malformed optional information. The system
-    # is still malformed, but something is likely wrong. These will get printed if
-    # a system that requires this function is run, but will not be fatal.
-    warnings = UnsupportedIRException[]
 
     # Go through the IR, annotating each intrinsic with an appropriate taint
     # source lattice element.
@@ -173,7 +190,7 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
     ultimate_rt, _ = Compiler.ir_abstract_constant_propagation(refiner, irsv; externally_refined)
 
     if ultimate_rt === Union{}
-        return UncompilableIPOResult(warnings, UnsupportedIRException("Function was discovered to unconditionally error", ir))
+        return UncompilableIPOResult(warnings, FunctionErrorsException())
     end
 
     # For easier debugging, delete all the statements that are dead, but don't renumber things
@@ -202,6 +219,12 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
             return UncompilableIPOResult(warnings, UnsupportedIRException("Saw invalid variable kind (`$kind`)  for variable $(var_num) (SSA $ssa)", ir))
         end
         varkinds[var_num] = kind.val
+        dv = var_num
+        while true
+            dv = var_to_diff[dv]
+            dv === nothing && break
+            varkinds[dv] = kind.val
+        end
 
         scope = argextype(inst.args[4], ir)
         if (!isa(scope, Const) || !isa(scope.val, Intrinsics.AbstractScope)) && !is_valid_partial_scope(scope)
@@ -223,6 +246,7 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
 
     # Do the same for equations
     for (ieq, ssa) in enumerate(eqssas)
+        isa(ssa, Argument) && continue
         inst = ir[ssa][:inst]::Union{Nothing, Expr}
         inst === nothing && continue # equation unused and was deleted
         @assert is_known_invoke(inst, equation, ir)
@@ -255,13 +279,14 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
     end
 
     # Now record the association of (::equation)() calls with the equations that they originate from
-    total_incidence = Vector{Any}(undef, length(eqssas))
+    total_incidence = Vector{Any}(undef, length(eqkinds))
 
     # Now go through and incorporate the structural information from any interior calls
-    eq_callee_mapping = Vector{Union{Nothing, Vector{Pair{StructuralSSARef, Int}}}}(nothing, length(eqssas))
+    eq_callee_mapping = Vector{Union{Nothing, Vector{Pair{StructuralSSARef, Int}}}}(nothing, length(eqkinds))
     handler_info = Compiler.compute_trycatch(ir)
     ncallees = 0
     compact = IncrementalCompact(ir)
+    opaque_eligible = isempty(total_incidence) && all(==(External), varclassification)
     for ((old_idx, i), stmt) in compact
         stmt === nothing && continue
         # No need to process error paths - even if they were to contain intrinsics, such intrinsics would have
@@ -270,6 +295,7 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
         isexpr(stmt, :invoke) || continue
         is_known_invoke(stmt, variable, compact) && continue
         is_known_invoke(stmt, equation, compact) && continue
+        is_known_invoke(stmt, InternalIntrinsics.external_equation, compact) && continue
         is_known_invoke(stmt, sim_time, compact) && continue
         is_known_invoke(stmt, ddt, compact) && continue
         if is_equation_call(stmt, compact)
@@ -319,19 +345,16 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
             end
 
             callee_argtypes = Any[argextype(stmt.args[i], compact) for i in 2:length(stmt.args)]
-            mapping = CalleeMapping(Compiler.optimizer_lattice(refiner), callee_argtypes, result, callee_codeinst.inferred.ir.argtypes)
+            mapping = CalleeMapping(Compiler.optimizer_lattice(refiner), callee_argtypes, callee_codeinst, result, callee_codeinst.inferred.ir.argtypes)
             inst[:info] = info = MappingInfo(info, result, mapping)
         end
 
-        # Determine whether this call is eligible for opaque treatement
-        if isa(result.extended_rt, Incidence) && isempty(result.total_incidence)
-            # For now, turn this into a call.
-            # TODO: We should keep the native code instance and use that
-            # TODO: Additional conditions:
-            #  - Does not introduce new variables
+        if result.opaque_eligible
             compact[SSAValue(i)] = nothing
             compact[SSAValue(i)] = Expr(:call, stmt.args[2:end]...)
             continue
+        else
+            opaque_eligible = false
         end
 
         # Rewrite to flattened ABI
@@ -343,25 +366,46 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
                 NewInstruction(Expr(:invoke, (StructuralSSARef(compact.result_idx), callee_codeinst), new_args...), stmtype, info, line, stmtflags))
         compact.ssa_rename[compact.idx - 1] = new_call
 
-        err = add_internal_equations_to_structure!(refiner, eqkinds, eqclassification, total_incidence, eq_callee_mapping, StructuralSSARef(new_call.id),
+        cms = CallerMappingState(result, refiner.var_to_diff, refiner.varclassification, refiner.varkinds, eqclassification, eqkinds)
+        err = add_internal_equations_to_structure!(refiner, cms, total_incidence, eq_callee_mapping, StructuralSSARef(new_call.id),
             result, mapping)
         if err !== true
             return UncompilableIPOResult(warnings, UnsupportedIRException(err, ir))
         end
     end
+
+    eqvars = EqVarState(var_to_diff, varclassification, varkinds,
+        total_incidence, eqclassification, eqkinds, eq_callee_mapping)
+
+    # Replace non linear return by a new variable and return that variable
+    if !opaque_eligible
+        last_ssa = SSAValue(compact.result_idx - 1)
+        ret_stmt_inst = compact[last_ssa]
+        ret_stmt = ret_stmt_inst[:stmt]
+        @assert isa(ret_stmt, ReturnNode)
+        line = ret_stmt_inst[:line]
+        Compiler.delete_inst_here!(compact)
+
+        (new_ret, ultimate_rt) = rewrite_ipo_return!(Compiler.typeinf_lattice(refiner), compact, line, ret_stmt.val, ultimate_rt, eqvars)
+        insert_node_here!(compact, NewInstruction(ReturnNode(new_ret), ultimate_rt, Compiler.NoCallInfo(), line, Compiler.IR_FLAG_REFINED), true)
+    elseif isa(ultimate_rt, Type)
+        # If we don't have any internal variables (in which case we might have to to do a more aggressive rewrite), strengthen the incidence
+        # by demoting to full incidence over the argument variables. Incidence is not allowed to propagate through global mutable state, so
+        # the incidence of the return type is bounded by the incidence of the arguments in this case.
+        ultimate_rt = Incidence(ultimate_rt,
+            IncidenceVector(MAX_EQS, Int[1:length(varclassification)+1;], IncidenceValue[nonlinear for _ in 1:length(varclassification)+1]))
+    end
+
     ir = Compiler.finish(compact)
 
     var_to_diff = StateSelection.complete(var_to_diff)
-    ultimate_rt, nimplicitoutpairs = process_ipo_return!(Compiler.typeinf_lattice(refiner), ultimate_rt, eqclassification, eqkinds, varclassification, varkinds,
-        var_to_diff, total_incidence, eq_callee_mapping)
 
     names = OrderedDict{Any, ScopeDictEntry}()
-    return DAEIPOResult(ir, ultimate_rt, argtypes,
+    return DAEIPOResult(ir, opaque_eligible, ultimate_rt, argtypes,
         nexternalargvars,
         nsysmscopes,
         nexternaleqs,
         ncallees,
-        nimplicitoutpairs,
         var_to_diff,
         varclassification,
         total_incidence, eqclassification, eq_callee_mapping,
@@ -371,55 +415,70 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
         warnings)
 end
 
-function process_ipo_return!(𝕃, ultimate_rt::Incidence, eqclassification, eqkinds, varclassification, varkinds, var_to_diff, total_incidence, eq_callee_mapping)
-    nonlinrepl = nothing
-    nimplicitoutpairs = 0
-    function get_nonlinrepl()
-        if nonlinrepl === nothing
-            nonlinrepl = add_vertex!(var_to_diff)
-            push!(varclassification, External)
-            push!(varkinds, Intrinsics.RemovedVar)
-            nimplicitoutpairs += 1
-        end
-        return nonlinrepl
-    end
-    new_row = _zero_row()
-    new_eq_row = _zero_row()
-    for (v_offset, coeff) in zip(rowvals(ultimate_rt.row), nonzeros(ultimate_rt.row))
-        v = v_offset - 1
-        if v != 0 && varclassification[v] != External && coeff === nonlinear
-            # nonlinear state variable created within this call tree
-            get_nonlinrepl()
-            new_eq_row[v_offset] = nonlinear # we might want to refine this to something linear
-        else
-            new_row[v_offset] = coeff
-            while v != 0 && v !== nothing
-                varclassification[v] = External
-                v = invview(var_to_diff)[v]
-            end
-        end
-    end
-    #=
-    if ultimate_rt.typ === Float64
-        get_nonlinrepl()
-    end
-    =#
-    if nonlinrepl !== nothing
-        new_eq_row[get_nonlinrepl()+1] = -1.
-        new_row[get_nonlinrepl()+1] = 1.
-        ultimate_rt = Incidence(Const(0.0), new_row)
-        push!(total_incidence, Incidence(ultimate_rt.typ, new_eq_row))
-        push!(eq_callee_mapping, nothing)
-        push!(eqclassification, Owned)
-        push!(eqkinds, Intrinsics.Always)
+function rewrite_ipo_return!(𝕃, compact::IncrementalCompact, line, ssa, ultimate_rt::Any, eqvars::EqVarState)
+    if isa(ultimate_rt, Eq)
+        return Pair{Any, Any}(ssa, ultimate_rt)
     end
 
-    return ultimate_rt, nimplicitoutpairs
+    if isa(ultimate_rt, PartialStruct)
+        new_fields = Any[]
+        new_types = Any[]
+        for i = 1:length(ultimate_rt.fields)
+            ssa_type = Compiler.getfield_tfunc(𝕃, ultimate_rt, Const(i))
+            ssa_field = insert_node_here!(compact,
+                NewInstruction(Expr(:call, getfield, variable), ssa_type, Compiler.NoCallInfo(), line, Compiler.IR_FLAG_REFINED), true)
+
+            (new_field, new_type) = rewrite_ipo_return!(𝕃, compact, line, ssa_field, ssa_type, eqvars)
+            push!(new_fields, new_field)
+            push!(new_types, new_type)
+        end
+        newT = Compiler.PartialStruct(ultimate_rt.typ, new_types)
+        if widenconst(ultimate_rt) <: Tuple
+            retssa = insert_node_here!(compact,
+                NewInstruction(Expr(:call, tuple, new_fields...), newT, Compiler.NoCallInfo(), line, Compiler.IR_FLAG_REFINED), true)
+        else
+            T = insert_node_here!(compact,
+                NewInstruction(Expr(:call, typeof, ssa), Type, Compiler.NoCallInfo(), line, Compiler.IR_FLAG_REFINED), true)
+            retssa = insert_node_here!(compact,
+                NewInstruction(Expr(:new, T, new_fields...), newT, Compiler.NoCallInfo(), line, Compiler.IR_FLAG_REFINED), true)
+        end
+        return Pair{Any, Any}(retssa, newT)
+    end
+
+    if !isa(ultimate_rt, Incidence) || (nnz(ultimate_rt.row) <= 1 && only(nonzeros(ultimate_rt.row)) != nonlinear)
+        return Pair{Any, Any}(ssa, ultimate_rt)
+    end
+
+    nonlinrepl = add_vertex!(eqvars.var_to_diff)
+    push!(eqvars.varclassification, External)
+    push!(eqvars.varkinds, Intrinsics.Continuous)
+
+    new_var_ssa = insert_node_here!(compact,
+        NewInstruction(Expr(:invoke, nothing, variable), Incidence(nonlinrepl), Compiler.NoCallInfo(), line, Compiler.IR_FLAG_REFINED), true)
+
+    eq_incidence = ultimate_rt - Incidence(nonlinrepl)
+    push!(eqvars.total_incidence, eq_incidence)
+    push!(eqvars.eq_callee_mapping, nothing)
+    push!(eqvars.eqclassification, Owned)
+    push!(eqvars.eqkinds, Intrinsics.Always)
+    new_eq = length(eqvars.total_incidence)
+
+    new_eq_ssa = insert_node_here!(compact,
+        NewInstruction(Expr(:invoke, nothing, equation), Eq(new_eq), Compiler.NoCallInfo(), line, Compiler.IR_FLAG_REFINED), true)
+
+    eq_val_ssa = insert_node_here!(compact,
+        NewInstruction(Expr(:call, InternalIntrinsics.assign_var, new_var_ssa, ssa), eq_incidence, Compiler.NoCallInfo(), line, Compiler.IR_FLAG_REFINED), true)
+
+    eq_call_ssa = insert_node_here!(compact,
+        NewInstruction(Expr(:invoke, nothing, new_eq_ssa, eq_val_ssa), Nothing, Compiler.NoCallInfo(), line, Compiler.IR_FLAG_REFINED), true)
+
+    T = widenconst(ultimate_rt)
+    # TODO: We don't have a way to express that the return value is directly this variable for arbitrary types
+    return Pair{Any, Any}(new_var_ssa, T === Float64 ? Incidence(nonlinrepl) : Incidence(T, nonlinrepl))
 end
 
-function add_internal_equations_to_structure!(refiner::StructuralRefiner, eqkinds::Vector{Intrinsics.EqKind}, eqclassification::Vector{VarEqClassification}, total_incidence,
+function add_internal_equations_to_structure!(refiner::StructuralRefiner, cms::CallerMappingState, total_incidence,
         eq_callee_mapping::Vector{Union{Nothing, Vector{Pair{StructuralSSARef, Int}}}}, thisssa::StructuralSSARef, callee_result::DAEIPOResult, callee_mapping::CalleeMapping)
-    cms = CallerMappingState(callee_result, refiner.var_to_diff, refiner.varclassification, refiner.varkinds, eqclassification)
     for i in 1:length(callee_mapping.var_coeffs)
         if !isassigned(callee_mapping.var_coeffs, i)
             compute_missing_coeff!(callee_mapping.var_coeffs, cms, i)
@@ -434,6 +493,11 @@ function add_internal_equations_to_structure!(refiner::StructuralRefiner, eqkind
     for eq = 1:length(callee_result.eqclassification)
         mapped_eq = callee_mapping.eqs[eq]
         mapped_eq == 0 && continue
+        if !isassigned(callee_result.total_incidence, eq)
+            # This equation has no contributions in the callee - the only reason
+            # we're here is because it leaked an explicit reference.
+            continue
+        end
         mapped_inc = apply_linear_incidence(Compiler.typeinf_lattice(refiner), callee_result.total_incidence[eq], cms, callee_mapping)
         if isassigned(total_incidence, mapped_eq)
             total_incidence[mapped_eq] = tfunc(Val(Core.Intrinsics.add_float),
@@ -448,45 +512,21 @@ function add_internal_equations_to_structure!(refiner::StructuralRefiner, eqkind
         push!(eq_callee_mapping[mapped_eq], thisssa=>eq)
     end
 
-    for (ieq, inc) in enumerate(callee_result.total_incidence[(callee_result.nexternaleqs+1):end])
+    for ieq in 1:length(callee_result.total_incidence)
         callee_mapping.eqs[ieq] == 0 || continue
+        callee_result.eqclassification[ieq] === External && continue
+        isassigned(callee_result.total_incidence, ieq) || continue
+        inc = callee_result.total_incidence[ieq]
         extinc = apply_linear_incidence(Compiler.typeinf_lattice(refiner), inc, cms, callee_mapping)
         if !isa(extinc, Incidence) && !isa(extinc, Const)
             return "Failed to map internal incidence for equation $ieq (internal result $inc) - got $extinc while processing $thisssa"
         end
         push!(total_incidence, extinc)
         push!(eq_callee_mapping, [thisssa=>ieq])
-        push!(eqclassification, CalleeInternal)
-        push!(eqkinds, callee_result.eqkinds[ieq])
+        push!(cms.caller_eqclassification, CalleeInternal)
+        push!(cms.caller_eqkinds, callee_result.eqkinds[ieq])
         callee_mapping.eqs[ieq] = length(total_incidence)
     end
 
     return true
-end
-
-function process_ipo_return!(𝕃, ultimate_rt::Type, eqclassification, eqkinds, varclassification, varkinds, var_to_diff, total_incidence, eq_callee_mapping)
-    # If we don't have any internal variables (in which case we might have to to do a more aggressive rewrite), strengthen the incidence
-    # by demoting to full incidence over the argument variables. Incidence is not allowed to propagate through global mutable state, so
-    # the incidence of the return type is bounded by the incidence of the arguments in this case.
-    if !all(==(External), varclassification)
-        return ultimate_rt, 0
-    end
-    # TODO: Keep track of whether we have any time dependence?
-    return Incidence(ultimate_rt, IncidenceVector(MAX_EQS, Int[1:length(varclassification)+1;], IncidenceValue[nonlinear for _ in 1:length(varclassification)+1])), 0
-end
-
-function process_ipo_return!(𝕃, ultimate_rt::Eq, eqclassification, args...)
-    eqclassification[ultimate_rt.id] = External
-    return ultimate_rt, 0
-end
-process_ipo_return!(𝕃, ultimate_rt::Union{Type, PartialScope, PartialKeyValue, Const}, args...) = ultimate_rt, 0
-function process_ipo_return!(𝕃, ultimate_rt::PartialStruct, args...)
-    nimplicitoutpairs = 0
-    fields = Any[]
-    for f in ultimate_rt.fields
-        (rt, n) = process_ipo_return!(𝕃, f, args...)
-        nimplicitoutpairs += n
-        push!(fields, rt)
-    end
-    return PartialStruct(𝕃, ultimate_rt.typ, fields), nimplicitoutpairs
 end

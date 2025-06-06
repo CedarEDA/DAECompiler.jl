@@ -28,12 +28,12 @@ function sciml_dae_split_du!(compact, line, arg, numstates)
     nassgn = numstates[AssignedDiff]
     ntotalstates = numstates[AssignedDiff] + numstates[UnassignedDiff] + numstates[Algebraic]
 
+    in_du_assgn = insert_node_here!(compact,
+        NewInstruction(Expr(:call, view, arg, 1:nassgn), VectorViewType, line))
     in_du_unassgn = insert_node_here!(compact,
         NewInstruction(Expr(:call, view, arg, (nassgn+1):(nassgn+numstates[UnassignedDiff])), VectorViewType, line))
-    du_assgn = insert_node_here!(compact,
-        NewInstruction(Expr(:call, view, arg, 1:nassgn), VectorViewType, line))
 
-    return (in_du_unassgn, du_assgn)
+    return (in_du_assgn, in_du_unassgn)
 end
 
 function make_daefunction(f)
@@ -96,6 +96,7 @@ function dae_factory_gen(state::TransformationState, ci::CodeInstance, key::Torn
 
     all_states = Int[]
     for var = 1:length(result.var_to_diff)
+        varkind(state, var) == Intrinsics.Continuous || continue
         kind = classify_var(result.var_to_diff, key, var)
         kind == nothing && continue
         numstates[kind] += 1
@@ -126,7 +127,7 @@ function dae_factory_gen(state::TransformationState, ci::CodeInstance, key::Torn
     out_eq = insert_node_here!(oc_compact,
         NewInstruction(Expr(:call, view, Argument(2), (nassgn+1):ntotalstates), VectorViewType, line))
 
-    (in_du_unassgn, du_assgn) = sciml_dae_split_du!(oc_compact, line, Argument(3), numstates)
+    (in_du_assgn, in_du_unassgn) = sciml_dae_split_du!(oc_compact, line, Argument(3), numstates)
     (in_u_mm, in_u_unassgn, in_alg) = sciml_dae_split_u!(oc_compact, line, Argument(4), numstates)
 
     # Call DAECompiler-generated RHS with internal ABI
@@ -163,7 +164,7 @@ function dae_factory_gen(state::TransformationState, ci::CodeInstance, key::Torn
     end
 
     bc = insert_node_here!(oc_compact,
-        NewInstruction(Expr(:call, Base.Broadcast.broadcasted, -, out_du_mm, du_assgn), Any, line))
+        NewInstruction(Expr(:call, Base.Broadcast.broadcasted, -, out_du_mm, in_du_assgn), Any, line))
     insert_node_here!(oc_compact,
         NewInstruction(Expr(:call, Base.Broadcast.materialize!, out_du_mm, bc), Nothing, line))
 

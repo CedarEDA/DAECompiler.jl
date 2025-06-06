@@ -10,6 +10,8 @@ struct StructuralRefiner <: Compiler.AbstractInterpreter
     var_to_diff::DiffGraph
     varkinds::Vector{Intrinsics.VarKind}
     varclassification::Vector{VarEqClassification}
+    eqkinds::Vector{Intrinsics.EqKind}
+    eqclassification::Vector{VarEqClassification}
 end
 
 struct StructureCache; end
@@ -57,11 +59,9 @@ Compiler.cache_owner(::StructuralRefiner) = StructureCache()
     end
 
     argtypes = Compiler.collect_argtypes(interp, stmt.args, Compiler.StatementState(nothing, false), irsv)[2:end]
-    m = Compiler.get_ci_mi(callee_codeinst).def
-    argtypes = Compiler.va_process_argtypes(Compiler.optimizer_lattice(interp), argtypes, UInt(m.nargs), m.isva)
-    mapping = CalleeMapping(Compiler.optimizer_lattice(interp), argtypes, callee_result, callee_codeinst.inferred.ir.argtypes)
+    mapping = CalleeMapping(Compiler.optimizer_lattice(interp), argtypes, callee_codeinst, callee_result, callee_codeinst.inferred.ir.argtypes)
     new_rt = apply_linear_incidence(Compiler.optimizer_lattice(interp), callee_result.extended_rt,
-        CallerMappingState(callee_result, interp.var_to_diff, interp.varclassification, interp.varkinds, VarEqClassification[]), mapping)
+        CallerMappingState(callee_result, interp.var_to_diff, interp.varclassification, interp.varkinds, interp.eqclassification, interp.eqkinds), mapping)
 
     # Remember this mapping, both for performance of not having to recompute it
     # and because we may have assigned caller variables to internal variables
@@ -87,7 +87,7 @@ function structural_inc_ddt(var_to_diff::DiffGraph, varclassification::Union{Vec
             push!(varclassification, varclassification[v])
         end
         if varkinds !== nothing
-            push!(varkinds, Intrinsics.Continuous)
+            push!(varkinds, varkinds[v])
         end
         add_edge!(var_to_diff, v, dv)
         return dv + 1

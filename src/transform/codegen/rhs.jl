@@ -25,7 +25,7 @@ function handle_contribution!(ir::Compiler.IRCode, settings::Settings, inst::Com
     @replace_call!(ir, pos, Expr(:call, Base.setindex!, which, sum, slot), settings)
 end
 
-function compute_slot_ranges(info::MappingInfo, callee_key, var_assignment, eq_assignment)
+function compute_slot_ranges(caller_state::TransformationState, info::MappingInfo, callee_key, var_assignment, eq_assignment)
     # Compute the ranges for this child's states in the parent range.
     # We rely upon earlier stages of the pipeline having put these adjacent to each other
     # and in order. We could just trust that, but because it's a little bit tricky, here
@@ -47,6 +47,7 @@ function compute_slot_ranges(info::MappingInfo, callee_key, var_assignment, eq_a
         caller_map = info.mapping.var_coeffs[callee_var]
         isa(caller_map, Const) && continue
         caller_var = only(rowvals(caller_map.row))-1
+        varkind(caller_state, caller_var) == Intrinsics.Continuous || continue
 
         callee_kind = classify_var(info.result.var_to_diff, callee_key, callee_var)
         callee_kind === nothing && continue
@@ -117,7 +118,7 @@ function rhs_finish!(
         push!(ir.argtypes, Tuple)  # SICM State
         push!(ir.argtypes, Tuple)  # in vars
         if in(settings.mode, (ODE, ODENoInit))
-            slotnames = [:sicm_state, :vars, :in_u_mm, :in_u_unassgn, :in_alg, :in_alg_derv, :out_du_mm, :out_eq, :t]
+            slotnames = [:sicm_state, :vars, :in_u_mm, :in_u_unassgn, :in_alg_derv, :in_alg, :out_du_mm, :out_eq, :t]
         elseif in(settings.mode, (DAE, DAENoInit))
             slotnames = [:sicm_state, :vars, :in_u_mm, :in_u_unassgn, :in_du_unassgn, :in_alg, :out_du_mm, :out_eq, :t]
         else
@@ -132,7 +133,6 @@ function rhs_finish!(
 
         t = Argument(last(arg_range)+1)
         push!(ir.argtypes, Float64)  #  t
-
 
         processed_variables = BitSet()
 
@@ -174,7 +174,7 @@ function rhs_finish!(
                 push!(stmt.args, in_vars)
 
                 # Ordering from tearing is (AssignedDiff, UnassignedDiff, Algebraic, Explicit)
-                slot_ranges = compute_slot_ranges(info, callee_key, var_assignment, eq_assignment)
+                slot_ranges = compute_slot_ranges(state, info, callee_key, var_assignment, eq_assignment)
                 for (arg, range) in zip(arg_range, slot_ranges)
                     push!(stmt.args, insert_node!(ir, SSAValue(i),
                         NewInstruction(inst;
@@ -191,10 +191,16 @@ function rhs_finish!(
                 error()
             elseif is_known_invoke(stmt, variable, ir)
                 varnum = idnum(ir.stmts.type[i])
+                kind = varkind(state, varnum)
+                if kind == Intrinsics.Epsilon
+                    replace_call!(ir, SSAValue(i), 0.)
+                    continue
+                end
+                @assert kind == Intrinsics.Continuous
 
                 assgn = var_assignment[varnum]
                 if assgn == nothing
-                    display(StateSelection.MatchedSystemStructure(structure, var_eq_matching))
+                    display(StateSelection.MatchedSystemStructure(result, structure, var_eq_matching))
                     @sshow varnum
                     error("Variable left over in IR that doesn't have an assignment")
                 end

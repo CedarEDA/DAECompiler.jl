@@ -88,10 +88,10 @@ function stmt_debuginfo_edge(i, stmt)
     DebugInfo(filename, nothing, Core.svec(), compressed)
 end
 
-function cache_dae_ci!(old_ci, src, debuginfo, abi, owner)
+function cache_dae_ci!(old_ci, src, debuginfo, abi, owner; rettype=Tuple)
     mi = old_ci.def
     edges = Core.svec(old_ci)
-    daef_ci = CodeInstance(abi === nothing ? old_ci.def : Core.ABIOverride(abi, old_ci.def), owner, Tuple, Union{}, nothing, src, Int32(0),
+    daef_ci = CodeInstance(abi === nothing ? old_ci.def : Core.ABIOverride(abi, old_ci.def), owner, rettype, Union{}, nothing, src, Int32(0),
         old_ci.min_world, old_ci.max_world, old_ci.ipo_purity_bits,
         nothing, debuginfo, edges)
     Compiler.store_backedges(daef_ci, edges)
@@ -104,7 +104,7 @@ macro replace_call!(ir, idx, new_call, settings)
     :(replace_call!($(esc(ir)), $(esc(idx)), $(esc(new_call)); settings = $(esc(settings)), source = $source))
 end
 
-function replace_call!(ir::Union{IRCode,IncrementalCompact}, idx::SSAValue, new_call::Expr; settings::Union{Nothing, Settings} = nothing, source = nothing)
+function replace_call!(ir::Union{IRCode,IncrementalCompact}, idx::SSAValue, @nospecialize(new_call); settings::Union{Nothing, Settings} = nothing, source = nothing)
     @assert !isa(ir[idx][:inst], PhiNode)
     ir[idx][:inst] = new_call
     ir[idx][:type] = Any

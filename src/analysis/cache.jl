@@ -32,13 +32,13 @@ end
 
 struct DAEIPOResult
     ir::IRCode
+    opaque_eligible::Bool
     extended_rt::Any
     argtypes
     nexternalargvars::Int # total vars is length(var_to_diff)
     nsysmscopes::Int
     nexternaleqs::Int
     ncallees::Int
-    nimplicitoutpairs::Int
     var_to_diff::DiffGraph
     varclassification::Vector{VarEqClassification}
     total_incidence::Vector{Any}
@@ -48,12 +48,12 @@ struct DAEIPOResult
     varkinds::Vector{Union{Intrinsics.VarKind, Nothing}}
     eqkinds::Vector{Union{Intrinsics.EqKind, Nothing}}
     # TODO: Chain these rather than copying them
-    warnings::Vector{UnsupportedIRException}
+    warnings::Vector{BadDAECompilerInputException}
 end
 
 struct UncompilableIPOResult
-    warnings::Vector{UnsupportedIRException}
-    error::UnsupportedIRException
+    warnings::Vector{BadDAECompilerInputException}
+    error::BadDAECompilerInputException
 end
 
 function add_equation_row!(graph, solvable_graph, ieq::Int, inc::Incidence)
@@ -92,7 +92,9 @@ function make_structure_from_ipo(ipo::DAEIPOResult)
     graph = BipartiteGraph(neqs, nvars)
     solvable_graph = BipartiteGraph(neqs, nvars)
 
-    for (ieq, inc) in enumerate(ipo.total_incidence)
+    for ieq in 1:length(ipo.total_incidence)
+        isassigned(ipo.total_incidence, ieq) || continue
+        inc = ipo.total_incidence[ieq]
         add_equation_row!(graph, solvable_graph, ieq, inc)
     end
 

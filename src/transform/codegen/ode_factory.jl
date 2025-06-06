@@ -84,6 +84,7 @@ function ode_factory_gen(state::TransformationState, ci::CodeInstance, key::Torn
 
     all_states = Int[]
     for var = 1:length(result.var_to_diff)
+        varkind(state, var) == Intrinsics.Continuous || continue
         kind = classify_var(result.var_to_diff, key, var)
         kind == nothing && continue
         numstates[kind] += 1
@@ -109,25 +110,31 @@ function ode_factory_gen(state::TransformationState, ci::CodeInstance, key::Torn
     # Zero the output
     @insert_node_here interface_ic line zero!(du)::VectorViewType
 
-    # out_du_mm, out_eq, in_u_mm, in_u_unassgn, in_alg, in_alg_derv
     nassgn = numstates[AssignedDiff]
+    nunassgn = numstates[UnassignedDiff]
     ntotalstates = numstates[AssignedDiff] + numstates[UnassignedDiff] + numstates[Algebraic] + numstates[AlgebraicDerivative]
-    out_du_mm = @insert_node_here interface_ic line view(du, 1:nassgn)::VectorViewType
-    out_eq = @insert_node_here interface_ic line view(du, (nassgn+1):ntotalstates)::VectorViewType
 
     (in_u_mm, in_u_unassgn, in_alg, in_alg_derv) = sciml_ode_split_u!(interface_ic, line, u, numstates)
+    out_du_mm = @insert_node_here interface_ic line view(du, 1:nassgn)::VectorViewType
+    out_du_unassgn = @insert_node_here interface_ic line view(du, (nassgn+1):(nassgn+nunassgn))::VectorViewType
+    out_eq = @insert_node_here interface_ic line view(du, (nassgn+nunassgn+1):ntotalstates)::VectorViewType
 
     # Call DAECompiler-generated RHS with internal ABI
     sicm_oc = @insert_node_here interface_ic line getfield(self, 1)::Core.OpaqueClosure
 
     # N.B: The ordering of arguments should match the ordering in the StateKind enum
-    @insert_node_here interface_ic line (:invoke)(odef_ci, sicm_oc, (), in_u_mm, in_u_unassgn, in_alg, in_alg_derv, out_du_mm, out_eq, t)::Nothing
+    @insert_node_here interface_ic line (:invoke)(odef_ci, oc_sicm, (), in_u_mm, in_u_unassgn, in_alg_derv, in_alg, out_du_mm, out_eq, t)::Nothing
+
+    # Assign the algebraic derivatives to the their corresponding variables
+    bc = @insert_node_here interface_ic line Base.Broadcast.broadcasted(identity, in_alg_derv)::Any
+    @insert_node_here interface_ic line Base.Broadcast.materialize!(out_du_unassgn, bc)::Nothing
 
     # Return
     @insert_node_here interface_ic line (return)::Union{}
 
     interface_ir = Compiler.finish(interface_ic)
     maybe_rewrite_debuginfo!(interface_ir, settings)
+    Compiler.verify_ir(interface_ir)
     interface_oc = Core.OpaqueClosure(interface_ir; slotnames = [:self, :du, :u, :p, :t])
 
     line = result.ir[SSAValue(1)][:line]

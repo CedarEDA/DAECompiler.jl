@@ -149,6 +149,22 @@ StateSelection.BipartiteGraphs.overview_label(::Type{WrongEquation}) = ('✕', "
 const IPOMatches = Union{Unassigned, SelectedState, StateInvariant, AlgebraicState, FullyLinear, WrongEquation, InOut}
 const IPOMatching = StateSelection.Matching{IPOMatches}
 
+struct CalleeInfo
+    callees::Union{Nothing, Vector{StructuralSSARef}}
+end
+CalleeInfo(callee::StructuralSSARef) = CalleeInfo([callee])
+StateSelection.BipartiteGraphs.overview_label(::Type{CalleeInfo}) = ('%', "Used in callee (referenced by structural SSA)", 178)
+
+function Base.show(io::IO, (; callees)::CalleeInfo)
+    callees === nothing && return
+    first = true
+    for callee in callees
+        !first && print(io, ", ")
+        printstyled(io, "%", callee.id; color = 178)
+        first = false
+    end
+end
+
 function top_level_state_selection!(tstate)
     (; result, structure) = tstate
 
@@ -184,6 +200,7 @@ function top_level_state_selection!(tstate)
 
     for (eq, match) in enumerate(invview(var_eq_matching))
         match === unassigned || continue
+        always_eq_filter(tstate)(eq) || continue
         push!(explicit_eqs, eq)
     end
 
