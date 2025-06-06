@@ -6,35 +6,36 @@ struct CalleeMapping
 end
 
 struct CallerMappingState
-    result::DAEIPOResult
+    callee_result::DAEIPOResult
     caller_var_to_diff::DiffGraph
     caller_varclassification::Vector{VarEqClassification}
     caller_varkind::Union{Vector{Intrinsics.VarKind}, Nothing}
     caller_eqclassification::Vector{VarEqClassification}
+    caller_eqkinds::Union{Vector{Intrinsics.EqKind}, Nothing}
 end
 
-function compute_missing_coeff!(coeffs, (;result, caller_var_to_diff, caller_varclassification, caller_varkind)::CallerMappingState, v)
+function compute_missing_coeff!(coeffs, (;callee_result, caller_var_to_diff, caller_varclassification, caller_varkind)::CallerMappingState, v)
     # First find the rootvar, and if we already have a coeff for it
     # apply the derivatives.
     ndiffs = 0
-    calle_inv = invview(result.var_to_diff)
+    calle_inv = invview(callee_result.var_to_diff)
     while calle_inv[v] !== nothing && !isassigned(coeffs, v)
         ndiffs += 1
         v = calle_inv[v]
     end
 
     if !isassigned(coeffs, v)
-        @assert v > result.nexternalargvars # Arg vars should have already been mapped
+        @assert v > callee_result.nexternalargvars # Arg vars should have already been mapped
         # Reached the root and it's an internal variable. We need to allocate
         # it in the caller now
         coeffs[v] = Incidence(add_vertex!(caller_var_to_diff))
-        push!(caller_varclassification, result.varclassification[v] == External ? Owned : CalleeInternal)
-        push!(caller_varkind, result.varkinds[v])
+        push!(caller_varclassification, callee_result.varclassification[v] == External ? Owned : CalleeInternal)
+        push!(caller_varkind, callee_result.varkinds[v])
     end
     thisinc = coeffs[v]
 
     for _ = 1:ndiffs
-        dv = result.var_to_diff[v]
+        dv = callee_result.var_to_diff[v]
         coeffs[dv] = structural_inc_ddt(caller_var_to_diff, caller_varclassification, caller_varkind, thisinc)
         v = dv
     end
@@ -143,10 +144,9 @@ end
 function apply_linear_incidence(𝕃, ret::Eq, caller::CallerMappingState, mapping::CalleeMapping)
     eq_mapping = mapping.eqs[ret.id]
     if eq_mapping == 0
-        error("I removed these from StructuralRefiner for conceptual reasons - if we hit these, lets revisit")
-        #push!(caller_eqclassification, Owned)
-        #push!(caller_eqkinds, result.eqkinds[ret.id])
-        mapping.eqs[ret.id] = eq_mapping = length(caller_eqclassification)
+        push!(caller.caller_eqclassification, Owned)
+        push!(caller.caller_eqkinds, caller.callee_result.eqkinds[ret.id])
+        mapping.eqs[ret.id] = eq_mapping = length(caller.caller_eqclassification)
     end
     return Eq(eq_mapping)
 end
@@ -171,48 +171,4 @@ struct MappingInfo <: Compiler.CallInfo
     info::Any
     result::DAEIPOResult
     mapping::CalleeMapping
-end
-
-function _make_argument_lattice_elem(𝕃, which::Argument, @nospecialize(argt), add_variable!, add_equation!, add_scope!)
-    if isa(argt, Const)
-        #@assert !isa(argt.val, Scope) # Shouldn't have been forwarded
-        return argt
-    elseif isa(argt, Type) && argt <: Intrinsics.AbstractScope
-        return PartialScope(add_scope!(which))
-    elseif isa(argt, Type) && argt == equation
-        return Eq(add_equation!(which))
-    elseif is_non_incidence_type(argt)
-        return argt
-    elseif Compiler.isprimitivetype(argt)
-        inc = Incidence(add_variable!(which))
-        return argt === Float64 ? inc : Incidence(argt, inc.row)
-    elseif isa(argt, PartialStruct)
-        return PartialStruct(𝕃, argt.typ, Any[make_argument_lattice_elem(𝕃, which, f, add_variable!, add_equation!, add_scope!) for f in argt.fields])
-    elseif isabstracttype(argt) || ismutabletype(argt) || !isa(argt, DataType)
-        return nothing
-    else
-        fields = Any[]
-        any = false
-        # TODO: This doesn't handle recursion
-        if Base.datatype_fieldcount(argt) === nothing
-            return nothing
-        end
-        for i = 1:length(fieldtypes(argt))
-            # TODO: Can we make this lazy?
-            ft = fieldtype(argt, i)
-            mft = _make_argument_lattice_elem(𝕃, which, ft, add_variable!, add_equation!, add_scope!)
-            if mft === nothing
-                push!(fields, Incidence(ft))
-            else
-                any = true
-                push!(fields, mft)
-            end
-        end
-        return any ? PartialStruct(𝕃, argt, fields) : nothing
-    end
-end
-
-function make_argument_lattice_elem(𝕃, which::Argument, @nospecialize(argt), add_variable!, add_equation!, add_scope!)
-    mft = _make_argument_lattice_elem(𝕃, which, argt, add_variable!, add_equation!, add_scope!)
-    mft === nothing ? Incidence(argt) : mft
 end

@@ -202,14 +202,11 @@ end
 end
 implicitexteq() = applyeq(external())
 
-# ERROR: I removed these from StructuralRefiner for conceptual reasons - if we hit these, lets revisit
-@test_broken begin
-    dae_sol = solve(DAECProblem(implicitexteq, (1,) .=> 1), IDA())
-    ode_sol = solve(ODECProblem(implicitexteq, (1,) .=> 1), Rodas5(autodiff=false))
+dae_sol = solve(DAECProblem(implicitexteq, (1,) .=> 1), IDA())
+ode_sol = solve(ODECProblem(implicitexteq, (1,) .=> 1), Rodas5(autodiff=false))
 
-    for sol in (dae_sol, ode_sol)
-        @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[1, :], exp.(sol.t)))
-    end
+for sol in (dae_sol, ode_sol)
+    @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[1, :], exp.(sol.t)))
 end
 
 #========= External Equation (nonlinear) =========#
@@ -220,14 +217,11 @@ end
 end
 implicitexteq_nl() = applyeq_nl(external2())
 
-# ERROR: I removed these from StructuralRefiner for conceptual reasons - if we hit these, lets revisit
-@test_broken begin
-    dae_sol = solve(DAECProblem(implicitexteq_nl, (1,) .=> 1), IDA())
-    ode_sol = solve(ODECProblem(implicitexteq_nl, (1,) .=> 1), Rodas5(autodiff=false))
+dae_sol = solve(DAECProblem(implicitexteq_nl, (1,) .=> 1), IDA())
+ode_sol = solve(ODECProblem(implicitexteq_nl, (1,) .=> 1), Rodas5(autodiff=false))
 
-    for sol in (dae_sol, ode_sol)
-        @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[1, :], 2acot.(exp.(log(cot(0.5)) .- sol.t))))
-    end
+for sol in (dae_sol, ode_sol)
+    @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[1, :], 2acot.(exp.(log(cot(0.5)) .- sol.t))))
 end
 
 #========= External Equation (multiple equations) =========#
@@ -239,32 +233,43 @@ end
     applyeq2(eq, x)
 end
 
-# ERROR: I removed these from StructuralRefiner for conceptual reasons - if we hit these, lets revisit
-@test_broken begin
-    dae_sol = solve(DAECProblem(impliciteqvar, (1,) .=> 1), IDA())
-    ode_sol = solve(ODECProblem(impliciteqvar, (1,) .=> 1), Rodas5(autodiff=false))
+dae_sol = solve(DAECProblem(impliciteqvar, (1,) .=> 1), IDA())
+ode_sol = solve(ODECProblem(impliciteqvar, (1,) .=> 1), Rodas5(autodiff=false))
 
-    for sol in (dae_sol, ode_sol)
-        @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[1, :], 1 .+ sol.t))
-    end
+for sol in (dae_sol, ode_sol)
+    @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[1, :], 1 .+ sol.t))
 end
 
+#========= External Equation (multiple equations + constant) =========#
 @noinline external4() = (always(), ddt(continuous()))
 @noinline applyeq3(eq, var) = eq(var)
 @noinline function impliciteqvar2()
     (eq, var) = external4()
     applyeq3(eq, var)
     applyeq3(eq, var)
+    applyeq3(eq, -4.)
 end
 
-# ERROR: I removed these from StructuralRefiner for conceptual reasons - if we hit these, lets revisit
-@test_broken begin
-    dae_sol = solve(DAECProblem(impliciteqvar2, (1,) .=> 1), IDA())
-    ode_sol = solve(ODECProblem(impliciteqvar2, (1,) .=> 1), Rodas5(autodiff=false))
+dae_sol = solve(DAECProblem(impliciteqvar2, (1,) .=> 1), IDA())
+ode_sol = solve(ODECProblem(impliciteqvar2, (1,) .=> 1), Rodas5(autodiff=false))
 
-    for sol in (dae_sol, ode_sol)
-        @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[1, :], 1 .+ 2sol.t))
-    end
+for sol in (dae_sol, ode_sol)
+    @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[1, :], 1 .+ 2sol.t))
+end
+
+#========= External Equation (multiple equations + external nonlinear) =========#
+@noinline function impliciteqvar3()
+    (eq, var) = external3()
+    applyeq3(eq, 0.5ddt(var))
+    applyeq3(eq, 0.5ddt(var))
+    applyeq3(eq, -sin(var))
+end
+
+dae_sol = solve(DAECProblem(impliciteqvar3, (1,) .=> 1), IDA())
+ode_sol = solve(ODECProblem(impliciteqvar3, (1,) .=> 1), Rodas5(autodiff=false))
+
+for sol in (dae_sol, ode_sol)
+    @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[1, :], 2acot.(exp.(-sol.t).*cot(1/2))))
 end
 
 #=================== Scope handling ==================#

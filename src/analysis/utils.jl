@@ -27,7 +27,10 @@ function _eq_val_arg(stmt::Expr)
     return stmt.args[ft_ind + 1]
 end
 
-struct UnsupportedIRException <: Exception
+abstract type BadDAECompilerInputException <: Exception end
+
+struct FunctionErrorsException <: BadDAECompilerInputException; end
+struct UnsupportedIRException <: BadDAECompilerInputException
     msg::String
     ir::IRCode
 end
