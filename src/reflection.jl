@@ -26,7 +26,7 @@ end
 code_ad_by_type(@nospecialize(tt::Type); kwargs...) =
   _code_ad_by_type(tt; kwargs...).inferred.ir
 
-function code_structure_by_type(@nospecialize(tt::Type); world::UInt = Base.tls_world_age(), result = false, matched = false, mode = DAE, force_inline_all = false, insert_stmt_debuginfo = true, kwargs...)
+function code_structure_by_type(@nospecialize(tt::Type); world::UInt = Base.tls_world_age(), result = false, matched = false, mode = DAE, force_inline_all = false, insert_stmt_debuginfo = false, kwargs...)
   ci = _code_ad_by_type(tt; world, kwargs...)
   settings = Settings(; mode, force_inline_all, insert_stmt_debuginfo)
   _result = structural_analysis!(ci, world, settings)
