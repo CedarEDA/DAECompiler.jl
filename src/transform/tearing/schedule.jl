@@ -670,7 +670,7 @@ Compiler.get_inference_world(interp::DummyOptInterp) = interp.world
 
 function StateSelection.SSAUses(result::DAEIPOResult)
     eq_callees = Union{Nothing, Vector{StructuralSSARef}}[]
-    var_callees_dict = Dict{Int,Vector{StructuralSSARef}}()
+    var_callees = Vector{Union{Nothing, Vector{StructuralSSARef}}}(nothing, length(result.varclassification))
     for value in result.eq_callee_mapping
         if value === nothing
             push!(eq_callees, nothing)
@@ -679,7 +679,20 @@ function StateSelection.SSAUses(result::DAEIPOResult)
         callee = collect(unique(first.(value)))
         push!(eq_callees, callee)
     end
-    var_callees = [get(var_callees_dict, i, nothing) for i in 1:maximum(keys(var_callees_dict); init = 0)]
+    for i = 1:length(result.ir.stmts)
+        info = result.ir[SSAValue(i)][:info]
+        info isa MappingInfo || continue
+        for (callee_var, caller_mapping) in enumerate(info.mapping.var_coeffs)
+            isa(caller_mapping, Incidence) || continue
+            if length(rowvals(caller_mapping.row)) == 1
+                caller_var = only(rowvals(caller_mapping.row)) - 1
+                caller_var === 0 && continue
+                result.varclassification[caller_var] == CalleeInternal || continue
+                var_callees[caller_var] !== nothing || (var_callees[caller_var] = Vector{StructuralSSARef}())
+                push!(var_callees[caller_var], StructuralSSARef(i))
+            end
+        end
+    end
     return StateSelection.SSAUses(CalleeInfo.(eq_callees), CalleeInfo.(var_callees))
 end
 
