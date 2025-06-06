@@ -164,7 +164,7 @@ function rhs_finish!(
                 spec_data = stmt.args[1]
                 callee_key = spec_data[2]
                 callee_ordinal = spec_data[end]::Int
-                callee_result = structural_analysis!(callee_ci, world)
+                callee_result = structural_analysis!(callee_ci, world, settings)
                 callee_daef_ci = rhs_finish!(callee_result, callee_ci, callee_key, world, settings, callee_ordinal)
                 # Allocate a continuous block of variables for all callee alg and diff states
 

@@ -102,14 +102,14 @@ macro defintrmethod(name, fdef)
 end
 
 """
-    @insert_node_here compact line make_odefunction(f)::ODEFunction
-    @insert_node_here compact line make_odefunction(f)::ODEFunction true
-    @insert_node_here compact line (:invoke)(ci, args...)::Int true
-    @insert_node_here compact line (return x)::Int true
+    @insert_node_here compact line settings make_odefunction(f)::ODEFunction
+    @insert_node_here compact line settings make_odefunction(f)::ODEFunction true
+    @insert_node_here compact line settings (:invoke)(ci, args...)::Int true
+    @insert_node_here compact line settings (return x)::Int true
 """
-macro insert_node_here(compact, line, ex, reverse_affinity = false)
+macro insert_node_here(compact, line, settings, ex, reverse_affinity = false)
     source = :(LineNumberNode($(__source__.line), $(QuoteNode(__source__.file))))
-    line = :($DAECompiler.insert_new_lineinfo!($compact.ir.debuginfo, $source, $compact.result_idx, $line))
+    line = :($settings.insert_stmt_debuginfo ? $line : $DAECompiler.insert_new_lineinfo!($compact.ir.debuginfo, $source, $compact.result_idx, $line))
     insert_node_here(compact, line, ex, reverse_affinity)
 end
 

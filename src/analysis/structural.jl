@@ -16,14 +16,14 @@ function find_matching_ci(predicate, mi::MethodInstance, world::UInt)
     return nothing
 end
 
-function structural_analysis!(ci::CodeInstance, world::UInt)
+function structural_analysis!(ci::CodeInstance, world::UInt, settings::Settings)
     # Check if we have aleady done this work - if so return the cached result
     result_ci = find_matching_ci(ci->ci.owner == StructureCache(), ci.def, world)
     if result_ci !== nothing
         return result_ci.inferred
     end
 
-    result = _structural_analysis!(ci, world)
+    result = _structural_analysis!(ci, world, settings)
     # TODO: The world bounds might have been narrowed
     cache_dae_ci!(ci, result, nothing, nothing, StructureCache())
 
@@ -40,7 +40,7 @@ struct EqVarState
     eq_callee_mapping
 end
 
-function _structural_analysis!(ci::CodeInstance, world::UInt)
+function _structural_analysis!(ci::CodeInstance, world::UInt, settings::Settings)
     # Variables
     var_to_diff = DiffGraph(0)
     varclassification = VarEqClassification[]
@@ -83,7 +83,7 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
     compact = IncrementalCompact(ir)
     old_argtypes = copy(ir.argtypes)
     empty!(ir.argtypes)
-    (arg_replacements, new_argtypes, nexternalargvars, nexternaleqs) = flatten_arguments!(compact, old_argtypes, 0, 0, ir.argtypes)
+    (arg_replacements, new_argtypes, nexternalargvars, nexternaleqs) = flatten_arguments!(compact, settings, old_argtypes, 0, 0, ir.argtypes)
     if nexternalargvars == -1
         return UncompilableIPOResult(warnings, UnsupportedIRException("Unhandled argument types", Compiler.finish(compact)))
     end
@@ -98,7 +98,7 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
     argtypes = Any[Incidence(new_argtypes[i], i) for i = 1:nexternalargvars]
 
     # Allocate variable and equation numbers of any incoming arguments
-    refiner = StructuralRefiner(world, var_to_diff, varkinds, varclassification, eqkinds, eqclassification)
+    refiner = StructuralRefiner(world, settings, var_to_diff, varkinds, varclassification, eqkinds, eqclassification)
     nexternalargvars = length(var_to_diff)
 
     # Go through the IR, annotating each intrinsic with an appropriate taint
@@ -337,7 +337,7 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
         if isa(info, MappingInfo)
             (; result, mapping) = info
         else
-            result = structural_analysis!(callee_codeinst, Compiler.get_inference_world(refiner))
+            result = structural_analysis!(callee_codeinst, Compiler.get_inference_world(refiner), settings)
 
             if isa(result, UncompilableIPOResult)
                 # TODO: Stack trace?
@@ -360,7 +360,7 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
         # Rewrite to flattened ABI
         compact[SSAValue(i)] = nothing
         compact.result_idx -= 1
-        new_args = _flatten_parameter!(Compiler.optimizer_lattice(refiner), compact, callee_codeinst.inferred.ir.argtypes, arg->stmt.args[arg+1], line)
+        new_args = _flatten_parameter!(Compiler.optimizer_lattice(refiner), compact, callee_codeinst.inferred.ir.argtypes, arg->stmt.args[arg+1], line, settings)
 
         new_call = insert_node_here!(compact,
                 NewInstruction(Expr(:invoke, (StructuralSSARef(compact.result_idx), callee_codeinst), new_args...), stmtype, info, line, stmtflags))

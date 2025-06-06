@@ -1,4 +1,4 @@
-function _flatten_parameter!(𝕃, compact, argtypes, ntharg, line)
+function _flatten_parameter!(𝕃, compact, argtypes, ntharg, line, settings)
     list = Any[]
     for (argn, argt) in enumerate(argtypes)
         if isa(argt, Const)
@@ -18,11 +18,11 @@ function _flatten_parameter!(𝕃, compact, argtypes, ntharg, line)
                 continue
             end
             this = ntharg(argn)
-            nthfield(i) = @insert_node_here compact line getfield(this, i)::Compiler.getfield_tfunc(𝕃, argextype(this, compact), Const(i))
+            nthfield(i) = @insert_node_here compact line settings getfield(this, i)::Compiler.getfield_tfunc(𝕃, argextype(this, compact), Const(i))
             if isa(argt, PartialStruct)
-                fields = _flatten_parameter!(𝕃, compact, argt.fields, nthfield, line)
+                fields = _flatten_parameter!(𝕃, compact, argt.fields, nthfield, line, settings)
             else
-                fields = _flatten_parameter!(𝕃, compact, fieldtypes(argt), nthfield, line)
+                fields = _flatten_parameter!(𝕃, compact, fieldtypes(argt), nthfield, line, settings)
             end
             append!(list, fields)
         end
@@ -30,8 +30,8 @@ function _flatten_parameter!(𝕃, compact, argtypes, ntharg, line)
     return list
 end
 
-function flatten_parameter!(𝕃, compact, argtypes, ntharg, line)
-    return @insert_node_here compact line tuple(_flatten_parameter!(𝕃, compact, argtypes, ntharg, line)...)::Tuple
+function flatten_parameter!(𝕃, compact, argtypes, ntharg, line, settings)
+    return @insert_node_here compact line settings tuple(_flatten_parameter!(𝕃, compact, argtypes, ntharg, line, settings)...)::Tuple
 end
 
 # Needs to match flatten_arguments!
@@ -74,7 +74,7 @@ struct TransformedArg
     TransformedArg(@nospecialize(arg), new_offset::Int, new_eqoffset::Int) = new(arg, new_offset, new_eqoffset)
 end
 
-function flatten_argument!(compact::Compiler.IncrementalCompact, @nospecialize(argt), offset::Int, eqoffset::Int, argtypes::Vector{Any})::TransformedArg
+function flatten_argument!(compact::Compiler.IncrementalCompact, settings::Settings, @nospecialize(argt), offset::Int, eqoffset::Int, argtypes::Vector{Any})::TransformedArg
     @assert !isa(argt, Incidence) && !isa(argt, Eq)
     if isa(argt, Const)
         return TransformedArg(argt.val, offset, eqoffset)
@@ -84,28 +84,32 @@ function flatten_argument!(compact::Compiler.IncrementalCompact, @nospecialize(a
         push!(argtypes, argt)
         return TransformedArg(Argument(offset+1), offset+1, eqoffset)
     elseif argt === equation
-        ssa = @insert_node_here compact compact[Compiler.OldSSAValue(1)][:line] (:invoke)(nothing, InternalIntrinsics.external_equation)::Eq(eqoffset+1)
+        line = compact[Compiler.OldSSAValue(1)][:line]
+        ssa = @insert_node_here compact line settings (:invoke)(nothing, InternalIntrinsics.external_equation)::Eq(eqoffset+1)
         return TransformedArg(ssa, offset, eqoffset+1)
     elseif isabstracttype(argt) || ismutabletype(argt) || (!isa(argt, DataType) && !isa(argt, PartialStruct))
-        ssa = @insert_node_here compact compact[Compiler.OldSSAValue(1)][:line] error("Cannot IPO model arg type $argt")::Union{}
+        line = compact[Compiler.OldSSAValue(1)][:line]
+        ssa = @insert_node_here compact line settings error("Cannot IPO model arg type $argt")::Union{}
         return TransformedArg(ssa, -1, eqoffset)
     else
         if !isa(argt, PartialStruct) && Base.datatype_fieldcount(argt) === nothing
-            ssa = @insert_node_here compact compact[Compiler.OldSSAValue(1)][:line] error("Cannot IPO model arg type $argt")::Union{}
+            line = compact[Compiler.OldSSAValue(1)][:line]
+            ssa = @insert_node_here compact line settings error("Cannot IPO model arg type $argt")::Union{}
             return TransformedArg(ssa, -1, eqoffset)
         end
-        (args, _, offset) = flatten_arguments!(compact, isa(argt, PartialStruct) ? argt.fields : collect(Any, fieldtypes(argt)), offset, eqoffset, argtypes)
+        (args, _, offset) = flatten_arguments!(compact, settings, isa(argt, PartialStruct) ? argt.fields : collect(Any, fieldtypes(argt)), offset, eqoffset, argtypes)
         offset == -1 && return TransformedArg(ssa, -1, eqoffset)
         this = Expr(:new, isa(argt, PartialStruct) ? argt.typ : argt, args...)
-        ssa = @insert_node_here compact compact[Compiler.OldSSAValue(1)][:line] this::argt
+        line = compact[Compiler.OldSSAValue(1)][:line]
+        ssa = @insert_node_here compact line settings this::argt
         return TransformedArg(ssa, offset, eqoffset)
     end
 end
 
-function flatten_arguments!(compact::Compiler.IncrementalCompact, argtypes::Vector{Any}, offset::Int=0, eqoffset::Int=0, new_argtypes::Vector{Any} = Any[])
+function flatten_arguments!(compact::Compiler.IncrementalCompact, settings::Settings, argtypes::Vector{Any}, offset::Int=0, eqoffset::Int=0, new_argtypes::Vector{Any} = Any[])
     args = Any[]
     for argt in argtypes
-        (; ssa, offset, eqoffset) = flatten_argument!(compact, argt, offset, eqoffset, new_argtypes)
+        (; ssa, offset, eqoffset) = flatten_argument!(compact, settings, argt, offset, eqoffset, new_argtypes)
         offset == -1 && break
         push!(args, ssa)
     end

@@ -98,7 +98,7 @@ function gen_init_uncompress!(
                 spec_data = stmt.args[1]
                 callee_key = stmt.args[1][2]
                 callee_ordinal = stmt.args[1][end]::Int
-                callee_result = structural_analysis!(callee_ci, world)
+                callee_result = structural_analysis!(callee_ci, world, settings)
                 callee_daef_ci = rhs_finish!(callee_result, callee_ci, callee_key, world, settings, callee_ordinal)
                 # Allocate a continuous block of variables for all callee alg and diff states
 

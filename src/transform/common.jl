@@ -102,7 +102,6 @@ function replace_call!(ir::Union{IRCode,IncrementalCompact}, idx::SSAValue, @nos
     ir[idx][:type] = Any
     ir[idx][:info] = Compiler.NoCallInfo()
     ir[idx][:flag] |= Compiler.IR_FLAG_REFINED
-    @sshow source
     source === nothing && return new_call
     settings === nothing && return new_call
     settings.insert_stmt_debuginfo || return new_call
@@ -111,9 +110,7 @@ function replace_call!(ir::Union{IRCode,IncrementalCompact}, idx::SSAValue, @nos
         ir[idx][:line] = source
     else
         i = idx.id
-        @sshow typeof(ir)
         line = insert_new_lineinfo!(debuginfo, source, i, ir[idx][:line])
-        @sshow line
         ir[idx][:line] = line
     end
     return new_call
@@ -146,7 +143,6 @@ end
 
 function new_debuginfo_edge((; file, line)::LineNumberNode, prev_edge, prev_edge_line)
     if prev_edge !== nothing && prev_edge_line !== nothing
-        @sshow prev_edge_line
         codelocs = Int32[line, 1, prev_edge_line]
         edges = Core.svec(prev_edge)
     else

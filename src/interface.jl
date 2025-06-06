@@ -11,7 +11,7 @@ function factory_gen(@nospecialize(fT), settings::Settings, world::UInt = Base.g
     ci = ad_typeinf(world, Tuple{fT}; force_inline_all=settings.force_inline_all, edges=Core.svec(factory_mi))
 
     # Perform or lookup DAECompiler specific analysis for this system.
-    result = structural_analysis!(ci, world)
+    result = structural_analysis!(ci, world, settings)
 
     if isa(result, UncompilableIPOResult)
         if isa(result.error, FunctionErrorsException)

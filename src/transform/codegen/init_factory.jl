@@ -26,7 +26,7 @@ function init_uncompress_gen!(compact::Compiler.IncrementalCompact, result::DAEI
         @assert sicm_ci !== nothing
 
         line = result.ir[SSAValue(1)][:line]
-        param_list = flatten_parameter!(Compiler.fallback_lattice, compact, ci.inferred.ir.argtypes[1:end], argn->Argument(2+argn), line)
+        param_list = flatten_parameter!(Compiler.fallback_lattice, compact, ci.inferred.ir.argtypes[1:end], argn->Argument(2+argn), line, settings)
         sicm = insert_node_here!(compact,
             NewInstruction(Expr(:call, invoke, param_list, sicm_ci), Tuple, line))
     else

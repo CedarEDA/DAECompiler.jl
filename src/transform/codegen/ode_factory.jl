@@ -4,16 +4,16 @@
 Given an IR value `arg` that corresponds to `u` in SciML's ODE ABI, split it into component pieces for
 the DAECompiler internal ABI.
 """
-function sciml_ode_split_u!(compact, line, arg, numstates)
+function sciml_ode_split_u!(compact, line, settings, arg, numstates)
     ntotalstates = numstates[AssignedDiff] + numstates[UnassignedDiff] + numstates[Algebraic] + numstates[AlgebraicDerivative]
 
-    u_mm = @insert_node_here compact line view(arg,
+    u_mm = @insert_node_here compact line settings view(arg,
         1:numstates[AssignedDiff])::VectorViewType
-    u_unassgn = @insert_node_here compact line view(arg,
+    u_unassgn = @insert_node_here compact line settings view(arg,
         (numstates[AssignedDiff] + 1):(numstates[AssignedDiff] + numstates[UnassignedDiff]))::VectorViewType
-    alg = @insert_node_here compact line view(arg,
+    alg = @insert_node_here compact line settings view(arg,
         (numstates[AssignedDiff] + numstates[UnassignedDiff] + 1):(numstates[AssignedDiff] + numstates[UnassignedDiff] + numstates[Algebraic]))::VectorViewType
-    alg_derv = @insert_node_here compact line view(arg,
+    alg_derv = @insert_node_here compact line settings view(arg,
         (numstates[AssignedDiff] + numstates[UnassignedDiff] + numstates[Algebraic] + 1):ntotalstates)::VectorViewType
 
     return (u_mm, u_unassgn, alg, alg_derv)
@@ -70,8 +70,8 @@ function ode_factory_gen(state::TransformationState, ci::CodeInstance, key::Torn
         @assert sicm_ci !== nothing
 
         line = result.ir[SSAValue(1)][:line]
-        param_list = flatten_parameter!(Compiler.fallback_lattice, returned_ic, ci.inferred.ir.argtypes[1:end], argn->Argument(2+argn), line)
-        sicm_state = @insert_node_here returned_ic line (:call)(invoke, param_list, sicm_ci)::Tuple
+        param_list = flatten_parameter!(Compiler.fallback_lattice, returned_ic, ci.inferred.ir.argtypes[1:end], argn->Argument(2+argn), line, settings)
+        sicm_state = @insert_node_here returned_ic line settings (:call)(invoke, param_list, sicm_ci)::Tuple
     else
         sicm_state = ()
     end
@@ -108,29 +108,29 @@ function ode_factory_gen(state::TransformationState, ci::CodeInstance, key::Torn
     line = interface_ir[SSAValue(1)][:line]
 
     # Zero the output
-    @insert_node_here interface_ic line zero!(du)::VectorViewType
+    @insert_node_here interface_ic line settings zero!(du)::VectorViewType
 
     nassgn = numstates[AssignedDiff]
     nunassgn = numstates[UnassignedDiff]
     ntotalstates = numstates[AssignedDiff] + numstates[UnassignedDiff] + numstates[Algebraic] + numstates[AlgebraicDerivative]
 
-    (in_u_mm, in_u_unassgn, in_alg, in_alg_derv) = sciml_ode_split_u!(interface_ic, line, u, numstates)
-    out_du_mm = @insert_node_here interface_ic line view(du, 1:nassgn)::VectorViewType
-    out_du_unassgn = @insert_node_here interface_ic line view(du, (nassgn+1):(nassgn+nunassgn))::VectorViewType
-    out_eq = @insert_node_here interface_ic line view(du, (nassgn+nunassgn+1):ntotalstates)::VectorViewType
+    (in_u_mm, in_u_unassgn, in_alg, in_alg_derv) = sciml_ode_split_u!(interface_ic, line, settings, u, numstates)
+    out_du_mm = @insert_node_here interface_ic line settings view(du, 1:nassgn)::VectorViewType
+    out_du_unassgn = @insert_node_here interface_ic line settings view(du, (nassgn+1):(nassgn+nunassgn))::VectorViewType
+    out_eq = @insert_node_here interface_ic line settings view(du, (nassgn+nunassgn+1):ntotalstates)::VectorViewType
 
     # Call DAECompiler-generated RHS with internal ABI
-    sicm_oc = @insert_node_here interface_ic line getfield(self, 1)::Core.OpaqueClosure
+    sicm_oc = @insert_node_here interface_ic line settings getfield(self, 1)::Core.OpaqueClosure
 
     # N.B: The ordering of arguments should match the ordering in the StateKind enum
-    @insert_node_here interface_ic line (:invoke)(odef_ci, sicm_oc, (), in_u_mm, in_u_unassgn, in_alg_derv, in_alg, out_du_mm, out_eq, t)::Nothing
+    @insert_node_here interface_ic line settings (:invoke)(odef_ci, sicm_oc, (), in_u_mm, in_u_unassgn, in_alg_derv, in_alg, out_du_mm, out_eq, t)::Nothing
 
     # Assign the algebraic derivatives to the their corresponding variables
-    bc = @insert_node_here interface_ic line Base.Broadcast.broadcasted(identity, in_alg_derv)::Any
-    @insert_node_here interface_ic line Base.Broadcast.materialize!(out_du_unassgn, bc)::Nothing
+    bc = @insert_node_here interface_ic line settings Base.Broadcast.broadcasted(identity, in_alg_derv)::Any
+    @insert_node_here interface_ic line settings Base.Broadcast.materialize!(out_du_unassgn, bc)::Nothing
 
     # Return
-    @insert_node_here interface_ic line (return)::Union{}
+    @insert_node_here interface_ic line settings (return)::Union{}
 
     interface_ir = Compiler.finish(interface_ic)
     maybe_rewrite_debuginfo!(interface_ir, settings)
@@ -145,19 +145,28 @@ function ode_factory_gen(state::TransformationState, ci::CodeInstance, key::Torn
     @atomic interface_ci.max_world = @atomic ci.max_world
     @atomic interface_ci.min_world = 1 # @atomic ci.min_world
 
-    new_oc = @insert_node_here returned_ic line (:new_opaque_closure)(argt, Union{}, Nothing, true, interface_method, sicm_state)::Core.OpaqueClosure true
+    new_oc = @insert_node_here returned_ic line settings (:new_opaque_closure)(argt, Union{}, Nothing, true, interface_method, sicm_state)::Core.OpaqueClosure true
 
     nd = numstates[AssignedDiff] + numstates[UnassignedDiff]
     na = numstates[Algebraic] + numstates[AlgebraicDerivative]
-    mass_matrix = na == 0 ? GlobalRef(LinearAlgebra, :I) : @insert_node_here returned_ic line generate_ode_mass_matrix(nd, na)::Matrix{Float64}
+    mass_matrix = na == 0 ? GlobalRef(LinearAlgebra, :I) : @insert_node_here returned_ic line settings generate_ode_mass_matrix(nd, na)::Matrix{Float64}
     initf = init_key !== nothing ? init_uncompress_gen!(returned_ic, result, ci, init_key, key, world, settings) : nothing
-    odef = @insert_node_here returned_ic line make_odefunction(new_oc, mass_matrix, initf)::ODEFunction true
+    odef = @insert_node_here returned_ic line settings make_odefunction(new_oc, mass_matrix, initf)::ODEFunction true
 
-    odef_and_n = @insert_node_here returned_ic line tuple(odef, nd + na)::Tuple true
-    @insert_node_here returned_ic line (return odef_and_n)::Core.OpaqueClosure true
+    odef_and_n = @insert_node_here returned_ic line settings tuple(odef, nd + na)::Tuple true
+    @insert_node_here returned_ic line settings (return odef_and_n)::Core.OpaqueClosure true
 
     returned_ir = Compiler.finish(returned_ic)
     Compiler.verify_ir(returned_ir)
+
+    @async @eval Main begin
+        f_src = $ci.inferred
+        sicm_ir = $sicm_ir
+        interface_ir = $interface_ir
+        odef_ci = $odef_ci
+        odef_src = odef_ci.inferred
+        src = odef_src
+    end
 
     slotnames = [[:factory, :settings]; Symbol.(:arg, 1:(length(returned_ir.argtypes) - 2))]
     return returned_ir, slotnames
