@@ -109,7 +109,7 @@ function replace_call!(ir::Union{IRCode,IncrementalCompact}, idx::SSAValue, @nos
     if isa(source, Tuple)
         ir[idx][:line] = source
     else
-        line = maybe_insert_debuginfo!(debuginfo, settings, idx.id, source, ir[idx][:line], previous)
+        line = maybe_insert_debuginfo!(debuginfo, settings, idx.id, source, ir[idx][:line])
         ir[idx][:line] = line
     end
     return new_call
