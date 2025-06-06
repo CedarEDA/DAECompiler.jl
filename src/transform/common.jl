@@ -76,7 +76,7 @@ function rewrite_debuginfo!(ir::IRCode)
         annotation = type === nothing ? "" : " (inferred type: $type)"
         filename = Symbol("%$i = $(stmt[:inst])", annotation)
         lineno = LineNumberNode(1, filename)
-        stmt[:line] = insert_debuginfo!(ir.debuginfo, lineno, i, stmt[:line])
+        stmt[:line] = insert_debuginfo!(ir.debuginfo, i, lineno, stmt[:line])
     end
 end
 
@@ -109,23 +109,22 @@ function replace_call!(ir::Union{IRCode,IncrementalCompact}, idx::SSAValue, @nos
     if isa(source, Tuple)
         ir[idx][:line] = source
     else
-        i = idx.id
-        line = maybe_insert_debuginfo!(debuginfo, settings, source, i, ir[idx][:line])
+        line = maybe_insert_debuginfo!(debuginfo, settings, idx.id, source, ir[idx][:line], previous)
         ir[idx][:line] = line
     end
     return new_call
 end
 
-function maybe_insert_debuginfo!(compact::IncrementalCompact, settings::Settings, source::LineNumberNode, previous = nothing, idx = compact.result_idx)
-    insert_debuginfo!(compact.ir.debuginfo, source, compact.result_idx, previous)
+function maybe_insert_debuginfo!(compact::IncrementalCompact, settings::Settings, source::LineNumberNode, previous = nothing, i = compact.result_idx)
+    maybe_insert_debuginfo!(compact.ir.debuginfo, settings, i, source, previous)
 end
 
-function maybe_insert_debuginfo!(debuginfo::DebugInfoStream, settings::Settings, source::LineNumberNode, previous, i)
+function maybe_insert_debuginfo!(debuginfo::DebugInfoStream, settings::Settings, i::Integer, source::LineNumberNode, previous)
     settings.insert_stmt_debuginfo || return previous
-    insert_debuginfo!(debuginfo, source, i, previous)
+    insert_debuginfo!(debuginfo, i, source, previous)
 end
 
-function insert_debuginfo!(debuginfo::DebugInfoStream, source::LineNumberNode, i::Integer, previous)
+function insert_debuginfo!(debuginfo::DebugInfoStream, i::Integer, source::LineNumberNode, previous)
     if previous !== nothing && isa(previous, Tuple)
         prev_edge_index, prev_edge_line = previous[2], previous[3]
     else

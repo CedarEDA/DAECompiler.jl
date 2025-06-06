@@ -114,7 +114,7 @@ end
 """
 macro insert_node_here(compact, line, settings, ex, reverse_affinity = false)
     source = :(LineNumberNode($(__source__.line), $(QuoteNode(__source__.file))))
-    line = :($DAECompiler.maybe_insert_debuginfo!($compact, $settings, $source, $compact.result_idx, $line))
+    line = :($DAECompiler.maybe_insert_debuginfo!($compact, $settings, $source, $line, $compact.result_idx))
     generate_insert_node_here(compact, line, ex, reverse_affinity)
 end
 
