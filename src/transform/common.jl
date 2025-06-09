@@ -98,8 +98,7 @@ function replace_call!(ir::Union{IRCode,IncrementalCompact}, idx::SSAValue, @nos
     if isa(source, Tuple)
         ir[idx][:line] = source
     else
-        line = maybe_insert_debuginfo!(debuginfo, settings, idx.id, source, ir[idx][:line])
-        ir[idx][:line] = line
+        maybe_insert_debuginfo!(debuginfo, settings, idx.id, source, ir[idx][:line])
     end
     return new_call
 end
@@ -125,15 +124,6 @@ end
 function insert_debuginfo!(debuginfo::DebugInfoStream, i::Integer, source::LineNumberNode, previous)
     if previous !== nothing && isa(previous, Tuple)
         prev_edge_index, prev_edge_line = previous[2], previous[3]
-    else
-        j = i - 1
-        ref = get(debuginfo.codelocs, 3(j - 1) + 1, nothing)
-        while ref == 0 && j > 1
-            ref = get(debuginfo.codelocs, 3(j - 1) + 1, nothing)
-            j -= 1
-        end
-        prev_edge_index = get(debuginfo.codelocs, 3(j - 1) + 2, nothing)
-        prev_edge_line = get(debuginfo.codelocs, 3(j - 1) + 3, nothing)
     end
     prev_edge = prev_edge_index === nothing ? nothing : get(debuginfo.edges, prev_edge_index, nothing)
     edge = new_debuginfo_edge(source, prev_edge, prev_edge_line)
@@ -157,7 +147,7 @@ function new_debuginfo_edge((; file, line)::LineNumberNode, prev_edge, prev_edge
     end
     firstline = codelocs[1]
     compressed = ccall(:jl_compress_codelocs, Any, (Int32, Any, Int), firstline, codelocs, 1)
-    DebugInfo(@something(file, :(var"")), nothing, edges, compressed)
+    DebugInfo(@something(file, :none), nothing, edges, compressed)
 end
 
 is_solved_variable(stmt) = isexpr(stmt, :call) && stmt.args[1] == solved_variable ||
