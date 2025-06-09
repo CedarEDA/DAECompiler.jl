@@ -72,16 +72,17 @@ function rewrite_debuginfo!(ir::IRCode)
     for (i, stmt) in enumerate(ir.stmts)
         type = stmt[:type]
         annotation = type === nothing ? "" : " (inferred type: $type)"
-        # Work around showing functions requiring `invokelatest` queries
-        # that are problematic to execute from generated functions.
-        local filename
+        # Work around `show` functions requiring `invokelatest` queries
+        # that may be problematic to execute from within generated functions.
+        local inst
         try
-            filename = Symbol("%$i = $(stmt[:inst])", annotation)
+            inst = string(stmt[:inst])
         catch e
             isa(e, UndefVarError) && continue
             rethrow()
         end
-        lineno = LineNumberNode(1, filename::Symbol)
+        filename = Symbol("%$i = $inst", annotation)
+        lineno = LineNumberNode(1, filename)
         stmt[:line] = insert_debuginfo!(ir.debuginfo, i, lineno, stmt[:line])
     end
 end
