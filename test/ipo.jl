@@ -424,10 +424,10 @@ result = @code_structure result = true internal_variable_leaking()
 @test length(result.varkinds) == 4 # 2 states + their differentials
 @test length(result.eqkinds) == 2
 
-# dae_sol = solve(DAECProblem(internal_variable_leaking, (1, 2) .=> 1.), IDA())
-# ode_sol = solve(ODECProblem(internal_variable_leaking, (1, 2) .=> 1.), Rodas5(autodiff=false))
-# for (sol, i) in Iterators.product((dae_sol, ode_sol), 1:2)
-#     @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[i, :], exp.(sol.t)))
-# end
+dae_sol = solve(DAECProblem(internal_variable_leaking, (1, 2) .=> 1.), IDA())
+ode_sol = solve(ODECProblem(internal_variable_leaking, (1, 2) .=> 1.), Rodas5(autodiff=false))
+for (sol, i) in Iterators.product((dae_sol, ode_sol), 1:2)
+    @test all(map((x,y)->isapprox(x[], y, atol=1e-2), sol[i, :], exp.(sol.t)))
+end
 
 end
