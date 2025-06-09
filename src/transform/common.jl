@@ -69,8 +69,6 @@ function maybe_rewrite_debuginfo!(ir::IRCode, settings::Settings)
 end
 
 function rewrite_debuginfo!(ir::IRCode)
-    debuginfo = ir.debuginfo
-    firstline = debuginfo.firstline
     for (i, stmt) in enumerate(ir.stmts)
         type = stmt[:type]
         annotation = type === nothing ? "" : " (inferred type: $type)"
