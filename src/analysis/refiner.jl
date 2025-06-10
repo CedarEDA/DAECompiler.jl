@@ -7,6 +7,7 @@ of structural incidence information.
 """
 struct StructuralRefiner <: Compiler.AbstractInterpreter
     world::UInt
+    settings::Settings
     var_to_diff::DiffGraph
     varkinds::Vector{Intrinsics.VarKind}
     varclassification::Vector{VarEqClassification}
@@ -51,7 +52,7 @@ Compiler.cache_owner(::StructuralRefiner) = StructureCache()
     end
 
     callee_codeinst = invokee::CodeInstance
-    callee_result = structural_analysis!(callee_codeinst, Compiler.get_inference_world(interp))
+    callee_result = structural_analysis!(callee_codeinst, Compiler.get_inference_world(interp), interp.settings)
 
     if isa(callee_result, UncompilableIPOResult) || isa(callee_result.extended_rt, Const) || isa(callee_result.extended_rt, Type)
         # If this is uncompilable, we will be notfiying the user in the outer loop - here we just ignore it

@@ -40,9 +40,8 @@ function widen_extra_info!(ir)
     end
 end
 
-function ir_to_src(ir::IRCode, settings::Settings)
+function ir_to_src(ir::IRCode, settings::Settings; slotnames = nothing)
     isva = false
-    slotnames = nothing
     ir.debuginfo.def === nothing && (ir.debuginfo.def = :var"generated IR for OpaqueClosure")
     maybe_rewrite_debuginfo!(ir, settings)
     nargtypes = length(ir.argtypes)
@@ -65,29 +64,27 @@ function ir_to_src(ir::IRCode, settings::Settings)
 end
 
 function maybe_rewrite_debuginfo!(ir::IRCode, settings::Settings)
-    settings.insert_stmt_debuginfo && rewrite_debuginfo!(ir)
+    settings.insert_ssa_debuginfo && rewrite_debuginfo!(ir)
     return ir
 end
 
 function rewrite_debuginfo!(ir::IRCode)
-    debuginfo = ir.debuginfo
-    firstline = debuginfo.firstline
-    empty!(debuginfo.edges)
-    empty!(debuginfo.codelocs)
     for (i, stmt) in enumerate(ir.stmts)
-        push!(debuginfo.codelocs, i, i, 1)
-        inst = stmt[:inst]
         type = stmt[:type]
-        push!(debuginfo.edges, debuginfo_edge(i, inst, type))
+        annotation = type === nothing ? "" : " (inferred type: $type)"
+        # Work around `show` functions requiring `invokelatest` queries
+        # that may be problematic to execute from within generated functions.
+        local inst
+        try
+            inst = string(stmt[:inst])
+        catch e
+            isa(e, UndefVarError) && continue
+            rethrow()
+        end
+        filename = Symbol("%$i = $inst", annotation)
+        lineno = LineNumberNode(1, filename)
+        stmt[:line] = insert_debuginfo!(ir.debuginfo, i, lineno, stmt[:line])
     end
-end
-
-function debuginfo_edge(i, stmt, type)
-    annotation = type === nothing ? "" : " (inferred type: $type)"
-    filename = Symbol("%$i = $stmt", annotation)
-    codelocs = Int32[1, 0, 0]
-    compressed = ccall(:jl_compress_codelocs, Any, (Int32, Any, Int), 1#=firstline=#, codelocs, 1)
-    DebugInfo(filename, nothing, Core.svec(), compressed)
 end
 
 function cache_dae_ci!(old_ci, src, debuginfo, abi, owner; rettype=Tuple)
@@ -101,12 +98,63 @@ function cache_dae_ci!(old_ci, src, debuginfo, abi, owner; rettype=Tuple)
     return daef_ci
 end
 
+function replace_call!(ir::Union{IRCode,IncrementalCompact}, idx::SSAValue, @nospecialize(new_call), settings::Settings, source)
+    replace_call!(ir, idx, new_call)
+    settings.insert_stmt_debuginfo || return new_call
+    debuginfo = isa(ir, IncrementalCompact) ? ir.ir.debuginfo : ir.debuginfo
+    if isa(source, Tuple)
+        ir[idx][:line] = source
+    else
+        maybe_insert_debuginfo!(debuginfo, settings, idx.id, source, ir[idx][:line])
+    end
+    return new_call
+end
+
 function replace_call!(ir::Union{IRCode,IncrementalCompact}, idx::SSAValue, @nospecialize(new_call))
     @assert !isa(ir[idx][:inst], PhiNode)
     ir[idx][:inst] = new_call
     ir[idx][:type] = Any
     ir[idx][:info] = Compiler.NoCallInfo()
     ir[idx][:flag] |= Compiler.IR_FLAG_REFINED
+    return new_call
+end
+
+function maybe_insert_debuginfo!(compact::IncrementalCompact, settings::Settings, source::LineNumberNode, previous = nothing, i = compact.result_idx)
+    maybe_insert_debuginfo!(compact.ir.debuginfo, settings, i, source, previous)
+end
+
+function maybe_insert_debuginfo!(debuginfo::DebugInfoStream, settings::Settings, i::Integer, source::LineNumberNode, previous)
+    settings.insert_stmt_debuginfo || return previous
+    insert_debuginfo!(debuginfo, i, source, previous)
+end
+
+function insert_debuginfo!(debuginfo::DebugInfoStream, i::Integer, source::LineNumberNode, previous)
+    if previous !== nothing && isa(previous, Tuple)
+        prev_edge_index, prev_edge_line = previous[2], previous[3]
+    end
+    prev_edge = prev_edge_index === nothing ? nothing : get(debuginfo.edges, prev_edge_index, nothing)
+    edge = new_debuginfo_edge(source, prev_edge, prev_edge_line)
+    push!(debuginfo.edges, edge)
+    edge_index = length(debuginfo.edges)
+    line = Int32.((i, edge_index, 1))
+    length(debuginfo.codelocs) ≥ 3i || resize!(debuginfo.codelocs, 3i)
+    debuginfo.codelocs[3(i - 1) + 1] = line[1]
+    debuginfo.codelocs[3(i - 1) + 2] = line[2]
+    debuginfo.codelocs[3(i - 1) + 3] = line[3]
+    return line
+end
+
+function new_debuginfo_edge((; file, line)::LineNumberNode, prev_edge, prev_edge_line)
+    if prev_edge !== nothing && prev_edge_line !== nothing
+        codelocs = Int32[line, 1, prev_edge_line]
+        edges = Core.svec(prev_edge)
+    else
+        codelocs = [line, 0, 0]
+        edges = Core.svec()
+    end
+    firstline = codelocs[1]
+    compressed = ccall(:jl_compress_codelocs, Any, (Int32, Any, Int), firstline, codelocs, 1)
+    DebugInfo(@something(file, :none), nothing, edges, compressed)
 end
 
 is_solved_variable(stmt) = isexpr(stmt, :call) && stmt.args[1] == solved_variable ||
@@ -133,7 +181,7 @@ If doing an ODE, then can put `nothing` for `du` argument as we know it will not
 If `var_assignment` is `nothing`, all variables are assumed unassigned. In this
 case `u` and `du` may be `nothing` as well.
 """
-function replace_if_intrinsic!(compact, ssa, du, u, p, t, var_assignment)
+function replace_if_intrinsic!(compact, settings, ssa, du, u, p, t, var_assignment)
     inst = compact[ssa]
     stmt = inst[:inst]
     # Transform references to `Argument(1)` into `p`
@@ -161,7 +209,7 @@ function replace_if_intrinsic!(compact, ssa, du, u, p, t, var_assignment)
             inst[:inst] = GlobalRef(DAECompiler.Intrinsics, :_VARIABLE_UNASSIGNED)
         else
             source = in_du ? du : u
-            replace_call!(compact, ssa, Expr(:call, getindex, source, var_idx))
+            replace_call!(compact, ssa, Expr(:call, getindex, source, var_idx), settings, @__SOURCE__)
         end
     elseif is_known_invoke_or_call(stmt, sim_time, compact)
         inst[:inst] = t

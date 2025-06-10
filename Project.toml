@@ -13,6 +13,7 @@ CentralizedCaches = "d1073d05-2d26-4019-b855-dfa0385fef5e"
 ChainRules = "082447d4-558c-5d27-93f4-14fc19e9eca2"
 ChainRulesCore = "d360d2e6-b24c-11e9-a2a3-2a2ae2dbcce4"
 Compiler = "807dbc54-b67e-4c79-8afb-eafe4df6f2e1"
+ConstructionBase = "187b0558-2788-49d3-abe0-74a17ed4e7c9"
 Cthulhu = "f68482b8-f384-11e8-15f7-abe071a5a75f"
 DiffEqBase = "2b5f629d-d688-5b77-993f-72d75c75574e"
 DiffEqCallbacks = "459566f4-90b8-5000-8ac3-15dfb0a30def"
@@ -46,6 +47,7 @@ ModelingToolkit = "961ee093-0014-501f-94e3-6117800e7a78"
 
 [sources]
 Compiler = {rev = "master", url = "https://github.com/JuliaLang/BaseCompiler.jl.git"}
+ConstructionBase = {rev = "rebase_PR_100", url = "https://github.com/nsajko/ConstructionBase.jl"}
 Cthulhu = {rev = "master", url = "https://github.com/JuliaDebug/Cthulhu.jl.git"}
 DifferentiationInterface = {rev = "main", subdir = "DifferentiationInterface", url = "https://github.com/Keno/DifferentiationInterface.jl"}
 Diffractor = {rev = "main", url = "https://github.com/JuliaDiff/Diffractor.jl.git"}
@@ -59,6 +61,7 @@ CentralizedCaches = "1.1.0"
 ChainRules = "1.50"
 ChainRulesCore = "1.20"
 Compiler = "0"
+ConstructionBase = "1.5.9"
 DiffEqBase = "6.149.2"
 DifferentiationInterface = "0.6.52"
 Diffractor = "0.2.7"
