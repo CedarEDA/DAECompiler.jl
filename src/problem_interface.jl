@@ -41,7 +41,7 @@ function DAECProblem(f, tspan::Tuple{Real, Real} = (0., 1.);
 end
 
 function DiffEqBase.get_concrete_problem(prob::DAECProblem, isadaptive; kwargs...)
-    settings = Settings(; mode=prob.init === nothing ? DAE : DAENoInit, prob.settings.force_inline_all, prob.settings.insert_stmt_debuginfo, prob.insert_ssa_debuginfo)
+    settings = Settings(; mode=prob.init === nothing ? DAE : DAENoInit, prob.settings.force_inline_all, prob.settings.insert_stmt_debuginfo, prob.settings.insert_ssa_debuginfo)
     (daef, differential_vars) = factory(Val(settings), prob.f)
 
     u0 = zeros(length(differential_vars))
@@ -93,7 +93,7 @@ function ODECProblem(f, tspan::Tuple{Real, Real} = (0., 1.);
 end
 
 function DiffEqBase.get_concrete_problem(prob::ODECProblem, isadaptive; kwargs...)
-    settings = Settings(; mode=prob.init === nothing ? ODE : ODENoInit, prob.settings.force_inline_all, prob.settings.insert_stmt_debuginfo, prob.insert_ssa_debuginfo)
+    settings = Settings(; mode=prob.init === nothing ? ODE : ODENoInit, prob.settings.force_inline_all, prob.settings.insert_stmt_debuginfo, prob.settings.insert_ssa_debuginfo)
     (odef, n) = factory(Val(settings), prob.f)
 
     u0 = zeros(n)
