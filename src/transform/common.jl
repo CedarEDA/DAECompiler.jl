@@ -64,7 +64,7 @@ function ir_to_src(ir::IRCode, settings::Settings; slotnames = nothing)
 end
 
 function maybe_rewrite_debuginfo!(ir::IRCode, settings::Settings)
-    settings.insert_stmt_debuginfo && rewrite_debuginfo!(ir)
+    settings.insert_ssa_debuginfo && rewrite_debuginfo!(ir)
     return ir
 end
 
