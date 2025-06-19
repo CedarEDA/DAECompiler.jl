@@ -362,9 +362,8 @@ function _structural_analysis!(ci::CodeInstance, world::UInt, settings::Settings
         compact.result_idx -= 1
         new_args = _flatten_parameter!(Compiler.optimizer_lattice(refiner), compact, callee_codeinst.inferred.ir.argtypes, arg->stmt.args[arg+1], line, settings)
 
-        thisline = maybe_insert_debuginfo!(compact, settings, @__SOURCE__(), line)
-        new_call = insert_node_here!(compact,
-                NewInstruction(Expr(:invoke, (StructuralSSARef(compact.result_idx), callee_codeinst), new_args...), stmtype, info, thisline, stmtflags))
+        new_call = insert_instruction!(compact, settings, @__SOURCE__,
+                NewInstruction(Expr(:invoke, (StructuralSSARef(compact.result_idx), callee_codeinst), new_args...), stmtype, info, line, stmtflags))
         compact.ssa_rename[compact.idx - 1] = new_call
 
         cms = CallerMappingState(result, refiner.var_to_diff, refiner.varclassification, refiner.varkinds, eqclassification, eqkinds)
@@ -388,8 +387,7 @@ function _structural_analysis!(ci::CodeInstance, world::UInt, settings::Settings
         Compiler.delete_inst_here!(compact)
 
         (new_ret, ultimate_rt) = rewrite_ipo_return!(Compiler.typeinf_lattice(refiner), compact, line, settings, ret_stmt.val, ultimate_rt, eqvars)
-        thisline = maybe_insert_debuginfo!(compact, settings, @__SOURCE__(), line)
-        insert_node_here!(compact, NewInstruction(ReturnNode(new_ret), ultimate_rt, Compiler.NoCallInfo(), thisline, Compiler.IR_FLAG_REFINED), true)
+        insert_instruction!(compact, settings, @__SOURCE__, NewInstruction(ReturnNode(new_ret), ultimate_rt, Compiler.NoCallInfo(), line, Compiler.IR_FLAG_REFINED), reverse_affinity = true)
     elseif isa(ultimate_rt, Type)
         # If we don't have any internal variables (in which case we might have to to do a more aggressive rewrite), strengthen the incidence
         # by demoting to full incidence over the argument variables. Incidence is not allowed to propagate through global mutable state, so
@@ -427,9 +425,8 @@ function rewrite_ipo_return!(𝕃, compact::IncrementalCompact, line, settings, 
         new_types = Any[]
         for i = 1:length(ultimate_rt.fields)
             ssa_type = Compiler.getfield_tfunc(𝕃, ultimate_rt, Const(i))
-            thisline = maybe_insert_debuginfo!(compact, settings, @__SOURCE__(), line)
-            ssa_field = insert_node_here!(compact,
-                NewInstruction(Expr(:call, getfield, variable), ssa_type, Compiler.NoCallInfo(), thisline, Compiler.IR_FLAG_REFINED), true)
+            ssa_field = insert_instruction!(compact, settings, @__SOURCE__,
+                NewInstruction(Expr(:call, getfield, variable), ssa_type, Compiler.NoCallInfo(), line, Compiler.IR_FLAG_REFINED), reverse_affinity = true)
 
             (new_field, new_type) = rewrite_ipo_return!(𝕃, compact, line, settings, ssa_field, ssa_type, eqvars)
             push!(new_fields, new_field)
@@ -437,17 +434,14 @@ function rewrite_ipo_return!(𝕃, compact::IncrementalCompact, line, settings, 
         end
         newT = Compiler.PartialStruct(ultimate_rt.typ, new_types)
         if widenconst(ultimate_rt) <: Tuple
-            thisline = maybe_insert_debuginfo!(compact, settings, @__SOURCE__(), line)
-            retssa = insert_node_here!(compact,
-                NewInstruction(Expr(:call, tuple, new_fields...), newT, Compiler.NoCallInfo(), thisline, Compiler.IR_FLAG_REFINED), true)
+            retssa = insert_instruction!(compact, settings, @__SOURCE__,
+                NewInstruction(Expr(:call, tuple, new_fields...), newT, Compiler.NoCallInfo(), line, Compiler.IR_FLAG_REFINED), reverse_affinity = true)
         else
-            thisline = maybe_insert_debuginfo!(compact, settings, @__SOURCE__(), line)
-            T = insert_node_here!(compact,
-                NewInstruction(Expr(:call, typeof, ssa), Type, Compiler.NoCallInfo(), thisline, Compiler.IR_FLAG_REFINED), true)
+            T = insert_instruction!(compact, settings, @__SOURCE__,
+                NewInstruction(Expr(:call, typeof, ssa), Type, Compiler.NoCallInfo(), line, Compiler.IR_FLAG_REFINED), reverse_affinity = true)
 
-            thisline = maybe_insert_debuginfo!(compact, settings, @__SOURCE__(), line)
-            retssa = insert_node_here!(compact,
-                NewInstruction(Expr(:new, T, new_fields...), newT, Compiler.NoCallInfo(), thisline, Compiler.IR_FLAG_REFINED), true)
+            retssa = insert_instruction!(compact, settings, @__SOURCE__,
+                NewInstruction(Expr(:new, T, new_fields...), newT, Compiler.NoCallInfo(), line, Compiler.IR_FLAG_REFINED), reverse_affinity = true)
         end
         return Pair{Any, Any}(retssa, newT)
     end
@@ -460,9 +454,8 @@ function rewrite_ipo_return!(𝕃, compact::IncrementalCompact, line, settings, 
     push!(eqvars.varclassification, External)
     push!(eqvars.varkinds, Intrinsics.Continuous)
 
-    thisline = maybe_insert_debuginfo!(compact, settings, @__SOURCE__(), line)
-    new_var_ssa = insert_node_here!(compact,
-        NewInstruction(Expr(:invoke, nothing, variable), Incidence(nonlinrepl), Compiler.NoCallInfo(), thisline, Compiler.IR_FLAG_REFINED), true)
+    new_var_ssa = insert_instruction!(compact, settings,
+        NewInstruction(Expr(:invoke, nothing, variable), Incidence(nonlinrepl), Compiler.NoCallInfo(), line, Compiler.IR_FLAG_REFINED), true)
 
     eq_incidence = ultimate_rt - Incidence(nonlinrepl)
     push!(eqvars.total_incidence, eq_incidence)
@@ -471,17 +464,14 @@ function rewrite_ipo_return!(𝕃, compact::IncrementalCompact, line, settings, 
     push!(eqvars.eqkinds, Intrinsics.Always)
     new_eq = length(eqvars.total_incidence)
 
-    thisline = maybe_insert_debuginfo!(compact, settings, @__SOURCE__(), line)
-    new_eq_ssa = insert_node_here!(compact,
-        NewInstruction(Expr(:invoke, nothing, equation), Eq(new_eq), Compiler.NoCallInfo(), thisline, Compiler.IR_FLAG_REFINED), true)
+    new_eq_ssa = insert_instruction!(compact, settings, @__SOURCE__,
+        NewInstruction(Expr(:invoke, nothing, equation), Eq(new_eq), Compiler.NoCallInfo(), LINE, Compiler.IR_FLAG_REFINED), true)
 
-    thisline = maybe_insert_debuginfo!(compact, settings, @__SOURCE__(), line)
-    eq_val_ssa = insert_node_here!(compact,
-        NewInstruction(Expr(:call, InternalIntrinsics.assign_var, new_var_ssa, ssa), eq_incidence, Compiler.NoCallInfo(), thisline, Compiler.IR_FLAG_REFINED), true)
+    eq_val_ssa = insert_instruction!(compact, settings, @__SOURCE__,
+        NewInstruction(Expr(:call, InternalIntrinsics.assign_var, new_var_ssa, ssa), eq_incidence, Compiler.NoCallInfo(), LINE, Compiler.IR_FLAG_REFINED), true)
 
-    thisline = maybe_insert_debuginfo!(compact, settings, @__SOURCE__(), line)
-    eq_call_ssa = insert_node_here!(compact,
-        NewInstruction(Expr(:invoke, nothing, new_eq_ssa, eq_val_ssa), Nothing, Compiler.NoCallInfo(), thisline, Compiler.IR_FLAG_REFINED), true)
+    eq_call_ssa = insert_instruction!(compact, settings, @__SOURCE__,
+        NewInstruction(Expr(:invoke, nothing, new_eq_ssa, eq_val_ssa), Nothing, Compiler.NoCallInfo(), LINE, Compiler.IR_FLAG_REFINED), true)
 
     T = widenconst(ultimate_rt)
     # TODO: We don't have a way to express that the return value is directly this variable for arbitrary types

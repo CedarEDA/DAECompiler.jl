@@ -38,7 +38,7 @@ function ir_add!(compact::IncrementalCompact, line, settings::Settings, @nospeci
     (b === nothing || b === 0.) && return _a
     (a === nothing || b === 0.) && return _b
     source = @something(source, @__SOURCE__)
-    idx = _insert_node_here!(compact, line, settings, source, :($a + $b), Any)
+    idx = insert_instruction!(compact, line, settings, source, :($a + $b), Any)
     compact[idx][:flag] |= Compiler.IR_FLAG_REFINED
     idx
 end
@@ -48,7 +48,7 @@ function ir_mul_const!(compact, line, settings, coeff::Float64, _a, source = not
         return _a
     end
     source = @something(source, @__SOURCE__)
-    idx = _insert_node_here!(compact, line, settings, source, :($coeff * $_a), Any)
+    idx = insert_instruction!(compact, line, settings, source, :($coeff * $_a), Any)
     compact[idx][:flag] |= Compiler.IR_FLAG_REFINED
     return idx
 end
@@ -228,8 +228,7 @@ function schedule_nonlinear!(compact, settings, param_vars, var_eq_matching, ir,
             new_stmt.args[i] = arg
         end
 
-        thisline = maybe_insert_debuginfo!(compact, settings, @__SOURCE__(), inst.line)
-        ret = insert_node_here!(compact, NewInstruction(inst; stmt=new_stmt, line=thisline))
+        ret = insert_instruction!(compact, settings, @__SOURCE__, NewInstruction(inst; stmt=new_stmt, line))
     end
 
     ssa_rename[val.id] = isa(ret, SSAValue) ? CarriedSSAValue(ordinal, ret.id) : ret
@@ -904,10 +903,8 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
                         push!(in_param_vars.args, argval)
                     end
 
-                    thisline = maybe_insert_debuginfo!(compact, settings, @__SOURCE__(), inst.line)
-                    new_stmt.args[2] = insert_node_here!(compact, NewInstruction(inst; stmt=in_param_vars, type=Tuple, flag=UInt32(0), line=thisline))
-                    thisline = maybe_insert_debuginfo!(compact, settings, @__SOURCE__(), inst.line)
-                    sstate = insert_node_here!(compact, NewInstruction(inst; stmt=new_stmt, type=Tuple, flag=UInt32(0), line=thisline))
+                    new_stmt.args[2] = insert_instruction!(compact, settinsg, NewInstruction(inst; stmt=in_param_vars, type=Tuple, flag=UInt32(0), line))
+                    sstate = insert_instruction!(compact, settinsg, NewInstruction(inst; stmt=new_stmt, type=Tuple, flag=UInt32(0), line))
                     carried_states[sref] = CarriedSSAValue(0, sstate.id)
                 else
                     carried_states[sref] = isdefined(callee_sicm_ci, :rettype_const) ? callee_sicm_ci.rettype_const : callee_sicm_ci.rettype.instance
@@ -1031,8 +1028,7 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
                     push!(in_vars.args, argval)
                 end
 
-                thisline = maybe_insert_debuginfo!(compact1, settings, @__SOURCE__(), eqinst.line)
-                in_vars_ssa = insert_node_here!(compact1, NewInstruction(eqinst; stmt=in_vars, type=Tuple, line=thisline))
+                in_vars_ssa = insert_instruction!(compact1, settings, @__SOURCE__, NewInstruction(eqinst; stmt=in_vars, type=Tuple, line))
 
                 new_stmt = copy(eqinst[:stmt])
                 resize!(new_stmt.args, 2)
@@ -1050,21 +1046,17 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
 
                 callee_ordinals[eq] = callee_ordinal+1
 
-                thisline = maybe_insert_debuginfo!(compact, settings, @__SOURCE__(), eqinst.line)
-                this_call = insert_node_here!(compact1, NewInstruction(eqinst; stmt=urs[], line=thisline))
+                this_call = insert_instruction!(compact1, settings, @__SOURCE__, NewInstruction(eqinst; stmt=urs[], line))
 
-                thisline = maybe_insert_debuginfo!(compact, settings, @__SOURCE__(), eqinst.line)
-                this_eqresids = insert_node_here!(compact1, NewInstruction(eqinst; stmt=Expr(:call, getfield, this_call, 1), type=Any, line=thisline))
+                this_eqresids = insert_instruction!(compact1, settings, @__SOURCE__, NewInstruction(eqinst; stmt=Expr(:call, getfield, this_call, 1), type=Any, line))
 
-                thisline = maybe_insert_debuginfo!(compact, settings, @__SOURCE__(), eqinst.line)
-                new_state = insert_node_here!(compact1, NewInstruction(eqinst; stmt=Expr(:call, getfield, this_call, 2), type=Any, line=thisline))
+                new_state = insert_instruction!(compact1, settings, @__SOURCE__, NewInstruction(eqinst; stmt=Expr(:call, getfield, this_call, 2), type=Any, line))
 
                 carried_states[eq] = CarriedSSAValue(ordinal, new_state.id)
 
                 for (idx, this_callee_eq) in enumerate(callee_out_eqs)
                     this_eq = callee_eq_mapping[eq][this_callee_eq]
-                    thisline = maybe_insert_debuginfo!(compact, settings, @__SOURCE__(), eqinst.line)
-                    curval = insert_node_here!(compact1, NewInstruction(eqinst; stmt=Expr(:call, getfield, this_eqresids, idx), type=Any, line=thisline))
+                    curval = insert_instruction!(compact1, settings, @__SOURCE__, NewInstruction(eqinst; stmt=Expr(:call, getfield, this_eqresids, idx), type=Any, line))
                     push!(eqs[this_eq][2], NewSSAValue(curval.id))
                 end
             else

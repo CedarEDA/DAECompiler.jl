@@ -103,7 +103,7 @@ end
 
 "Get the current file location as a `LineNumberNode`."
 macro __SOURCE__()
-    :(LineNumberNode($(__source__.line), $(QuoteNode(__source__.file))))
+    return :(LineNumberNode($(__source__.line), $(QuoteNode(__source__.file))))
 end
 
 """
@@ -114,43 +114,46 @@ end
 """
 macro insert_node_here(compact, line, settings, ex, reverse_affinity = false)
     source = :(LineNumberNode($(__source__.line), $(QuoteNode(__source__.file))))
-    generate_insert_node_here(compact, line, settings, ex, source, reverse_affinity)
+    return generate_insert_instruction(compact, line, settings, ex, source, reverse_affinity)
 end
 
-function generate_insert_node_here(compact, line, settings, ex, source, reverse_affinity)
+function generate_insert_instruction(compact, line, settings, ex, source, reverse_affinity)
     isexpr(ex, :(::), 2) || throw(ArgumentError("Expected type-annotated expression, got $ex"))
     ex, type = ex.args
     compact = esc(compact)
     settings = esc(settings)
     line = esc(line)
-    inst_ex = esc(process_inst_expr(ex))
+    inst_ex = esc(process_instruction_expr(ex))
     type = esc(type)
-    return :(_insert_node_here!($compact, $line, $settings, $source, $inst_ex, $type; reverse_affinity = $reverse_affinity))
+    return :(insert_instruction!($compact, $line, $settings, $source, $inst_ex, $type; reverse_affinity = $reverse_affinity))
 end
 
-function process_inst_expr(ex)
+function process_instruction_expr(ex)
     if isexpr(ex, :call) && isa(ex.args[1], QuoteNode)
         # The called "function" is a non-call `Expr` head
         ex = Expr(ex.args[1].value, ex.args[2:end]...)
     end
     isa(ex, Symbol) && return ex
-    isexpr(ex, :return) && return :(ReturnNode($(ex.args...)))
+    isexpr(ex, :return) && return :($ReturnNode($(ex.args...)))
     return :(Expr($(QuoteNode(ex.head)), $(ex.args...)))
 end
 
-function _insert_node_here!(compact::IncrementalCompact, line, settings::Settings, source::LineNumberNode, args...; reverse_affinity::Bool = false)
+function insert_instruction!(compact::IncrementalCompact, line, settings::Settings, source::LineNumberNode, args...; reverse_affinity::Bool = false)
     line = maybe_insert_debuginfo!(compact, settings, source, line, compact.result_idx)
-    _insert_node_here!(compact, line, args...; reverse_affinity)
+    return insert_instruction!(compact, line, args...; reverse_affinity)
 end
 
-# function _insert_node_here!(compact::IncrementalCompact, line, ex::Expr; reverse_affinity::Bool = false)
-#     isexpr(ex, :(::), 2) || throw(ArgumentError("Expected type-annotated expression, got $ex"))
-#     ex, type = ex.args
-#     return _insert_node_here!(compact::IncrementalCompact, line, inst_ex, type; reverse_affinity)
-# end
+function insert_instruction!(compact::IncrementalCompact, settings::Settings, source::LineNumberNode, inst::NewInstruction; reverse_affinity::Bool = false)
+    line = maybe_insert_debuginfo!(compact, settings, source, inst.line, compact.result_idx)
+    inst_with_source = NewInstruction(inst.stmt, inst.type, inst.info, line, inst.flag)
+end
 
-function _insert_node_here!(compact::IncrementalCompact, line, inst_ex, type; reverse_affinity::Bool = false)
+function insert_instruction!(compact::IncrementalCompact, line, inst_ex, type; reverse_affinity::Bool = false)
     inst = NewInstruction(inst_ex, type, line)
+    return insert_instruction!(compact, inst; reverse_affinity)
+end
+
+function insert_instruction!(compact::IncrementalCompact, inst::NewInstruction; reverse_affinity::Bool = false)
     return insert_node_here!(compact, inst, reverse_affinity)
 end
 
