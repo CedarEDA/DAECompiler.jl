@@ -83,7 +83,7 @@ function schedule_incidence!(compact, curval, incT::Incidence, var, line, settin
         isa(coeff, Float64) || continue
 
         if lin_var == 0
-            lin_var_ssa = @insert_node_here compact line settings (:invoke)(nothing, Intrinsics.sim_time)::Incidence(0)
+            lin_var_ssa = @insert_instruction compact line settings (:invoke)(nothing, Intrinsics.sim_time)::Incidence(0)
         else
             if vars === nothing || !isassigned(vars, lin_var)
                 lin_var_ssa = schedule_missing_var!(lin_var)
@@ -747,7 +747,7 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
     var_sols = Vector{Any}(undef, length(structure.var_to_diff))
 
     for (idx, var) in enumerate(key.param_vars)
-        var_sols[var] = @insert_node_here compact line settings getfield(Argument(1), idx)::Any
+        var_sols[var] = @insert_instruction compact line settings getfield(Argument(1), idx)::Any
     end
 
     carried_states = Dict{StructuralSSARef, Any}()
@@ -959,7 +959,7 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
     ssa_rename = Vector{Any}(undef, length(result.ir.stmts))
 
     function insert_solved_var_here!(compact1, var, curval, line)
-        @insert_node_here compact1 line settings solved_variable(var, curval)::Nothing
+        @insert_instruction compact1 line settings solved_variable(var, curval)::Nothing
     end
 
     isempty(var_schedule) && (var_schedule = Pair{BitSet, BitSet}[BitSet()=>BitSet()])
@@ -981,7 +981,7 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
                     display(result.ir)
                     error("Tried to schedule variable $(lin_var) that we do not have a solution to (but our scheduling should have ensured that we do)")
                 end
-                var_sols[lin_var] = CarriedSSAValue(ordinal, (@insert_node_here compact1 line settings (:invoke)(
+                var_sols[lin_var] = CarriedSSAValue(ordinal, (@insert_instruction compact1 line settings (:invoke)(
                     nothing, Intrinsics.variable)::Incidence(lin_var)).id)
             end
         end
@@ -998,7 +998,7 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
 
         (in_vars, out_eqs) = sched
         for (idx, var) in enumerate(in_vars)
-            var_sols[var] = CarriedSSAValue(ordinal, (@insert_node_here compact1 line settings getfield(Argument(2), idx)::Any).id)
+            var_sols[var] = CarriedSSAValue(ordinal, (@insert_instruction compact1 line settings getfield(Argument(2), idx)::Any).id)
             insert_solved_var_here!(compact1, var, var_sols[var], line)
         end
 
@@ -1113,7 +1113,7 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
                 else
                     curval = nonlinearssa
                     (curval, thiscoeff) = schedule_incidence!(compact1, curval, incT, -1, line, settings; vars=var_sols, schedule_missing_var!)
-                    @insert_node_here compact1 line settings InternalIntrinsics.contribution!(eq, Explicit, curval)::Nothing
+                    @insert_instruction compact1 line settings InternalIntrinsics.contribution!(eq, Explicit, curval)::Nothing
                 end
             end
         end
@@ -1140,7 +1140,7 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
         end
 
         line = ir[SSAValue(length(ir.stmts))][:line]
-        eq_resid_ssa = isempty(out_eqs) ? () : @insert_node_here compact1 line settings  eq_resids::Tuple
+        eq_resid_ssa = isempty(out_eqs) ? () : @insert_instruction compact1 line settings  eq_resids::Tuple
 
         state_resid = Expr(:call, tuple)
         resids[ordinal] = (compact1, state_resid, eq_resid_ssa)
@@ -1151,9 +1151,9 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
     for i = length(resids):-1:1
         (this_compact, this_resid, eq_resid_ssa) = resids[i]
         line = ir[SSAValue(length(ir.stmts))][:line]
-        state_resid_ssa = @insert_node_here this_compact line settings this_resid::Tuple
-        tup_resid_ssa = @insert_node_here this_compact line settings tuple(eq_resid_ssa, state_resid_ssa)::Tuple{Tuple, Tuple}
-        @insert_node_here this_compact line settings (return tup_resid_ssa)::Union{}
+        state_resid_ssa = @insert_instruction this_compact line settings this_resid::Tuple
+        tup_resid_ssa = @insert_instruction this_compact line settings tuple(eq_resid_ssa, state_resid_ssa)::Tuple{Tuple, Tuple}
+        @insert_instruction this_compact line settings (return tup_resid_ssa)::Union{}
 
         # Rewrite SICM to state references
         line = this_compact[SSAValue(1)][:line]
@@ -1198,8 +1198,8 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
         debuginfo = Core.DebugInfo(:sicm)
         sicm_rettype = Tuple{}
     else
-        resid_ssa = @insert_node_here compact line settings sicm_resid::Tuple
-        @insert_node_here compact line settings (return resid_ssa)::Union{}
+        resid_ssa = @insert_instruction compact line settings sicm_resid::Tuple
+        @insert_instruction compact line settings (return resid_ssa)::Union{}
         ir_sicm = Compiler.finish(compact)
         resize!(ir_sicm.cfg.blocks, 1)
         empty!(ir_sicm.cfg.blocks[1].succs)
