@@ -7,7 +7,7 @@ function init_uncompress_gen(result::DAEIPOResult, ci::CodeInstance, init_key::T
 
     new_oc = init_uncompress_gen!(compact, result, ci, init_key, diff_key, world, settings)
     line = result.ir[SSAValue(1)][:line]
-    @insert_instruction compact line settings (return new_oc)::Core.OpaqueClosure true
+    @insert_instruction_here compact line settings (return new_oc)::Core.OpaqueClosure true
 
     ir_factory = Compiler.finish(compact)
     Compiler.verify_ir(ir_factory)
@@ -28,7 +28,7 @@ function init_uncompress_gen!(compact::Compiler.IncrementalCompact, result::DAEI
 
         line = result.ir[SSAValue(1)][:line]
         param_list = flatten_parameter!(Compiler.fallback_lattice, compact, ci.inferred.ir.argtypes[1:end], argn->Argument(2+argn), line, settings)
-        sicm = @insert_instruction compact line settings invoke(param_list, sicm_ci)::Tuple
+        sicm = @insert_instruction_here compact line settings invoke(param_list, sicm_ci)::Tuple
     else
         sicm = ()
     end
@@ -61,13 +61,13 @@ function init_uncompress_gen!(compact::Compiler.IncrementalCompact, result::DAEI
 
     # Zero the output
     nout = numstates[UnassignedDiff] + numstates[AssignedDiff]
-    out_arr = @insert_instruction oc_compact line settings zeros(nout)::Vector{Float64}
+    out_arr = @insert_instruction_here oc_compact line settings zeros(nout)::Vector{Float64}
 
     nscratch = numstates[Algebraic] + numstates[AlgebraicDerivative]
-    scratch_arr = @insert_instruction oc_compact line settings zeros(nout)::Vector{Float64}
+    scratch_arr = @insert_instruction_here oc_compact line settings zeros(nout)::Vector{Float64}
 
     # Get the solution vector out of the solution object
-    in_nlsol_u = @insert_instruction oc_compact line settings getproperty(Argument(2), QuoteNode(:u0))::Vector{Float64}
+    in_nlsol_u = @insert_instruction_here oc_compact line settings getproperty(Argument(2), QuoteNode(:u0))::Vector{Float64}
 
     # Adapt to DAECompiler ABI
     nassgn = numstates[AssignedDiff]
@@ -77,11 +77,11 @@ function init_uncompress_gen!(compact::Compiler.IncrementalCompact, result::DAEI
     (out_du_unassgn, _) = sciml_dae_split_du!(oc_compact, line, settings, scratch_arr, numstates)
 
     # Call DAECompiler-generated RHS with internal ABI
-    oc_sicm = @insert_instruction oc_compact line settings getfield(Argument(1), 1)::Core.OpaqueClosure
-    @insert_instruction oc_compact line settings (:invoke)(daef_ci, oc_sicm, (), out_u_mm, out_u_unassgn, out_du_unassgn, out_alg, in_nlsol_u, 0.0)::Nothing
+    oc_sicm = @insert_instruction_here oc_compact line settings getfield(Argument(1), 1)::Core.OpaqueClosure
+    @insert_instruction_here oc_compact line settings (:invoke)(daef_ci, oc_sicm, (), out_u_mm, out_u_unassgn, out_du_unassgn, out_alg, in_nlsol_u, 0.0)::Nothing
 
     # Return
-    @insert_instruction oc_compact line settings (return out_arr)::Vector{Float64}
+    @insert_instruction_here oc_compact line settings (return out_arr)::Vector{Float64}
 
     ir_oc = Compiler.finish(oc_compact)
     oc = Core.OpaqueClosure(ir_oc)
@@ -94,7 +94,7 @@ function init_uncompress_gen!(compact::Compiler.IncrementalCompact, result::DAEI
     @atomic oc_ci.max_world = @atomic ci.max_world
     @atomic oc_ci.min_world = 1 # @atomic ci.min_world
 
-    new_oc = @insert_instruction compact line settings (:new_opaque_closure)(
+    new_oc = @insert_instruction_here compact line settings (:new_opaque_closure)(
         argt, Vector{Float64}, Vector{Float64}, true, oc_source_method, sicm)::Core.OpaqueClosure true
 
     return new_oc

@@ -38,7 +38,7 @@ function ir_add!(compact::IncrementalCompact, line, settings::Settings, @nospeci
     (b === nothing || b === 0.) && return _a
     (a === nothing || b === 0.) && return _b
     source = @something(source, @__SOURCE__)
-    idx = insert_instruction!(compact, line, settings, source, :($a + $b), Any)
+    idx = insert_instruction_here!(compact, line, settings, source, :($a + $b), Any)
     compact[idx][:flag] |= Compiler.IR_FLAG_REFINED
     idx
 end
@@ -48,7 +48,7 @@ function ir_mul_const!(compact, line, settings, coeff::Float64, _a, source = not
         return _a
     end
     source = @something(source, @__SOURCE__)
-    idx = insert_instruction!(compact, line, settings, source, :($coeff * $_a), Any)
+    idx = insert_instruction_here!(compact, line, settings, source, :($coeff * $_a), Any)
     compact[idx][:flag] |= Compiler.IR_FLAG_REFINED
     return idx
 end
@@ -83,7 +83,7 @@ function schedule_incidence!(compact, curval, incT::Incidence, var, line, settin
         isa(coeff, Float64) || continue
 
         if lin_var == 0
-            lin_var_ssa = @insert_instruction compact line settings (:invoke)(nothing, Intrinsics.sim_time)::Incidence(0)
+            lin_var_ssa = @insert_instruction_here compact line settings (:invoke)(nothing, Intrinsics.sim_time)::Incidence(0)
         else
             if vars === nothing || !isassigned(vars, lin_var)
                 lin_var_ssa = schedule_missing_var!(lin_var)
@@ -228,7 +228,7 @@ function schedule_nonlinear!(compact, settings, param_vars, var_eq_matching, ir,
             new_stmt.args[i] = arg
         end
 
-        ret = insert_instruction!(compact, settings, @__SOURCE__, NewInstruction(inst; stmt=new_stmt, line))
+        ret = insert_instruction_here!(compact, settings, @__SOURCE__, NewInstruction(inst; stmt=new_stmt))
     end
 
     ssa_rename[val.id] = isa(ret, SSAValue) ? CarriedSSAValue(ordinal, ret.id) : ret
@@ -747,7 +747,7 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
     var_sols = Vector{Any}(undef, length(structure.var_to_diff))
 
     for (idx, var) in enumerate(key.param_vars)
-        var_sols[var] = @insert_instruction compact line settings getfield(Argument(1), idx)::Any
+        var_sols[var] = @insert_instruction_here compact line settings getfield(Argument(1), idx)::Any
     end
 
     carried_states = Dict{StructuralSSARef, Any}()
@@ -903,8 +903,8 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
                         push!(in_param_vars.args, argval)
                     end
 
-                    new_stmt.args[2] = insert_instruction!(compact, settinsg, NewInstruction(inst; stmt=in_param_vars, type=Tuple, flag=UInt32(0), line))
-                    sstate = insert_instruction!(compact, settinsg, NewInstruction(inst; stmt=new_stmt, type=Tuple, flag=UInt32(0), line))
+                    new_stmt.args[2] = insert_instruction_here!(compact, settinsg, NewInstruction(inst; stmt=in_param_vars, type=Tuple, flag=UInt32(0), line))
+                    sstate = insert_instruction_here!(compact, settinsg, NewInstruction(inst; stmt=new_stmt, type=Tuple, flag=UInt32(0), line))
                     carried_states[sref] = CarriedSSAValue(0, sstate.id)
                 else
                     carried_states[sref] = isdefined(callee_sicm_ci, :rettype_const) ? callee_sicm_ci.rettype_const : callee_sicm_ci.rettype.instance
@@ -959,7 +959,7 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
     ssa_rename = Vector{Any}(undef, length(result.ir.stmts))
 
     function insert_solved_var_here!(compact1, var, curval, line)
-        @insert_instruction compact1 line settings solved_variable(var, curval)::Nothing
+        @insert_instruction_here compact1 line settings solved_variable(var, curval)::Nothing
     end
 
     isempty(var_schedule) && (var_schedule = Pair{BitSet, BitSet}[BitSet()=>BitSet()])
@@ -981,7 +981,7 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
                     display(result.ir)
                     error("Tried to schedule variable $(lin_var) that we do not have a solution to (but our scheduling should have ensured that we do)")
                 end
-                var_sols[lin_var] = CarriedSSAValue(ordinal, (@insert_instruction compact1 line settings (:invoke)(
+                var_sols[lin_var] = CarriedSSAValue(ordinal, (@insert_instruction_here compact1 line settings (:invoke)(
                     nothing, Intrinsics.variable)::Incidence(lin_var)).id)
             end
         end
@@ -998,7 +998,7 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
 
         (in_vars, out_eqs) = sched
         for (idx, var) in enumerate(in_vars)
-            var_sols[var] = CarriedSSAValue(ordinal, (@insert_instruction compact1 line settings getfield(Argument(2), idx)::Any).id)
+            var_sols[var] = CarriedSSAValue(ordinal, (@insert_instruction_here compact1 line settings getfield(Argument(2), idx)::Any).id)
             insert_solved_var_here!(compact1, var, var_sols[var], line)
         end
 
@@ -1028,7 +1028,7 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
                     push!(in_vars.args, argval)
                 end
 
-                in_vars_ssa = insert_instruction!(compact1, settings, @__SOURCE__, NewInstruction(eqinst; stmt=in_vars, type=Tuple, line))
+                in_vars_ssa = insert_instruction_here!(compact1, settings, @__SOURCE__, NewInstruction(eqinst; stmt=in_vars, type=Tuple, line))
 
                 new_stmt = copy(eqinst[:stmt])
                 resize!(new_stmt.args, 2)
@@ -1046,17 +1046,17 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
 
                 callee_ordinals[eq] = callee_ordinal+1
 
-                this_call = insert_instruction!(compact1, settings, @__SOURCE__, NewInstruction(eqinst; stmt=urs[], line))
+                this_call = insert_instruction_here!(compact1, settings, @__SOURCE__, NewInstruction(eqinst; stmt=urs[], line))
 
-                this_eqresids = insert_instruction!(compact1, settings, @__SOURCE__, NewInstruction(eqinst; stmt=Expr(:call, getfield, this_call, 1), type=Any, line))
+                this_eqresids = insert_instruction_here!(compact1, settings, @__SOURCE__, NewInstruction(eqinst; stmt=Expr(:call, getfield, this_call, 1), type=Any, line))
 
-                new_state = insert_instruction!(compact1, settings, @__SOURCE__, NewInstruction(eqinst; stmt=Expr(:call, getfield, this_call, 2), type=Any, line))
+                new_state = insert_instruction_here!(compact1, settings, @__SOURCE__, NewInstruction(eqinst; stmt=Expr(:call, getfield, this_call, 2), type=Any, line))
 
                 carried_states[eq] = CarriedSSAValue(ordinal, new_state.id)
 
                 for (idx, this_callee_eq) in enumerate(callee_out_eqs)
                     this_eq = callee_eq_mapping[eq][this_callee_eq]
-                    curval = insert_instruction!(compact1, settings, @__SOURCE__, NewInstruction(eqinst; stmt=Expr(:call, getfield, this_eqresids, idx), type=Any, line))
+                    curval = insert_instruction_here!(compact1, settings, @__SOURCE__, NewInstruction(eqinst; stmt=Expr(:call, getfield, this_eqresids, idx), type=Any, line))
                     push!(eqs[this_eq][2], NewSSAValue(curval.id))
                 end
             else
@@ -1113,7 +1113,7 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
                 else
                     curval = nonlinearssa
                     (curval, thiscoeff) = schedule_incidence!(compact1, curval, incT, -1, line, settings; vars=var_sols, schedule_missing_var!)
-                    @insert_instruction compact1 line settings InternalIntrinsics.contribution!(eq, Explicit, curval)::Nothing
+                    @insert_instruction_here compact1 line settings InternalIntrinsics.contribution!(eq, Explicit, curval)::Nothing
                 end
             end
         end
@@ -1140,7 +1140,7 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
         end
 
         line = ir[SSAValue(length(ir.stmts))][:line]
-        eq_resid_ssa = isempty(out_eqs) ? () : @insert_instruction compact1 line settings  eq_resids::Tuple
+        eq_resid_ssa = isempty(out_eqs) ? () : @insert_instruction_here compact1 line settings  eq_resids::Tuple
 
         state_resid = Expr(:call, tuple)
         resids[ordinal] = (compact1, state_resid, eq_resid_ssa)
@@ -1151,9 +1151,9 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
     for i = length(resids):-1:1
         (this_compact, this_resid, eq_resid_ssa) = resids[i]
         line = ir[SSAValue(length(ir.stmts))][:line]
-        state_resid_ssa = @insert_instruction this_compact line settings this_resid::Tuple
-        tup_resid_ssa = @insert_instruction this_compact line settings tuple(eq_resid_ssa, state_resid_ssa)::Tuple{Tuple, Tuple}
-        @insert_instruction this_compact line settings (return tup_resid_ssa)::Union{}
+        state_resid_ssa = @insert_instruction_here this_compact line settings this_resid::Tuple
+        tup_resid_ssa = @insert_instruction_here this_compact line settings tuple(eq_resid_ssa, state_resid_ssa)::Tuple{Tuple, Tuple}
+        @insert_instruction_here this_compact line settings (return tup_resid_ssa)::Union{}
 
         # Rewrite SICM to state references
         line = this_compact[SSAValue(1)][:line]
@@ -1198,8 +1198,8 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
         debuginfo = Core.DebugInfo(:sicm)
         sicm_rettype = Tuple{}
     else
-        resid_ssa = @insert_instruction compact line settings sicm_resid::Tuple
-        @insert_instruction compact line settings (return resid_ssa)::Union{}
+        resid_ssa = @insert_instruction_here compact line settings sicm_resid::Tuple
+        @insert_instruction_here compact line settings (return resid_ssa)::Union{}
         ir_sicm = Compiler.finish(compact)
         resize!(ir_sicm.cfg.blocks, 1)
         empty!(ir_sicm.cfg.blocks[1].succs)
