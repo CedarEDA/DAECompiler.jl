@@ -107,17 +107,17 @@ macro __SOURCE__()
 end
 
 """
-    @insert_instruction compact line settings make_odefunction(f)::ODEFunction
-    @insert_instruction compact line settings make_odefunction(f)::ODEFunction true
-    @insert_instruction compact line settings (:invoke)(ci, args...)::Int true
-    @insert_instruction compact line settings (return x)::Int true
+    @insert_instruction_here compact line settings make_odefunction(f)::ODEFunction
+    @insert_instruction_here compact line settings make_odefunction(f)::ODEFunction true
+    @insert_instruction_here compact line settings (:invoke)(ci, args...)::Int true
+    @insert_instruction_here compact line settings (return x)::Int true
 """
-macro insert_instruction(compact, line, settings, ex, reverse_affinity = false)
+macro insert_instruction_here(compact, line, settings, ex, reverse_affinity = false)
     source = :(LineNumberNode($(__source__.line), $(QuoteNode(__source__.file))))
-    return generate_insert_instruction(compact, line, settings, ex, source, reverse_affinity)
+    return generate_insert_instruction_here(compact, line, settings, ex, source, reverse_affinity)
 end
 
-function generate_insert_instruction(compact, line, settings, ex, source, reverse_affinity)
+function generate_insert_instruction_here(compact, line, settings, ex, source, reverse_affinity)
     isexpr(ex, :(::), 2) || throw(ArgumentError("Expected type-annotated expression, got $ex"))
     ex, type = ex.args
     compact = esc(compact)
@@ -125,7 +125,7 @@ function generate_insert_instruction(compact, line, settings, ex, source, revers
     line = esc(line)
     inst_ex = esc(process_instruction_expr(ex))
     type = esc(type)
-    return :(insert_instruction!($compact, $line, $settings, $source, $inst_ex, $type; reverse_affinity = $reverse_affinity))
+    return :(insert_instruction_here!($compact, $line, $settings, $source, $inst_ex, $type; reverse_affinity = $reverse_affinity))
 end
 
 function process_instruction_expr(ex)
@@ -138,22 +138,22 @@ function process_instruction_expr(ex)
     return :(Expr($(QuoteNode(ex.head)), $(ex.args...)))
 end
 
-function insert_instruction!(compact::IncrementalCompact, line, settings::Settings, source::LineNumberNode, args...; reverse_affinity::Bool = false)
+function insert_instruction_here!(compact::IncrementalCompact, line, settings::Settings, source::LineNumberNode, args...; reverse_affinity::Bool = false)
     line = maybe_insert_debuginfo!(compact, settings, source, line, compact.result_idx)
-    return insert_instruction!(compact, line, args...; reverse_affinity)
+    return insert_instruction_here!(compact, line, args...; reverse_affinity)
 end
 
-function insert_instruction!(compact::IncrementalCompact, settings::Settings, source::LineNumberNode, inst::NewInstruction; reverse_affinity::Bool = false)
+function insert_instruction_here!(compact::IncrementalCompact, settings::Settings, source::LineNumberNode, inst::NewInstruction; reverse_affinity::Bool = false)
     line = maybe_insert_debuginfo!(compact, settings, source, inst.line, compact.result_idx)
     inst_with_source = NewInstruction(inst.stmt, inst.type, inst.info, line, inst.flag)
 end
 
-function insert_instruction!(compact::IncrementalCompact, line, inst_ex, type; reverse_affinity::Bool = false)
+function insert_instruction_here!(compact::IncrementalCompact, line, inst_ex, type; reverse_affinity::Bool = false)
     inst = NewInstruction(inst_ex, type, line)
-    return insert_instruction!(compact, inst; reverse_affinity)
+    return insert_instruction_here!(compact, inst; reverse_affinity)
 end
 
-function insert_instruction!(compact::IncrementalCompact, inst::NewInstruction; reverse_affinity::Bool = false)
+function insert_instruction_here!(compact::IncrementalCompact, inst::NewInstruction; reverse_affinity::Bool = false)
     return insert_node_here!(compact, inst, reverse_affinity)
 end
 
