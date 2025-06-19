@@ -33,21 +33,19 @@ function find_eqs_vars(state::TransformationState)
     find_eqs_vars(state.structure.graph, compact)
 end
 
-function ir_add!(compact::IncrementalCompact, line, settings::Settings, @nospecialize(_a), @nospecialize(_b), source = nothing)
+function ir_add!(compact::IncrementalCompact, line, settings::Settings, @nospecialize(_a), @nospecialize(_b), source = @__SOURCE__)
     a, b = _a, _b
     (b === nothing || b === 0.) && return _a
     (a === nothing || b === 0.) && return _b
-    source = @something(source, @__SOURCE__)
     idx = insert_instruction_here!(compact, line, settings, source, :($a + $b), Any)
     compact[idx][:flag] |= Compiler.IR_FLAG_REFINED
     idx
 end
 
-function ir_mul_const!(compact, line, settings, coeff::Float64, _a, source = nothing)
+function ir_mul_const!(compact, line, settings, coeff::Float64, _a, source = @__SOURCE__)
     if isone(coeff)
         return _a
     end
-    source = @something(source, @__SOURCE__)
     idx = insert_instruction_here!(compact, line, settings, source, :($coeff * $_a), Any)
     compact[idx][:flag] |= Compiler.IR_FLAG_REFINED
     return idx
@@ -903,8 +901,8 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
                         push!(in_param_vars.args, argval)
                     end
 
-                    new_stmt.args[2] = insert_instruction_here!(compact, settinsg, NewInstruction(inst; stmt=in_param_vars, type=Tuple, flag=UInt32(0), line))
-                    sstate = insert_instruction_here!(compact, settinsg, NewInstruction(inst; stmt=new_stmt, type=Tuple, flag=UInt32(0), line))
+                    new_stmt.args[2] = insert_instruction_here!(compact, settings, @__SOURCE__, NewInstruction(inst; stmt=in_param_vars, type=Tuple, flag=UInt32(0)))
+                    sstate = insert_instruction_here!(compact, settings, @__SOURCE__, NewInstruction(inst; stmt=new_stmt, type=Tuple, flag=UInt32(0)))
                     carried_states[sref] = CarriedSSAValue(0, sstate.id)
                 else
                     carried_states[sref] = isdefined(callee_sicm_ci, :rettype_const) ? callee_sicm_ci.rettype_const : callee_sicm_ci.rettype.instance
@@ -1028,7 +1026,7 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
                     push!(in_vars.args, argval)
                 end
 
-                in_vars_ssa = insert_instruction_here!(compact1, settings, @__SOURCE__, NewInstruction(eqinst; stmt=in_vars, type=Tuple, line))
+                in_vars_ssa = insert_instruction_here!(compact1, settings, @__SOURCE__, NewInstruction(eqinst; stmt=in_vars, type=Tuple))
 
                 new_stmt = copy(eqinst[:stmt])
                 resize!(new_stmt.args, 2)
@@ -1046,17 +1044,17 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
 
                 callee_ordinals[eq] = callee_ordinal+1
 
-                this_call = insert_instruction_here!(compact1, settings, @__SOURCE__, NewInstruction(eqinst; stmt=urs[], line))
+                this_call = insert_instruction_here!(compact1, settings, @__SOURCE__, NewInstruction(eqinst; stmt=urs[]))
 
-                this_eqresids = insert_instruction_here!(compact1, settings, @__SOURCE__, NewInstruction(eqinst; stmt=Expr(:call, getfield, this_call, 1), type=Any, line))
+                this_eqresids = insert_instruction_here!(compact1, settings, @__SOURCE__, NewInstruction(eqinst; stmt=Expr(:call, getfield, this_call, 1), type=Any))
 
-                new_state = insert_instruction_here!(compact1, settings, @__SOURCE__, NewInstruction(eqinst; stmt=Expr(:call, getfield, this_call, 2), type=Any, line))
+                new_state = insert_instruction_here!(compact1, settings, @__SOURCE__, NewInstruction(eqinst; stmt=Expr(:call, getfield, this_call, 2), type=Any))
 
                 carried_states[eq] = CarriedSSAValue(ordinal, new_state.id)
 
                 for (idx, this_callee_eq) in enumerate(callee_out_eqs)
                     this_eq = callee_eq_mapping[eq][this_callee_eq]
-                    curval = insert_instruction_here!(compact1, settings, @__SOURCE__, NewInstruction(eqinst; stmt=Expr(:call, getfield, this_eqresids, idx), type=Any, line))
+                    curval = insert_instruction_here!(compact1, settings, @__SOURCE__, NewInstruction(eqinst; stmt=Expr(:call, getfield, this_eqresids, idx), type=Any))
                     push!(eqs[this_eq][2], NewSSAValue(curval.id))
                 end
             else

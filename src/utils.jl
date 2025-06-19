@@ -146,10 +146,11 @@ end
 function insert_instruction_here!(compact::IncrementalCompact, settings::Settings, source::LineNumberNode, inst::NewInstruction; reverse_affinity::Bool = false)
     line = maybe_insert_debuginfo!(compact, settings, source, inst.line, compact.result_idx)
     inst_with_source = NewInstruction(inst.stmt, inst.type, inst.info, line, inst.flag)
+    return insert_instruction_here!(compact, inst_with_source; reverse_affinity)
 end
 
-function insert_instruction_here!(compact::IncrementalCompact, line, inst_ex, type; reverse_affinity::Bool = false)
-    inst = NewInstruction(inst_ex, type, line)
+function insert_instruction_here!(compact::IncrementalCompact, line, stmt, @nospecialize(type); reverse_affinity::Bool = false)
+    inst = NewInstruction(stmt, type, line)
     return insert_instruction_here!(compact, inst; reverse_affinity)
 end
 
