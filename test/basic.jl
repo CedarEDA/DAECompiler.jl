@@ -3,6 +3,7 @@ module Basic
 using Test
 using DAECompiler
 using DAECompiler.Intrinsics
+using DAECompiler: refresh
 using Sundials
 using SciMLBase
 using OrdinaryDiffEq

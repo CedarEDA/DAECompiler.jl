@@ -454,8 +454,8 @@ function rewrite_ipo_return!(𝕃, compact::IncrementalCompact, line, settings, 
     push!(eqvars.varclassification, External)
     push!(eqvars.varkinds, Intrinsics.Continuous)
 
-    new_var_ssa = insert_instruction_here!(compact, settings,
-        NewInstruction(Expr(:invoke, nothing, variable), Incidence(nonlinrepl), Compiler.NoCallInfo(), line, Compiler.IR_FLAG_REFINED), true)
+    new_var_ssa = insert_instruction_here!(compact, settings, @__SOURCE__,
+        NewInstruction(Expr(:invoke, nothing, variable), Incidence(nonlinrepl), Compiler.NoCallInfo(), line, Compiler.IR_FLAG_REFINED); reverse_affinity = true)
 
     eq_incidence = ultimate_rt - Incidence(nonlinrepl)
     push!(eqvars.total_incidence, eq_incidence)
@@ -465,13 +465,13 @@ function rewrite_ipo_return!(𝕃, compact::IncrementalCompact, line, settings, 
     new_eq = length(eqvars.total_incidence)
 
     new_eq_ssa = insert_instruction_here!(compact, settings, @__SOURCE__,
-        NewInstruction(Expr(:invoke, nothing, equation), Eq(new_eq), Compiler.NoCallInfo(), LINE, Compiler.IR_FLAG_REFINED), true)
+        NewInstruction(Expr(:invoke, nothing, equation), Eq(new_eq), Compiler.NoCallInfo(), line, Compiler.IR_FLAG_REFINED); reverse_affinity = true)
 
     eq_val_ssa = insert_instruction_here!(compact, settings, @__SOURCE__,
-        NewInstruction(Expr(:call, InternalIntrinsics.assign_var, new_var_ssa, ssa), eq_incidence, Compiler.NoCallInfo(), LINE, Compiler.IR_FLAG_REFINED), true)
+        NewInstruction(Expr(:call, InternalIntrinsics.assign_var, new_var_ssa, ssa), eq_incidence, Compiler.NoCallInfo(), line, Compiler.IR_FLAG_REFINED); reverse_affinity = true)
 
     eq_call_ssa = insert_instruction_here!(compact, settings, @__SOURCE__,
-        NewInstruction(Expr(:invoke, nothing, new_eq_ssa, eq_val_ssa), Nothing, Compiler.NoCallInfo(), LINE, Compiler.IR_FLAG_REFINED), true)
+        NewInstruction(Expr(:invoke, nothing, new_eq_ssa, eq_val_ssa), Nothing, Compiler.NoCallInfo(), line, Compiler.IR_FLAG_REFINED); reverse_affinity = true)
 
     T = widenconst(ultimate_rt)
     # TODO: We don't have a way to express that the return value is directly this variable for arbitrary types
