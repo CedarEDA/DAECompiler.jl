@@ -114,31 +114,44 @@ end
 """
 macro insert_node_here(compact, line, settings, ex, reverse_affinity = false)
     source = :(LineNumberNode($(__source__.line), $(QuoteNode(__source__.file))))
-    line = :($DAECompiler.maybe_insert_debuginfo!($compact, $settings, $source, $line, $compact.result_idx))
-    generate_insert_node_here(compact, line, ex, reverse_affinity)
+    generate_insert_node_here(compact, line, settings, ex, source, reverse_affinity)
 end
 
-function generate_insert_node_here(compact, line, ex, reverse_affinity)
+function generate_insert_node_here(compact, line, settings, ex, source, reverse_affinity)
     isexpr(ex, :(::), 2) || throw(ArgumentError("Expected type-annotated expression, got $ex"))
     ex, type = ex.args
+    compact = esc(compact)
+    settings = esc(settings)
+    line = esc(line)
+    inst_ex = esc(process_inst_expr(ex))
+    type = esc(type)
+    return :(_insert_node_here!($compact, $line, $settings, $source, $inst_ex, $type; reverse_affinity = $reverse_affinity))
+end
+
+function process_inst_expr(ex)
     if isexpr(ex, :call) && isa(ex.args[1], QuoteNode)
         # The called "function" is a non-call `Expr` head
         ex = Expr(ex.args[1].value, ex.args[2:end]...)
     end
-    compact = esc(compact)
-    line = esc(line)
-    type = esc(type)
-    if isa(ex, Symbol)
-        inst_ex = ex
-    elseif isexpr(ex, :return)
-        inst_ex = :(ReturnNode($(ex.args...)))
-    else
-        inst_ex = :(Expr($(QuoteNode(ex.head)), $(ex.args...)))
-    end
-    return quote
-        inst = NewInstruction($(esc(inst_ex)), $type, $line)
-        insert_node_here!($compact, inst, $(esc(reverse_affinity)))
-    end
+    isa(ex, Symbol) && return ex
+    isexpr(ex, :return) && return :(ReturnNode($(ex.args...)))
+    return :(Expr($(QuoteNode(ex.head)), $(ex.args...)))
+end
+
+function _insert_node_here!(compact::IncrementalCompact, line, settings::Settings, source::LineNumberNode, args...; reverse_affinity::Bool = false)
+    line = maybe_insert_debuginfo!(compact, settings, source, line, compact.result_idx)
+    _insert_node_here!(compact, line, args...; reverse_affinity)
+end
+
+# function _insert_node_here!(compact::IncrementalCompact, line, ex::Expr; reverse_affinity::Bool = false)
+#     isexpr(ex, :(::), 2) || throw(ArgumentError("Expected type-annotated expression, got $ex"))
+#     ex, type = ex.args
+#     return _insert_node_here!(compact::IncrementalCompact, line, inst_ex, type; reverse_affinity)
+# end
+
+function _insert_node_here!(compact::IncrementalCompact, line, inst_ex, type; reverse_affinity::Bool = false)
+    inst = NewInstruction(inst_ex, type, line)
+    return insert_node_here!(compact, inst, reverse_affinity)
 end
 
 """

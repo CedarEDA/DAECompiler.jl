@@ -33,20 +33,22 @@ function find_eqs_vars(state::TransformationState)
     find_eqs_vars(state.structure.graph, compact)
 end
 
-function ir_add!(compact::IncrementalCompact, line, settings::Settings, @nospecialize(_a), @nospecialize(_b))
+function ir_add!(compact::IncrementalCompact, line, settings::Settings, @nospecialize(_a), @nospecialize(_b), source = nothing)
     a, b = _a, _b
     (b === nothing || b === 0.) && return _a
     (a === nothing || b === 0.) && return _b
-    idx = @insert_node_here compact line settings (a + b)::Any
+    source = @something(source, @__SOURCE__)
+    idx = _insert_node_here!(compact, line, settings, source, :($a + $b), Any)
     compact[idx][:flag] |= Compiler.IR_FLAG_REFINED
     idx
 end
 
-function ir_mul_const!(compact, line, settings, coeff::Float64, _a)
+function ir_mul_const!(compact, line, settings, coeff::Float64, _a, source = nothing)
     if isone(coeff)
         return _a
     end
-    idx = @insert_node_here compact line settings (coeff * _a)::Any
+    source = @something(source, @__SOURCE__)
+    idx = _insert_node_here!(compact, line, settings, source, :($coeff * $_a), Any)
     compact[idx][:flag] |= Compiler.IR_FLAG_REFINED
     return idx
 end
@@ -60,7 +62,7 @@ end
 
 function schedule_incidence!(compact, curval, incT::Const, var, line, settings; vars=nothing, schedule_missing_var! = nothing)
     if curval !== nothing
-        return (ir_add!(compact, line, settings, curval, incT.val), nothing)
+        return (ir_add!(compact, line, settings, curval, incT.val, @__SOURCE__), nothing)
     end
     return (incT.val, nothing)
 end
@@ -93,8 +95,8 @@ function schedule_incidence!(compact, curval, incT::Incidence, var, line, settin
             end
         end
 
-        acc = ir_mul_const!(compact, line, settings, coeff, lin_var_ssa)
-        curval = curval === nothing ? acc : ir_add!(compact, line, settings, curval, acc)
+        acc = ir_mul_const!(compact, line, settings, coeff, lin_var_ssa, @__SOURCE__)
+        curval = curval === nothing ? acc : ir_add!(compact, line, settings, curval, acc, @__SOURCE__)
     end
     (curval, _) = schedule_incidence!(compact, curval, incT.typ, var, line, settings; vars, schedule_missing_var!)
     return (curval, thiscoeff)
@@ -1085,7 +1087,7 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
                                 this_nonlinearssa = SSAValue(eqcallssa.id)
                                 line = compact1[eqcallssa][:line]
                             end
-                            nonlinearssa = nonlinearssa === nothing ? this_nonlinearssa : ir_add!(compact1, line, settings, this_nonlinearssa, nonlinearssa)
+                            nonlinearssa = nonlinearssa === nothing ? this_nonlinearssa : ir_add!(compact1, line, settings, this_nonlinearssa, nonlinearssa, @__SOURCE__)
                         end
                         mapping = result.eq_callee_mapping[eq]
                         if mapping !== nothing
@@ -1113,7 +1115,7 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
                     curval = nonlinearssa
                     (curval, thiscoeff) = schedule_incidence!(compact1, curval, incT, var, line, settings; vars=var_sols, schedule_missing_var!)
                     @assert isa(thiscoeff, Float64)
-                    curval = ir_mul_const!(compact1, line, settings, 1/thiscoeff, curval)
+                    curval = ir_mul_const!(compact1, line, settings, 1/thiscoeff, curval, @__SOURCE__)
                     var_sols[var] = isa(curval, SSAValue) ? CarriedSSAValue(ordinal, curval.id) : curval
                     insert_solved_var_here!(compact1, var, curval, line)
                 else
