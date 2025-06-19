@@ -107,12 +107,12 @@ macro __SOURCE__()
 end
 
 """
-    @insert_node_here compact line settings make_odefunction(f)::ODEFunction
-    @insert_node_here compact line settings make_odefunction(f)::ODEFunction true
-    @insert_node_here compact line settings (:invoke)(ci, args...)::Int true
-    @insert_node_here compact line settings (return x)::Int true
+    @insert_instruction compact line settings make_odefunction(f)::ODEFunction
+    @insert_instruction compact line settings make_odefunction(f)::ODEFunction true
+    @insert_instruction compact line settings (:invoke)(ci, args...)::Int true
+    @insert_instruction compact line settings (return x)::Int true
 """
-macro insert_node_here(compact, line, settings, ex, reverse_affinity = false)
+macro insert_instruction(compact, line, settings, ex, reverse_affinity = false)
     source = :(LineNumberNode($(__source__.line), $(QuoteNode(__source__.file))))
     return generate_insert_instruction(compact, line, settings, ex, source, reverse_affinity)
 end
