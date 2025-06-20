@@ -199,8 +199,8 @@ function replace_if_intrinsic!(compact, settings, ssa, du, u, p, t, var_assignme
         if var_assignment === nothing
             var_idx = 0
         else
-            var_idx, in_du = var_assignment[var]
-            @assert !in_du || (du !== nothing)
+            kind, var_idx = var_assignment[var]
+            @assert kind !== AssignedDiff || du !== nothing
         end
 
         if iszero(var_idx)
@@ -208,7 +208,7 @@ function replace_if_intrinsic!(compact, settings, ssa, du, u, p, t, var_assignme
             # but for some reason, wasn't deleted in any prior pass.
             inst[:inst] = GlobalRef(DAECompiler.Intrinsics, :_VARIABLE_UNASSIGNED)
         else
-            source = in_du ? du : u
+            source = kind === AssignedDiff ? du : u
             replace_call!(compact, ssa, Expr(:call, getindex, source, var_idx), settings, @__SOURCE__)
         end
     elseif is_known_invoke_or_call(stmt, sim_time, compact)

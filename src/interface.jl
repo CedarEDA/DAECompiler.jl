@@ -41,20 +41,23 @@ function factory_gen(@nospecialize(fT), settings::Settings, world::UInt = Base.g
     end
 
     # Select differential and algebraic states
-    ret = top_level_state_selection!(tstate)
-
-    if isa(ret, UncompilableIPOResult)
-        return Base.generated_body_to_codeinfo(
-            Expr(:lambda, Any[:var"#self", :settings, :f], Expr(:block, Expr(:return, Expr(:call, throw, ret.error)))),
-            @__MODULE__, false)
-    end
-    (diff_key, init_key) = ret
-
-    if settings.mode in (DAE, DAENoInit, ODE, ODENoInit)
-        tearing_schedule!(tstate, ci, diff_key, world, settings)
-    end
-    if settings.mode in (InitUncompress, DAE, ODE)
-        tearing_schedule!(tstate, ci, init_key, world, settings)
+    if settings.skip_optimizations
+        diff_key = torn_cache_key(tstate, settings)
+        init_key = nothing
+    else
+        ret = top_level_state_selection!(tstate)
+        if isa(ret, UncompilableIPOResult)
+            return Base.generated_body_to_codeinfo(
+                Expr(:lambda, Any[:var"#self", :settings, :f], Expr(:block, Expr(:return, Expr(:call, throw, ret.error)))),
+                @__MODULE__, false)
+        end
+        (diff_key, init_key) = ret
+        if settings.mode in (DAE, DAENoInit, ODE, ODENoInit)
+            tearing_schedule!(tstate, ci, diff_key, world, settings)
+        end
+        if settings.mode in (InitUncompress, DAE, ODE)
+            tearing_schedule!(tstate, ci, init_key, world, settings)
+        end
     end
 
     # Generate the IR implementation of `factory`, returning the DAEFunction/ODEFunction

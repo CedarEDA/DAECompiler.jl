@@ -498,6 +498,8 @@ function invert_eq_callee_mapping(eq_callee_mapping)
     return callee_eq_mapping
 end
 
+classify_var(structure::DAESystemStructure, key::TornCacheKey, var) = classify_var(structure.var_to_diff, key, var)
+classify_var(result::DAEIPOResult, key::TornCacheKey, var) = classify_var(result.var_to_diff, key, var)
 function classify_var(var_to_diff, key::TornCacheKey, var)
     if var in key.alg_states
         vint = invview(var_to_diff)[var]
@@ -839,7 +841,7 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
                         if !any(out->callee_eq in out[2], callee_var_schedule)
                             display(mss)
                             cstructure = make_structure_from_ipo(callee_result)
-                            cvar_eq_matching = matching_for_key(callee_result, callee_key, cstructure)
+                            cvar_eq_matching = matching_for_key(callee_result, callee_key)
                             display(StateSelection.MatchedSystemStructure(callee_result, cstructure, cvar_eq_matching))
                             @sshow eq_orders
                             @sshow callee_result.total_incidence[callee_eq]
@@ -976,7 +978,7 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
                     @sshow lin_var
                     @sshow ordinal
                     @sshow eq_order
-                    display(result.ir)
+                    @sshow result.ir
                     error("Tried to schedule variable $(lin_var) that we do not have a solution to (but our scheduling should have ensured that we do)")
                 end
                 var_sols[lin_var] = CarriedSSAValue(ordinal, (@insert_instruction_here compact1 line settings (:invoke)(

@@ -28,6 +28,7 @@ module DAECompiler
     include("transform/state_selection.jl")
     include("transform/common.jl")
     include("transform/runtime.jl")
+    include("transform/unoptimized.jl")
     include("transform/tearing/schedule.jl")
     include("transform/codegen/dae_factory.jl")
     include("transform/codegen/ode_factory.jl")

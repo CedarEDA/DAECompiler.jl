@@ -25,8 +25,9 @@ function DAECProblem(f, init::Union{Vector, Tuple{Vararg{Pair}}}, tspan::Tuple{R
                      force_inline_all=false,
                      insert_stmt_debuginfo=false,
                      insert_ssa_debuginfo=false,
+                     skip_optimizations=false,
                      kwargs...)
-    settings = Settings(; force_inline_all, insert_stmt_debuginfo, insert_ssa_debuginfo)
+    settings = Settings(; force_inline_all, insert_stmt_debuginfo, insert_ssa_debuginfo, skip_optimizations)
     DAECProblem(f, init, guesses, tspan, kwargs, settings, missing, nothing, nothing)
 end
 
@@ -35,13 +36,14 @@ function DAECProblem(f, tspan::Tuple{Real, Real} = (0., 1.);
                      force_inline_all=false,
                      insert_stmt_debuginfo=false,
                      insert_ssa_debuginfo=false,
+                     skip_optimizations=false,
                      kwargs...)
-    settings = Settings(; force_inline_all, insert_stmt_debuginfo, insert_ssa_debuginfo)
+    settings = Settings(; force_inline_all, insert_stmt_debuginfo, insert_ssa_debuginfo, skip_optimizations)
     DAECProblem(f, nothing, guesses, tspan, kwargs, settings, missing, nothing, nothing)
 end
 
 function DiffEqBase.get_concrete_problem(prob::DAECProblem, isadaptive; kwargs...)
-    settings = Settings(; mode=prob.init === nothing ? DAE : DAENoInit, prob.settings.force_inline_all, prob.settings.insert_stmt_debuginfo, prob.settings.insert_ssa_debuginfo)
+    settings = Settings(; mode=prob.init === nothing ? DAE : DAENoInit, prob.settings.force_inline_all, prob.settings.insert_stmt_debuginfo, prob.settings.insert_ssa_debuginfo, prob.settings.skip_optimizations)
     (daef, differential_vars) = factory(Val(settings), prob.f)
 
     u0 = zeros(length(differential_vars))
@@ -77,8 +79,9 @@ function ODECProblem(f, init::Union{Vector, Tuple{Vararg{Pair}}}, tspan::Tuple{R
                      force_inline_all=false,
                      insert_stmt_debuginfo=false,
                      insert_ssa_debuginfo=false,
+                     skip_optimizations=false,
                      kwargs...)
-    settings = Settings(; force_inline_all, insert_stmt_debuginfo, insert_ssa_debuginfo)
+    settings = Settings(; force_inline_all, insert_stmt_debuginfo, insert_ssa_debuginfo, skip_optimizations)
     ODECProblem(f, init, guesses, tspan, kwargs, settings, missing, nothing)
 end
 
@@ -87,13 +90,14 @@ function ODECProblem(f, tspan::Tuple{Real, Real} = (0., 1.);
                      force_inline_all=false,
                      insert_stmt_debuginfo=false,
                      insert_ssa_debuginfo=false,
+                     skip_optimizations=false,
                      kwargs...)
-    settings = Settings(; force_inline_all, insert_stmt_debuginfo, insert_ssa_debuginfo)
+    settings = Settings(; force_inline_all, insert_stmt_debuginfo, insert_ssa_debuginfo, skip_optimizations)
     ODECProblem(f, nothing, guesses, tspan, kwargs, settings, missing, nothing)
 end
 
 function DiffEqBase.get_concrete_problem(prob::ODECProblem, isadaptive; kwargs...)
-    settings = Settings(; mode=prob.init === nothing ? ODE : ODENoInit, prob.settings.force_inline_all, prob.settings.insert_stmt_debuginfo, prob.settings.insert_ssa_debuginfo)
+    settings = Settings(; mode=prob.init === nothing ? ODE : ODENoInit, prob.settings.force_inline_all, prob.settings.insert_stmt_debuginfo, prob.settings.insert_ssa_debuginfo, prob.settings.skip_optimizations)
     (odef, n) = factory(Val(settings), prob.f)
 
     u0 = zeros(n)
