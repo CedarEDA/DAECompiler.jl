@@ -243,7 +243,7 @@ function rhs_finish!(
     return cis[ordinal]
 end
 
-function rhs_ir_finish!(ir::IRCode, ci::CodeInstance, settings::Settings, spec::RHSSpec, slotnames)
+function rhs_ir_finish!(ir::IRCode, ci::CodeInstance, settings::Settings, owner::Union{RHSSpec, UnoptimizedKey}, slotnames)
     ir = Compiler.compact!(ir)
     resize!(ir.cfg.blocks, 1)
     empty!(ir.cfg.blocks[1].succs)
@@ -253,7 +253,7 @@ function rhs_ir_finish!(ir::IRCode, ci::CodeInstance, settings::Settings, spec::
     src = ir_to_src(ir, settings; slotnames)
 
     abi = Tuple{ir.argtypes...}
-    daef_ci = cache_dae_ci!(ci, src, src.debuginfo, abi, spec)
+    daef_ci = cache_dae_ci!(ci, src, src.debuginfo, abi, owner)
     ccall(:jl_add_codeinst_to_jit, Cvoid, (Any, Any), daef_ci, src)
 
     return daef_ci

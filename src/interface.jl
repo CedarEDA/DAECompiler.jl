@@ -42,8 +42,7 @@ function factory_gen(@nospecialize(fT), settings::Settings, world::UInt = Base.g
 
     # Select differential and algebraic states
     if settings.skip_optimizations
-        diff_key = torn_cache_key(tstate, settings)
-        init_key = nothing
+        diff_key = UnoptimizedKey()
     else
         ret = top_level_state_selection!(tstate)
         if isa(ret, UncompilableIPOResult)

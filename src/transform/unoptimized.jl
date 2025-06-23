@@ -1,38 +1,15 @@
-function torn_cache_key(tstate::TransformationState, settings::Settings)
-    (; result, structure) = tstate
-    nvars = length(result.varkinds)
-    neqs = length(result.eqkinds)
-    param_vars = BitSet(1:result.nexternalargvars)
-    diff_vars = BitSet()
-    alg_vars = BitSet()
-    explicit_eqs = BitSet(1:neqs) # make all equations explicit
-    var_schedule = Pair{BitSet, BitSet}[]
-    for var in 1:nvars
-        # TODO: Derive this information via equation uses through `result.total_incidence`.
-        if structure.var_to_diff[var] !== nothing
-            # This variable has a derivative.
-            push!(diff_vars, var)
-        elseif invview(structure.var_to_diff)[var] === nothing
-            # This variable doesn't have and is not a derivative.
-            push!(alg_vars, var)
-        end
-    end
-
-    diff_key = TornCacheKey(diff_vars, alg_vars, param_vars, explicit_eqs, var_schedule)
-
-    return diff_key
-end
+struct UnoptimizedKey end
 
 function rhs_finish_noopt!(
     state::TransformationState,
     ci::CodeInstance,
-    key::TornCacheKey,
+    key::UnoptimizedKey,
     world::UInt,
     settings::Settings,
     indexT=Int)
 
     (; result, structure) = state
-    result_ci = find_matching_ci(ci->isa(ci.inferred, RHSSpec) && ci.inferred.key == key && ci.inferred.ordinal == 0, ci.def, world)
+    result_ci = find_matching_ci(ci -> ci.inferred === key, ci.def, world)
     if result_ci !== nothing
         return result_ci
     end
@@ -86,8 +63,7 @@ function rhs_finish_noopt!(
         end
     end
 
-    spec = RHSSpec(key, 0)
-    daef_ci = rhs_ir_finish!(Compiler.finish(compact), ci, settings, spec, slotnames)
+    daef_ci = rhs_ir_finish!(Compiler.finish(compact), ci, settings, key, slotnames)
     return daef_ci
 end
 

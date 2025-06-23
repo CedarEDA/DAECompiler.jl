@@ -135,9 +135,8 @@ end
 ```
 
 """
-function dae_factory_gen(state::TransformationState, ci::CodeInstance, key::TornCacheKey, world::UInt, settings::Settings, init_key::Union{TornCacheKey, Nothing})
-    result = state.result
-    # TODO: We should not have to recompute this here
+function dae_factory_gen(state::TransformationState, ci::CodeInstance, key::Union{TornCacheKey, UnoptimizedKey}, world::UInt, settings::Settings, init_key::Union{TornCacheKey, Nothing})
+    (; result, structure) = state
 
     ir_factory = copy(ci.inferred.ir)
     pushfirst!(ir_factory.argtypes, Settings)
@@ -151,6 +150,7 @@ function dae_factory_gen(state::TransformationState, ci::CodeInstance, key::Torn
         daef_ci = rhs_finish_noopt!(state, ci, key, world, settings, 1)
         oc = sciml_to_internal_abi_noopt!(copy(ci.inferred.ir), state, daef_ci, settings)
     else
+        # TODO: We should not have to recompute this here
         var_eq_matching = matching_for_key(state, key)
 
         torn_ci = find_matching_ci(ci->isa(ci.owner, TornIRSpec) && ci.owner.key == key, ci.def, world)
@@ -182,8 +182,12 @@ function dae_factory_gen(state::TransformationState, ci::CodeInstance, key::Torn
 
     new_oc = @insert_instruction_here compact line settings (:new_opaque_closure)(argt, Union{}, Nothing, true, oc_source_method, sicm)::Core.OpaqueClosure true
 
-    all_states = filter(var -> classify_var(result, key, var) != AlgebraicDerivative, continuous_variables(state))
-    differential_states = Bool[v in key.diff_states for v in all_states]
+    if settings.skip_optimizations
+        differential_states = Bool[structure.var_to_diff[v] !== nothing for v in continuous_variables(state)]
+    else
+        all_states = filter(var -> classify_var(result, key, var) != AlgebraicDerivative, continuous_variables(state))
+        differential_states = Bool[v in key.diff_states for v in all_states]
+    end
 
     if init_key !== nothing
         initf = init_uncompress_gen!(compact, result, ci, init_key, key, world, settings)

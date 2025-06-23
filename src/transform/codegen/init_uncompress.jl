@@ -1,5 +1,5 @@
 """
-    struct RHSSpec
+    struct InitUncompressSpec
 
 Cache partition for the RHS
 """
