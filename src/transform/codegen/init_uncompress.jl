@@ -98,7 +98,7 @@ function gen_init_uncompress!(
                 spec_data = stmt.args[1]
                 callee_key = stmt.args[1][2]
                 callee_ordinal = stmt.args[1][end]::Int
-                callee_result = structural_analysis!(callee_ci, world)
+                callee_result = structural_analysis!(callee_ci, world, settings)
                 callee_daef_ci = rhs_finish!(callee_result, callee_ci, callee_key, world, settings, callee_ordinal)
                 # Allocate a continuous block of variables for all callee alg and diff states
 
@@ -136,19 +136,14 @@ function gen_init_uncompress!(
                 else
                     (kind, slotidx) = slot
                     which = kind == AssignedDiff ? out_u_mm : error()
-                    replace_call!(ir, SSAValue(i), Expr(:call, Base.setindex!, which, argval, slotidx))
+                    replace_call!(ir, SSAValue(i), Expr(:call, Base.setindex!, which, argval, slotidx), settings, @__SOURCE__)
                 end
             else
-                replace_if_intrinsic!(ir, SSAValue(i), nothing, nothing, Argument(1), t, var_assignment)
+                replace_if_intrinsic!(ir, settings, SSAValue(i), nothing, nothing, Argument(1), t, var_assignment)
             end
         end
 
         # Just before the end of the function
-        idx = length(ir.stmts)
-        function ir_add!(a, b)
-            ni = NewInstruction(Expr(:call, +, a, b), Any, ir[SSAValue(idx)][:line])
-            insert_node!(ir, idx, ni)
-        end
         ir = Compiler.compact!(ir)
         Compiler.verify_ir(ir)
 
