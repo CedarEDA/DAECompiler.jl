@@ -18,7 +18,7 @@ function _flatten_parameter!(𝕃, compact, argtypes, ntharg, line, settings)
                 continue
             end
             this = ntharg(argn)
-            nthfield(i) = @insert_instruction_here compact line settings getfield(this, i)::Compiler.getfield_tfunc(𝕃, argextype(this, compact), Const(i))
+            nthfield(i) = @insert_instruction_here(compact, line, settings, getfield(this, i)::Compiler.getfield_tfunc(𝕃, argextype(this, compact), Const(i)))
             if isa(argt, PartialStruct)
                 fields = _flatten_parameter!(𝕃, compact, argt.fields, nthfield, line, settings)
             else
@@ -31,7 +31,7 @@ function _flatten_parameter!(𝕃, compact, argtypes, ntharg, line, settings)
 end
 
 function flatten_parameter!(𝕃, compact, argtypes, ntharg, line, settings)
-    return @insert_instruction_here compact line settings tuple(_flatten_parameter!(𝕃, compact, argtypes, ntharg, line, settings)...)::Tuple
+    return @insert_instruction_here(compact, line, settings, tuple(_flatten_parameter!(𝕃, compact, argtypes, ntharg, line, settings)...)::Tuple)
 end
 
 # Needs to match flatten_arguments!
@@ -85,23 +85,23 @@ function flatten_argument!(compact::Compiler.IncrementalCompact, settings::Setti
         return TransformedArg(Argument(offset+1), offset+1, eqoffset)
     elseif argt === equation
         line = compact[Compiler.OldSSAValue(1)][:line]
-        ssa = @insert_instruction_here compact line settings (:invoke)(nothing, InternalIntrinsics.external_equation)::Eq(eqoffset+1)
+        ssa = @insert_instruction_here(compact, line, settings, (:invoke)(nothing, InternalIntrinsics.external_equation)::Eq(eqoffset+1))
         return TransformedArg(ssa, offset, eqoffset+1)
     elseif isabstracttype(argt) || ismutabletype(argt) || (!isa(argt, DataType) && !isa(argt, PartialStruct))
         line = compact[Compiler.OldSSAValue(1)][:line]
-        ssa = @insert_instruction_here compact line settings error("Cannot IPO model arg type $argt")::Union{}
+        ssa = @insert_instruction_here(compact, line, settings, error("Cannot IPO model arg type $argt")::Union{})
         return TransformedArg(ssa, -1, eqoffset)
     else
         if !isa(argt, PartialStruct) && Base.datatype_fieldcount(argt) === nothing
             line = compact[Compiler.OldSSAValue(1)][:line]
-            ssa = @insert_instruction_here compact line settings error("Cannot IPO model arg type $argt")::Union{}
+            ssa = @insert_instruction_here(compact, line, settings, error("Cannot IPO model arg type $argt")::Union{})
             return TransformedArg(ssa, -1, eqoffset)
         end
         (args, _, offset) = flatten_arguments!(compact, settings, isa(argt, PartialStruct) ? argt.fields : collect(Any, fieldtypes(argt)), offset, eqoffset, argtypes)
         offset == -1 && return TransformedArg(ssa, -1, eqoffset)
         this = Expr(:new, isa(argt, PartialStruct) ? argt.typ : argt, args...)
         line = compact[Compiler.OldSSAValue(1)][:line]
-        ssa = @insert_instruction_here compact line settings this::argt
+        ssa = @insert_instruction_here(compact, line, settings, this::argt)
         return TransformedArg(ssa, offset, eqoffset)
     end
 end
