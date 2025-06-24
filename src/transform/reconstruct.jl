@@ -58,6 +58,22 @@ function expand_residuals(f, residuals, u, du, t)
     return expand_residuals(state, key, residuals, u, du, t)
 end
 
+function extract_removed_states(state::TransformationState, key::TornCacheKey, torn::TornIR, u, du, t)
+    (; result, structure) = state
+    # TODO: handle multiple partitions
+    torn_ir = only(torn.ir_seq)
+    removed_states = Int[]
+    for (i, inst) in enumerate(torn_ir.stmts)
+        stmt = inst[:stmt]
+        is_solved_variable(stmt) || continue
+        var = stmt.args[2]::Int
+        vint = invview(structure.var_to_diff)[var]
+        vint === nothing || key.diff_states === nothing || !in(vint, key.diff_states) || continue
+        push!(removed_states, var)
+    end
+    return removed_states
+end
+
 """
     compute_residual_vectors(f, u, du; t = rand())
 
@@ -71,26 +87,33 @@ be provided such that the selected equation that determines this derivative
 holds; otherwise, residuals for equations involving the value of this state
 derivative may differ between the unoptimized and optimized versions.
 """
-function compute_residual_vectors(f, u, du; t = rand())
-    # result = @code_structure result=true f()
-    # structure = make_structure_from_ipo(result)
-    # state = TransformationState(result, structure, copy(result.total_incidence))
-    # key, _ = top_level_state_selection!(state)
+function compute_residual_vectors(f, u, du; t = rand(), mode=DAE, world=Base.tls_world_age())
+    @assert mode === DAE # TODO: support ODEs
+    settings = Settings(; mode)
+    ci = _code_ad_by_type(Tuple{typeof(f)}; world)
+    result = @code_structure result=true mode=mode world=world f()
+    structure = make_structure_from_ipo(result)
+    state = TransformationState(result, structure, copy(result.total_incidence))
+    key, _ = top_level_state_selection!(state)
+    tearing_schedule!(state, ci, key, world, settings)
+    torn_ci = find_matching_ci(ci->isa(ci.owner, TornIRSpec) && ci.owner.key == key, ci.def, world)
+    torn_ir = torn_ci.inferred
+    removed_states = extract_removed_states(state, key, torn_ir, u, du, t)
 
     residuals = zeros(length(u))
     p = SciMLBase.NullParameters()
-    dropped_equations = 1 # TODO
-    u_compressed = u[[1, 2, 4]] # TODO
-    du_compressed = du[[1, 2, 4]] # TODO
-    residuals_compressed = zeros(length(residuals) - dropped_equations)
+    indices = filter(!in(removed_states), eachindex(u))
+    u_compressed = u[indices]
+    du_compressed = du[indices]
+    residuals_compressed = zeros(length(residuals) - length(removed_states))
 
     our_prob = DAECProblem(f, (1,) .=> 1., insert_stmt_debuginfo = true)
-    sciml_prob = DiffEqBase.get_concrete_problem(our_prob, true);
+    sciml_prob = DiffEqBase.get_concrete_problem(our_prob, true)
     f_compressed! = sciml_prob.f.f
     f_compressed!(residuals_compressed, du_compressed, u_compressed, p, t)
 
     our_prob = DAECProblem(f, (1,) .=> 1., insert_stmt_debuginfo = true, skip_optimizations = true)
-    sciml_prob = DiffEqBase.get_concrete_problem(our_prob, true);
+    sciml_prob = DiffEqBase.get_concrete_problem(our_prob, true)
     f_original! = sciml_prob.f.f
     f_original!(residuals, du, u, p, t)
 
