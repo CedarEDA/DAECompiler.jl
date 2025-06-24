@@ -185,7 +185,11 @@ function dae_factory_gen(state::TransformationState, ci::CodeInstance, key::Unio
     if settings.skip_optimizations
         differential_states = Bool[structure.var_to_diff[v] !== nothing for v in continuous_variables(state)]
     else
-        all_states = filter(var -> classify_var(result, key, var) != AlgebraicDerivative, continuous_variables(state))
+        all_states = filter(continuous_variables(state)) do var
+            kind = classify_var(result, key, var)
+            kind === nothing && return false
+            return kind !== AlgebraicDerivative
+        end
         differential_states = Bool[v in key.diff_states for v in all_states]
     end
 

@@ -44,8 +44,6 @@ function gen_init_uncompress!(
 
     cis = Vector{CodeInstance}()
     for (ir_ordinal, ir) in enumerate(torn.ir_seq)
-        ir = torn.ir_seq[ir_ordinal]
-
         # Read in from the last level before any DAE or ODE-specific `ir_levels`
         # We assume this is named `tearing_schedule!`
         ir = copy(ir)
