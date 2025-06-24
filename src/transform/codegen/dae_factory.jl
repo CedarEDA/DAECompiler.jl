@@ -165,7 +165,7 @@ function dae_factory_gen(state::TransformationState, ci::CodeInstance, key::Unio
 
             line = result.ir[SSAValue(1)][:line]
             param_list = flatten_parameter!(Compiler.fallback_lattice, compact, ci.inferred.ir.argtypes[1:end], argn->Argument(2+argn), line, settings)
-            sicm = @insert_instruction_here compact line settings invoke(param_list, sicm_ci)::Tuple
+            sicm = @insert_instruction_here(compact, line, settings, invoke(param_list, sicm_ci)::Tuple)
         end
 
         daef_ci = rhs_finish!(state, ci, key, world, settings, 1)

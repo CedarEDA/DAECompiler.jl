@@ -78,16 +78,16 @@ function sciml_to_internal_abi_noopt!(ir::IRCode, state::TransformationState, in
     compact = IncrementalCompact(ir)
     line = ir[SSAValue(1)][:line]
 
-    internal_oc = @insert_instruction_here compact line settings getfield(captures, 1)::Core.OpaqueClosure
+    internal_oc = @insert_instruction_here(compact, line, settings, getfield(captures, 1)::Core.OpaqueClosure)
     # TODO: Compute proper indices.
     neqs = length(state.structure.eq_to_diff)
-    out_indices = @insert_instruction_here compact line settings view(out, 1:neqs)::VectorIntViewType
-    du_indices = @insert_instruction_here compact line settings view(du, 1:neqs)::VectorIntViewType
-    u_indices = @insert_instruction_here compact line settings view(u, 1:neqs)::VectorIntViewType
+    out_indices = @insert_instruction_here(compact, line, settings, view(out, 1:neqs)::VectorIntViewType)
+    du_indices = @insert_instruction_here(compact, line, settings, view(du, 1:neqs)::VectorIntViewType)
+    u_indices = @insert_instruction_here(compact, line, settings, view(u, 1:neqs)::VectorIntViewType)
     # TODO: Provide actual external variables.
-    vars = @insert_instruction_here compact line settings getindex(Float64)::Vector{Float64}
-    @insert_instruction_here compact line settings (:invoke)(internal_ci, internal_oc, vars, out, du, u, out_indices, du_indices, u_indices, t)::Nothing
-    @insert_instruction_here compact line settings (return nothing)::Union{}
+    vars = @insert_instruction_here(compact, line, settings, getindex(Float64)::Vector{Float64})
+    @insert_instruction_here(compact, line, settings, (:invoke)(internal_ci, internal_oc, vars, out, du, u, out_indices, du_indices, u_indices, t)::Nothing)
+    @insert_instruction_here(compact, line, settings, (return nothing)::Union{})
 
     ir = Compiler.finish(compact)
     maybe_rewrite_debuginfo!(ir, settings)
