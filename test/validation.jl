@@ -1,5 +1,5 @@
 using DAECompiler
-using DAECompiler: refresh
+using DAECompiler: refresh, expand_residuals
 
 using Test
 using DAECompiler
@@ -26,7 +26,7 @@ f()
 
 # Setup SciML inputs.
 u = [3.0, 1.0, 100.0, 4.0]
-du = [2.0, 0.0, 0.0, 0.0]
+du = [3.0, 0.0, 0.0, 0.0]
 residuals = zeros(4)
 p = SciMLBase.NullParameters()
 t = 1.0
@@ -38,34 +38,21 @@ du_compressed = du[[1, 2, 4]]
 u_compressed = u[[1, 2, 4]]
 residuals_compressed = zeros(length(residuals) - dropped_equations)
 
-refresh()
-our_prob = DAECProblem(f, (1,) .=> 1., insert_stmt_debuginfo = true)
-sciml_prob = DiffEqBase.get_concrete_problem(our_prob, true);
-f_compressed = sciml_prob.f.f
-f_compressed(residuals_compressed, du_compressed, u_compressed, p, t)
-# XXX: `ddt(x₁)` gets substituted by `x₁ *ᵢ x₂` for the last equation after scheduling.
-# XXX: I believe the sign differences with `residuals` below are due to solving for
-# the corresponding variable in a variable-equation matching pair, therefore the negation
-# will depend on whether the solved variable appears with a positive or negative factor.
-# For example: ẋ₁ - x₁x₂ = 0
-#                    -ẋ₁ = -x₁x₂
-#                     ẋ₁ = -x₁x₂/-1
-#                     ẋ₁ = x₁x₂
-#                      0 = x₁x₂ - ẋ₁   <-- residual
-# Therefore, if a linear solved term appears with a positive coefficient,
-# the residual will be taken as the negative of the value provided to `always!`.
-# Empirical evidence validates this conjecture.
-@test residuals_compressed == [1.0, 3.0, 13.0]
+@testset "Validation" begin
+    refresh() # TODO: remove before merge
+    our_prob = DAECProblem(f, (1,) .=> 1., insert_stmt_debuginfo = true)
+    sciml_prob = DiffEqBase.get_concrete_problem(our_prob, true);
+    f_compressed = sciml_prob.f.f
+    f_compressed(residuals_compressed, du_compressed, u_compressed, p, t)
+    @test residuals_compressed == [0.0, 3.0, 13.0]
 
-refresh()
-our_prob = DAECProblem(f, (1,) .=> 1., insert_stmt_debuginfo = true, skip_optimizations = true)
-sciml_prob = DiffEqBase.get_concrete_problem(our_prob, true);
-f_original = sciml_prob.f.f
-f_original(residuals, du, u, p, t)
-@test residuals == [-1.0, -3.0, 97.0, 14.0]
-# -> the third equation is removed, so this entry in `f_original` can't be reliably tested,
-# unless added back somehow with `expand_residual` in a way that reflects the variable solve
-# (otherwise if we solve it wrong we won't catch the issue).
+    refresh() # TODO: remove before merge
+    our_prob = DAECProblem(f, (1,) .=> 1., insert_stmt_debuginfo = true, skip_optimizations = true)
+    sciml_prob = DiffEqBase.get_concrete_problem(our_prob, true);
+    f_original = sciml_prob.f.f
+    f_original(residuals, du, u, p, t)
+    @test residuals == [0.0, -3.0, 97.0, 13.0]
 
-# residuals_recovered = expand_residual(residuals_compressed, ...)
-# @test residuals_recovered ≈ residuals
+    residuals_recovered = expand_residuals(f, residuals_compressed, u, du, t)
+    @test residuals_recovered ≈ residuals
+end

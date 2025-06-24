@@ -16,6 +16,7 @@ module DAECompiler
     include("settings.jl")
     include("utils.jl")
     include("intrinsics.jl")
+    include("reflection.jl")
     include("analysis/utils.jl")
     include("analysis/lattice.jl")
     include("analysis/ADAnalyzer.jl")
@@ -29,6 +30,7 @@ module DAECompiler
     include("transform/common.jl")
     include("transform/runtime.jl")
     include("transform/unoptimized.jl")
+    include("transform/reconstruct.jl")
     include("transform/tearing/schedule.jl")
     include("transform/codegen/dae_factory.jl")
     include("transform/codegen/ode_factory.jl")
@@ -41,5 +43,4 @@ module DAECompiler
     include("analysis/consistency.jl")
     include("interface.jl")
     include("problem_interface.jl")
-    include("reflection.jl")
 end
