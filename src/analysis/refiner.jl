@@ -15,7 +15,11 @@ struct StructuralRefiner <: Compiler.AbstractInterpreter
     eqclassification::Vector{VarEqClassification}
 end
 
-struct StructureCache; end
+struct StructureCache
+    optimized::Bool
+end
+StructureCache() = StructureCache(true)
+StructureCache(settings::Settings) = StructureCache(!settings.skip_optimizations)
 
 Compiler.optimizer_lattice(interp::StructuralRefiner) = Compiler.PartialsLattice(EqStructureLattice())
 Compiler.typeinf_lattice(interp::StructuralRefiner) = Compiler.PartialsLattice(EqStructureLattice())
@@ -24,7 +28,7 @@ Compiler.ipo_lattice(interp::StructuralRefiner) = Compiler.PartialsLattice(EqStr
 Compiler.InferenceParams(interp::StructuralRefiner) = Compiler.InferenceParams()
 Compiler.OptimizationParams(interp::StructuralRefiner) = Compiler.OptimizationParams()
 Compiler.get_inference_world(interp::StructuralRefiner) = interp.world
-Compiler.cache_owner(::StructuralRefiner) = StructureCache()
+Compiler.cache_owner(interp::StructuralRefiner) = StructureCache(interp.settings)
 
 # This is the main logic. We visit an :invoke instruction and either apply the known transfer function for one of our
 # DAECompiler intrinsics or lookup the structural incidence matrix in the cache, applying it as appropriate.

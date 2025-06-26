@@ -18,14 +18,14 @@ end
 
 function structural_analysis!(ci::CodeInstance, world::UInt, settings::Settings)
     # Check if we have aleady done this work - if so return the cached result
-    result_ci = find_matching_ci(ci->ci.owner == StructureCache(), ci.def, world)
+    result_ci = find_matching_ci(ci->ci.owner == StructureCache(settings), ci.def, world)
     if result_ci !== nothing
         return result_ci.inferred
     end
 
     result = _structural_analysis!(ci, world, settings)
     # TODO: The world bounds might have been narrowed
-    cache_dae_ci!(ci, result, nothing, nothing, StructureCache())
+    cache_dae_ci!(ci, result, nothing, nothing, StructureCache(settings))
 
     return result
 end
