@@ -1,5 +1,5 @@
 """
-    struct RHSSpec
+    struct InitUncompressSpec
 
 Cache partition for the RHS
 """
@@ -11,7 +11,7 @@ end
 
 function gen_init_uncompress!(result::DAEIPOResult, ci::CodeInstance, init_key::TornCacheKey, diff_key::TornCacheKey, world::UInt, settings::Settings, ordinal::Int, indexT=Int)
     structure = make_structure_from_ipo(result)
-    tstate = TransformationState(result, structure, copy(result.total_incidence))
+    tstate = TransformationState(result, structure)
     return gen_init_uncompress!(tstate, ci, init_key, diff_key, world, settings, ordinal, indexT)
 end
 
@@ -44,8 +44,6 @@ function gen_init_uncompress!(
 
     cis = Vector{CodeInstance}()
     for (ir_ordinal, ir) in enumerate(torn.ir_seq)
-        ir = torn.ir_seq[ir_ordinal]
-
         # Read in from the last level before any DAE or ODE-specific `ir_levels`
         # We assume this is named `tearing_schedule!`
         ir = copy(ir)
@@ -98,7 +96,7 @@ function gen_init_uncompress!(
                 spec_data = stmt.args[1]
                 callee_key = stmt.args[1][2]
                 callee_ordinal = stmt.args[1][end]::Int
-                callee_result = structural_analysis!(callee_ci, world)
+                callee_result = structural_analysis!(callee_ci, world, settings)
                 callee_daef_ci = rhs_finish!(callee_result, callee_ci, callee_key, world, settings, callee_ordinal)
                 # Allocate a continuous block of variables for all callee alg and diff states
 
@@ -136,19 +134,14 @@ function gen_init_uncompress!(
                 else
                     (kind, slotidx) = slot
                     which = kind == AssignedDiff ? out_u_mm : error()
-                    replace_call!(ir, SSAValue(i), Expr(:call, Base.setindex!, which, argval, slotidx))
+                    replace_call!(ir, SSAValue(i), Expr(:call, Base.setindex!, which, argval, slotidx), settings, @__SOURCE__)
                 end
             else
-                replace_if_intrinsic!(ir, SSAValue(i), nothing, nothing, Argument(1), t, var_assignment)
+                replace_if_intrinsic!(ir, settings, SSAValue(i), nothing, nothing, Argument(1), t, var_assignment)
             end
         end
 
         # Just before the end of the function
-        idx = length(ir.stmts)
-        function ir_add!(a, b)
-            ni = NewInstruction(Expr(:call, +, a, b), Any, ir[SSAValue(idx)][:line])
-            insert_node!(ir, idx, ni)
-        end
         ir = Compiler.compact!(ir)
         Compiler.verify_ir(ir)
 

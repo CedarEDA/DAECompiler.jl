@@ -7,6 +7,7 @@ of structural incidence information.
 """
 struct StructuralRefiner <: Compiler.AbstractInterpreter
     world::UInt
+    settings::Settings
     var_to_diff::DiffGraph
     varkinds::Vector{Intrinsics.VarKind}
     varclassification::Vector{VarEqClassification}
@@ -14,7 +15,11 @@ struct StructuralRefiner <: Compiler.AbstractInterpreter
     eqclassification::Vector{VarEqClassification}
 end
 
-struct StructureCache; end
+struct StructureCache
+    optimized::Bool
+end
+StructureCache() = StructureCache(true)
+StructureCache(settings::Settings) = StructureCache(!settings.skip_optimizations)
 
 Compiler.optimizer_lattice(interp::StructuralRefiner) = Compiler.PartialsLattice(EqStructureLattice())
 Compiler.typeinf_lattice(interp::StructuralRefiner) = Compiler.PartialsLattice(EqStructureLattice())
@@ -23,7 +28,7 @@ Compiler.ipo_lattice(interp::StructuralRefiner) = Compiler.PartialsLattice(EqStr
 Compiler.InferenceParams(interp::StructuralRefiner) = Compiler.InferenceParams()
 Compiler.OptimizationParams(interp::StructuralRefiner) = Compiler.OptimizationParams()
 Compiler.get_inference_world(interp::StructuralRefiner) = interp.world
-Compiler.cache_owner(::StructuralRefiner) = StructureCache()
+Compiler.cache_owner(interp::StructuralRefiner) = StructureCache(interp.settings)
 
 # This is the main logic. We visit an :invoke instruction and either apply the known transfer function for one of our
 # DAECompiler intrinsics or lookup the structural incidence matrix in the cache, applying it as appropriate.
@@ -51,7 +56,7 @@ Compiler.cache_owner(::StructuralRefiner) = StructureCache()
     end
 
     callee_codeinst = invokee::CodeInstance
-    callee_result = structural_analysis!(callee_codeinst, Compiler.get_inference_world(interp))
+    callee_result = structural_analysis!(callee_codeinst, Compiler.get_inference_world(interp), interp.settings)
 
     if isa(callee_result, UncompilableIPOResult) || isa(callee_result.extended_rt, Const) || isa(callee_result.extended_rt, Type)
         # If this is uncompilable, we will be notfiying the user in the outer loop - here we just ignore it
