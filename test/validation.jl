@@ -49,15 +49,15 @@ end
 
     # IPO
 
+    u = [2.0]
+    du = [3.0]
     residuals, expanded_residuals = compute_residual_vectors(() -> onecall!(), u, du; t = 1.0)
     @test residuals ≈ [1.0]
     @test residuals ≈ expanded_residuals
 
     u = [2.0, 4.0]
     du = [3.0, 7.0]
-    # ERROR: BoundsError: attempt to access 2-element Vector{Float64} at index [3]
-    # (for `var = 3`)
-    refresh(); residuals, expanded_residuals = compute_residual_vectors(twocall!, u, du; t = 1.0)
-    @test residuals ≈ [1.0]
+    residuals, expanded_residuals = compute_residual_vectors(twocall!, u, du; t = 1.0)
+    @test residuals ≈ [1.0, 3.0]
     @test residuals ≈ expanded_residuals
 end;

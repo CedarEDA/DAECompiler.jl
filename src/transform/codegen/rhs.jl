@@ -1,5 +1,4 @@
 const VectorViewType = SubArray{Float64, 1, Vector{Float64}, Tuple{UnitRange{Int}}, true}
-const VectorIntViewType = SubArray{Int, 1, Vector{Int}, Tuple{UnitRange{Int}}, true}
 
 """
     struct RHSSpec

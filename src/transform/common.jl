@@ -116,7 +116,7 @@ function replace_call!(ir::Union{IRCode,IncrementalCompact}, idx::SSAValue, @nos
     ir[idx][:type] = Any
     ir[idx][:info] = Compiler.NoCallInfo()
     ir[idx][:flag] |= Compiler.IR_FLAG_REFINED
-    return new_call
+    return idx
 end
 
 function maybe_insert_debuginfo!(compact::IncrementalCompact, settings::Settings, source::LineNumberNode, previous = nothing, i = compact.result_idx)
@@ -129,6 +129,7 @@ function maybe_insert_debuginfo!(debuginfo::DebugInfoStream, settings::Settings,
 end
 
 function insert_debuginfo!(debuginfo::DebugInfoStream, i::Integer, source::LineNumberNode, previous)
+    prev_edge_index = prev_edge_line = nothing
     if previous !== nothing && isa(previous, Tuple)
         prev_edge_index, prev_edge_line = previous[2], previous[3]
     end

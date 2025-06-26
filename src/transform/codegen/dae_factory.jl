@@ -147,7 +147,7 @@ function dae_factory_gen(state::TransformationState, ci::CodeInstance, key::Unio
     argt = Tuple{Vector{Float64}, Vector{Float64}, Vector{Float64}, SciMLBase.NullParameters, Float64}
     sicm = ()
     if settings.skip_optimizations
-        daef_ci = rhs_finish_noopt!(state, ci, key, world, settings, 1)
+        daef_ci = rhs_finish_noopt!(state, ci, key, world, settings)
         oc = sciml_to_internal_abi_noopt!(copy(ci.inferred.ir), state, daef_ci, settings)
     else
         # TODO: We should not have to recompute this here
