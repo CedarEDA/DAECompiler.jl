@@ -30,7 +30,7 @@ function factory_gen(@nospecialize(fT), settings::Settings, world::UInt = Base.g
     end
 
     structure = make_structure_from_ipo(result)
-    tstate = TransformationState(result, structure, copy(result.total_incidence))
+    tstate = TransformationState(result, structure)
 
     # Ensure that the system is a consistent DAE system
     err = StateSelection.check_consistency(tstate, nothing)

@@ -78,7 +78,7 @@ end
 
 function rhs_finish!(result::DAEIPOResult, ci::CodeInstance, key::TornCacheKey, world::UInt, settings::Settings, ordinal::Int, indexT=Int)
     structure = make_structure_from_ipo(result)
-    tstate = TransformationState(result, structure, copy(result.total_incidence))
+    tstate = TransformationState(result, structure)
     return rhs_finish!(tstate, ci, key, world, settings, ordinal, indexT)
 end
 

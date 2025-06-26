@@ -93,7 +93,7 @@ function compute_residual_vectors(f, u, du; t = rand(), mode=DAE, world=Base.tls
     ci = _code_ad_by_type(Tuple{typeof(f)}; world)
     result = @code_structure result=true mode=mode world=world f()
     structure = make_structure_from_ipo(result)
-    state = TransformationState(result, structure, copy(result.total_incidence))
+    state = TransformationState(result, structure)
     key, _ = top_level_state_selection!(state)
     tearing_schedule!(state, ci, key, world, settings)
     torn_ci = find_matching_ci(ci->isa(ci.owner, TornIRSpec) && ci.owner.key == key, ci.def, world)

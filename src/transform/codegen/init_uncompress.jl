@@ -11,7 +11,7 @@ end
 
 function gen_init_uncompress!(result::DAEIPOResult, ci::CodeInstance, init_key::TornCacheKey, diff_key::TornCacheKey, world::UInt, settings::Settings, ordinal::Int, indexT=Int)
     structure = make_structure_from_ipo(result)
-    tstate = TransformationState(result, structure, copy(result.total_incidence))
+    tstate = TransformationState(result, structure)
     return gen_init_uncompress!(tstate, ci, init_key, diff_key, world, settings, ordinal, indexT)
 end
 

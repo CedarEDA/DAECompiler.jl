@@ -36,7 +36,7 @@ function code_structure_by_type(@nospecialize(tt::Type); world::UInt = Base.tls_
 
   structure = make_structure_from_ipo(result)
 
-  tstate = TransformationState(result, structure, copy(result.total_incidence))
+  tstate = TransformationState(result, structure)
   err = StateSelection.check_consistency(tstate, nothing)
   err !== nothing && throw(err)
 

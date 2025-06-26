@@ -654,7 +654,7 @@ end
 
 function tearing_schedule!(result::DAEIPOResult, ci::CodeInstance, key::TornCacheKey, world::UInt, settings::Settings)
     structure = make_structure_from_ipo(result)
-    tstate = TransformationState(result, structure, copy(result.total_incidence))
+    tstate = TransformationState(result, structure)
     return tearing_schedule!(tstate, ci, key, world, settings)
 end
 
@@ -856,7 +856,7 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
                     vars_for_final = BitSet()
                     # TODO: This is a very expensive way to compute this - we should be able to do this cheaper
                     cstructure = make_structure_from_ipo(callee_result)
-                    tstate = TransformationState(callee_result, cstructure, copy(callee_result.total_incidence))
+                    tstate = TransformationState(callee_result, cstructure)
                     cvar_eq_matching = matching_for_key(tstate, callee_key)
                     for callee_var in 1:length(cvar_eq_matching)
                         if cvar_eq_matching[callee_var] !== unassigned
