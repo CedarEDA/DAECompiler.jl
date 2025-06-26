@@ -63,7 +63,7 @@ function rhs_finish_noopt!(
         end
     end
 
-    daef_ci = rhs_ir_finish!(Compiler.finish(compact), ci, settings, key, slotnames)
+    daef_ci = rhs_finish_ir!(Compiler.finish(compact), ci, settings, key, slotnames)
     return daef_ci
 end
 

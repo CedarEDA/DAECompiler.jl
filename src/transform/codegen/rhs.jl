@@ -236,17 +236,19 @@ function rhs_finish!(
 
         # Just before the end of the function
         spec = RHSSpec(key, ir_ordinal)
-        daef_ci = rhs_ir_finish!(ir, ci, settings, spec, slotnames)
+        daef_ci = rhs_finish_ir!(ir, ci, settings, spec, slotnames; single_block = true)
         push!(cis, daef_ci)
     end
 
     return cis[ordinal]
 end
 
-function rhs_ir_finish!(ir::IRCode, ci::CodeInstance, settings::Settings, owner::Union{RHSSpec, UnoptimizedKey}, slotnames)
+function rhs_finish_ir!(ir::IRCode, ci::CodeInstance, settings::Settings, owner::Union{RHSSpec, UnoptimizedKey}, slotnames; single_block = false)
     ir = Compiler.compact!(ir)
-    resize!(ir.cfg.blocks, 1)
-    empty!(ir.cfg.blocks[1].succs)
+    if single_block
+        resize!(ir.cfg.blocks, 1)
+        empty!(ir.cfg.blocks[1].succs)
+    end
 
     widen_extra_info!(ir)
     Compiler.verify_ir(ir)
