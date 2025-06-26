@@ -18,7 +18,8 @@ function rhs_finish_noopt!(
     slotnames = [:captures, :vars, :out, :du, :u, :out_indices, :du_indices, :u_indices, :t]
     argtypes = [Tuple, Vector{Float64}, Vector{Float64}, Vector{Float64}, Vector{Float64}, VectorIntViewType, VectorIntViewType, VectorIntViewType, Float64]
     append!(empty!(ir.argtypes), argtypes)
-    captures, vars, out, du, u, out_indices, du_indics, u_indices, t = Argument.(eachindex(slotnames))
+    captures, vars, out, du, u, out_indices, du_indices, u_indices, t = Argument.(eachindex(slotnames))
+    # TODO: use `out_indices`, `du_indices`, `u_indices`
     @assert length(slotnames) == length(ir.argtypes)
 
     equations = Pair{SSAValue, Eq}[]
@@ -45,17 +46,27 @@ function rhs_finish_noopt!(
             eq = last(equations[i])
             call = Expr(:call, setindex!, out, value, eq.id)
             replace_call!(compact, ssaidx, call, settings, @__SOURCE__)
-        elseif is_known_invoke_or_call(stmt, variable, compact)
+        elseif is_known_invoke_or_call(stmt, Intrinsics.variable, compact)
             var = idnum(type)
             call = Expr(:call, getindex, u, var)
             replace_call!(compact, ssaidx, call, settings, @__SOURCE__)
             inst[:type] = Float64
-        elseif is_known_invoke_or_call(stmt, sim_time, compact)
+        elseif is_known_invoke_or_call(stmt, Intrinsics.sim_time, compact)
             inst[:stmt] = t
-        # TODO: process flattened variables
-        # TODO: process other intrinsics (epsilon, etc)
-        # else
-        #     replace_if_intrinsic!(compact, settings, ssaidx, nothing, nothing, nothing, t, nothing)
+        elseif is_known_invoke_or_call(stmt, Intrinsics.epsilon, compact)
+            inst[:stmt] = 0.0
+        elseif isexpr(stmt, :invoke)
+            @sshow stmt
+            callee_ci, callee_f = stmt.args[1]::CodeInstance, stmt.args[2]
+            callee_result = structural_analysis!(callee_ci, world, settings)
+            callee_structure = make_structure_from_ipo(callee_result)
+            callee_state = TransformationState(callee_result, callee_structure)
+            callee_daef_ci = rhs_finish_noopt!(callee_state, callee_ci, UnoptimizedKey(), world, settings)
+            callee_captures = ()
+            # TODO: compute indices into `u`/`du`/`out`
+            empty!(stmt.args)
+            push!(stmt.args, callee_daef_ci, callee_captures, vars,
+                out, du, u, out_indices, du_indices, u_indices, t)
         end
         type = inst[:type]
         if isa(type, Incidence) || isa(type, Eq)

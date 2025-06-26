@@ -53,7 +53,7 @@ end
 function expand_residuals(f, residuals, u, du, t)
     result = @code_structure result=true f()
     structure = make_structure_from_ipo(result)
-    state = TransformationState(result, structure, copy(result.total_incidence))
+    state = TransformationState(result, structure)
     key, _ = top_level_state_selection!(state)
     return expand_residuals(state, key, residuals, u, du, t)
 end

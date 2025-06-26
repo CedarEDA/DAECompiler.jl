@@ -357,18 +357,19 @@ function _structural_analysis!(ci::CodeInstance, world::UInt, settings::Settings
             opaque_eligible = false
         end
 
-        # Rewrite to flattened ABI
-        compact[SSAValue(i)] = nothing
-        compact.result_idx -= 1
-        new_args = _flatten_parameter!(Compiler.optimizer_lattice(refiner), compact, callee_codeinst.inferred.ir.argtypes, arg->stmt.args[arg+1], line, settings)
-
-        new_call = insert_instruction_here!(compact, settings, @__SOURCE__,
-                NewInstruction(Expr(:invoke, (StructuralSSARef(compact.result_idx), callee_codeinst), new_args...), stmtype, info, line, stmtflags))
-        compact.ssa_rename[compact.idx - 1] = new_call
+        if !settings.skip_optimizations
+            # Rewrite to flattened ABI
+            compact[SSAValue(i)] = nothing
+            compact.result_idx -= 1
+            new_args = _flatten_parameter!(Compiler.optimizer_lattice(refiner), compact, callee_codeinst.inferred.ir.argtypes, arg->stmt.args[arg+1], line, settings)
+            new_call = insert_instruction_here!(compact, settings, @__SOURCE__,
+            NewInstruction(Expr(:invoke, (StructuralSSARef(compact.result_idx), callee_codeinst), new_args...), stmtype, info, line, stmtflags))
+            compact.ssa_rename[compact.idx - 1] = new_call
+        end
 
         cms = CallerMappingState(result, refiner.var_to_diff, refiner.varclassification, refiner.varkinds, eqclassification, eqkinds)
-        err = add_internal_equations_to_structure!(refiner, cms, total_incidence, eq_callee_mapping, StructuralSSARef(new_call.id),
-            result, mapping)
+        err = add_internal_equations_to_structure!(refiner, cms, total_incidence, eq_callee_mapping,
+            StructuralSSARef(i), result, mapping)
         if err !== true
             return UncompilableIPOResult(warnings, UnsupportedIRException(err, ir))
         end

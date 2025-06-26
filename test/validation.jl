@@ -11,7 +11,7 @@ const *ᵢ = Core.Intrinsics.mul_float
 const +ᵢ = Core.Intrinsics.add_float
 const -ᵢ = Core.Intrinsics.sub_float
 
-@noinline function f()
+function f()
     x₁ = continuous() # selected
     x₂ = continuous() # selected
     x₃ = continuous() # algebraic, optimized away
@@ -22,12 +22,42 @@ const -ᵢ = Core.Intrinsics.sub_float
     always!(x₄ *ᵢ x₄ -ᵢ ddt(x₁))
 end
 
+@noinline function onecall!()
+    x = continuous()
+    always!(ddt(x) - x)
+end
+
+function twocall!()
+    onecall!(); onecall!();
+    return nothing
+end
+
 @testset "Validation" begin
     refresh() # TODO: remove before merge
-    f()
+
+    u = [2.0]
+    du = [3.0]
+    residuals, expanded_residuals = compute_residual_vectors(onecall!, u, du; t = 1.0)
+    @test residuals ≈ [1.0]
+    @test residuals ≈ expanded_residuals
+
     u = [3.0, 1.0, 100.0, 4.0]
     du = [3.0, 0.0, 0.0, 0.0]
     residuals, expanded_residuals = compute_residual_vectors(f, u, du; t = 1.0)
     @test residuals ≈ [0.0, -3.0, 97.0, 13.0]
+    @test residuals ≈ expanded_residuals
+
+    # IPO
+
+    residuals, expanded_residuals = compute_residual_vectors(() -> onecall!(), u, du; t = 1.0)
+    @test residuals ≈ [1.0]
+    @test residuals ≈ expanded_residuals
+
+    u = [2.0, 4.0]
+    du = [3.0, 7.0]
+    # ERROR: BoundsError: attempt to access 2-element Vector{Float64} at index [3]
+    # (for `var = 3`)
+    refresh(); residuals, expanded_residuals = compute_residual_vectors(twocall!, u, du; t = 1.0)
+    @test residuals ≈ [1.0]
     @test residuals ≈ expanded_residuals
 end;
