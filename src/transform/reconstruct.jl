@@ -2,12 +2,11 @@ function expand_residuals(state::TransformationState, key::TornCacheKey, compres
     (; result, structure) = state
     expanded = Float64[]
     i = 1
-    # TODO: Remove this and the `key` argument if unused
-    # var_eq_matching = matching_for_key(state, key)
-    # (slot_assignments, var_assignment, _) = assign_slots(state, key, var_eq_matching)
+    var_eq_matching = matching_for_key(state, key)
     for (eq, incidence) in enumerate(result.total_incidence)
         if !is_var_part_known_linear(incidence)
-            push!(expanded, compressed[i])
+            sign = infer_residual_sign(result, eq, var_eq_matching)
+            push!(expanded, sign * compressed[i])
             i += 1
             continue
         end
@@ -21,7 +20,7 @@ function expand_residuals(state::TransformationState, key::TornCacheKey, compres
                 is_diff = is_differential_variable(structure, var)
                 source = ifelse(is_diff, du, u)
                 slot = count(v -> is_differential_variable(structure, v) == is_diff, 1:var)
-                eq == var && !is_diff && (i += 1)
+                var === invview(var_eq_matching)[eq] && !is_diff && (i += 1)
                 value = source[slot]
             end
             residual += value * coeff
@@ -30,6 +29,22 @@ function expand_residuals(state::TransformationState, key::TornCacheKey, compres
         push!(expanded, constant_term + residual)
     end
     return expanded
+end
+
+function infer_residual_sign(result::DAEIPOResult, eq::Int, var_eq_matching)
+    # If a linear solved term appears with a positive coefficient,
+    # the residual will be taken as the negative of the value provided to `always!`.
+    # For example: ẋ₁ - x₁x₂ = 0
+    #                    -ẋ₁ = -x₁x₂
+    #                     ẋ₁ = -x₁x₂/-1
+    #                     ẋ₁ = x₁x₂
+    #                      0 = x₁x₂ - ẋ₁   <-- residual
+    incidence = result.total_incidence[eq]
+    var = invview(var_eq_matching)[eq]
+    isa(var, Int) || return 1
+    coeff = incidence.row[var + 1]
+    isa(coeff, Float64) || return -1
+    return -sign(coeff)
 end
 
 function is_differential_variable(structure::DAESystemStructure, var)
@@ -78,7 +93,7 @@ derivative may differ between the unoptimized and optimized versions.
 """
 function compute_residual_vectors(f, u, du; t = rand(), mode=DAE, world=Base.tls_world_age())
     @assert mode === DAE # TODO: support ODEs
-    settings = Settings(; mode)
+    settings = Settings(; mode, insert_stmt_debuginfo = true)
     ci = _code_ad_by_type(Tuple{typeof(f)}; world)
     result = @code_structure result=true mode=mode world=world f()
     structure = make_structure_from_ipo(result)

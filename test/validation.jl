@@ -27,8 +27,23 @@ end
     always!(ddt(x) - x)
 end
 
+@noinline function sin!()
+    x = continuous()
+    always!(ddt(x) - sin(x))
+end
+
+@noinline function neg_sin!()
+    x = continuous()
+    always!(sin(x) - ddt(x))
+end
+
 function twocall!()
     onecall!(); onecall!();
+    return nothing
+end
+
+function sin2!()
+    sin!(); sin!();
     return nothing
 end
 
@@ -47,6 +62,18 @@ end
     @test residuals ≈ [0.0, -3.0, 97.0, 13.0]
     @test residuals ≈ expanded_residuals
 
+    u = [2.0]
+    du = [3.0]
+    residuals, expanded_residuals = compute_residual_vectors(sin!, u, du; t = 1.0)
+    @test residuals ≈ du .- sin.(u)
+    @test residuals ≈ expanded_residuals
+
+    u = [2.0]
+    du = [3.0]
+    residuals, expanded_residuals = compute_residual_vectors(neg_sin!, u, du; t = 1.0)
+    @test residuals ≈ sin.(u) .- du
+    @test residuals ≈ expanded_residuals
+
     # IPO
 
     u = [2.0]
@@ -59,5 +86,11 @@ end
     du = [3.0, 7.0]
     residuals, expanded_residuals = compute_residual_vectors(twocall!, u, du; t = 1.0)
     @test residuals ≈ [1.0, 3.0]
+    @test residuals ≈ expanded_residuals
+
+    u = [2.0, 4.0]
+    du = [1.0, 1.0]
+    residuals, expanded_residuals = compute_residual_vectors(sin2!, u, du; t = 1.0)
+    @test all(>(0), residuals)
     @test residuals ≈ expanded_residuals
 end;
