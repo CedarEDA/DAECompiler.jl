@@ -64,7 +64,7 @@ Compiler.cache_owner(interp::StructuralRefiner) = StructureCache(interp.settings
     end
 
     argtypes = Compiler.collect_argtypes(interp, stmt.args, Compiler.StatementState(nothing, false), irsv)[2:end]
-    mapping = CalleeMapping(Compiler.optimizer_lattice(interp), argtypes, callee_codeinst, callee_result, callee_codeinst.inferred.ir.argtypes)
+    mapping = CalleeMapping(Compiler.optimizer_lattice(interp), argtypes, callee_codeinst, callee_result)
     new_rt = apply_linear_incidence(Compiler.optimizer_lattice(interp), callee_result.extended_rt,
         CallerMappingState(callee_result, interp.var_to_diff, interp.varclassification, interp.varkinds, interp.eqclassification, interp.eqkinds), mapping)
 

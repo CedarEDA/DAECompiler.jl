@@ -47,30 +47,62 @@ function sin2!()
     return nothing
 end
 
+@noinline new_equation() = always()
+function external_equation!()
+    x = continuous()
+    eq = new_equation()
+    eq(ddt(x) - 1.0)
+end
+
+@noinline function flattening_inner!((a, b))
+    x = continuous()
+    always!(ddt(x) - (a + b))
+end
+function flattening!()
+    x = continuous()
+    flattening_inner!((1.0, x))
+    always!(ddt(x) - 2.0)
+end
+
+@noinline apply_equation(eq, residual) = eq(residual)
+function equation_argument!()
+    x = continuous()
+    equation = new_equation()
+    apply_equation(equation, x - ddt(x))
+end
+
+@noinline new_equation_and_variable() = (always(), continuous())
+@noinline apply_equation_on_ddtx_minus_one(eq, x) = apply_equation(eq, ddt(x) - 1.)
+function equation_used_multiple_times!()
+    (eq, x) = new_equation_and_variable()
+    apply_equation_on_ddtx_minus_one(eq, x)
+    apply_equation_on_ddtx_minus_one(eq, x)
+end
+
 @testset "Validation" begin
     refresh() # TODO: remove before merge
 
     u = [2.0]
     du = [3.0]
-    residuals, expanded_residuals = compute_residual_vectors(onecall!, u, du; t = 1.0)
+    residuals, expanded_residuals = compute_residual_vectors(onecall!, u, du)
     @test residuals ≈ [1.0]
     @test residuals ≈ expanded_residuals
 
     u = [3.0, 1.0, 100.0, 4.0]
     du = [3.0, 0.0, 0.0, 0.0]
-    residuals, expanded_residuals = compute_residual_vectors(f, u, du; t = 1.0)
+    residuals, expanded_residuals = compute_residual_vectors(f, u, du)
     @test residuals ≈ [0.0, -3.0, 97.0, 13.0]
     @test residuals ≈ expanded_residuals
 
     u = [2.0]
     du = [3.0]
-    residuals, expanded_residuals = compute_residual_vectors(sin!, u, du; t = 1.0)
+    residuals, expanded_residuals = compute_residual_vectors(sin!, u, du)
     @test residuals ≈ du .- sin.(u)
     @test residuals ≈ expanded_residuals
 
     u = [2.0]
     du = [3.0]
-    residuals, expanded_residuals = compute_residual_vectors(neg_sin!, u, du; t = 1.0)
+    residuals, expanded_residuals = compute_residual_vectors(neg_sin!, u, du)
     @test residuals ≈ sin.(u) .- du
     @test residuals ≈ expanded_residuals
 
@@ -78,19 +110,43 @@ end
 
     u = [2.0]
     du = [3.0]
-    residuals, expanded_residuals = compute_residual_vectors(() -> onecall!(), u, du; t = 1.0)
+    residuals, expanded_residuals = compute_residual_vectors(() -> onecall!(), u, du)
     @test residuals ≈ [1.0]
     @test residuals ≈ expanded_residuals
 
     u = [2.0, 4.0]
     du = [3.0, 7.0]
-    residuals, expanded_residuals = compute_residual_vectors(twocall!, u, du; t = 1.0)
+    residuals, expanded_residuals = compute_residual_vectors(twocall!, u, du)
     @test residuals ≈ [1.0, 3.0]
     @test residuals ≈ expanded_residuals
 
     u = [2.0, 4.0]
     du = [1.0, 1.0]
-    residuals, expanded_residuals = compute_residual_vectors(sin2!, u, du; t = 1.0)
+    residuals, expanded_residuals = compute_residual_vectors(sin2!, u, du)
     @test all(>(0), residuals)
+    @test residuals ≈ expanded_residuals
+
+    u = [0.0]
+    du = [2.0]
+    residuals, expanded_residuals = compute_residual_vectors(external_equation!, u, du)
+    @test residuals ≈ [1.0]
+    @test residuals ≈ expanded_residuals
+
+    u = [2.0]
+    du = [1.0]
+    residuals, expanded_residuals = compute_residual_vectors(equation_argument!, u, du)
+    @test residuals ≈ [1.0]
+    @test residuals ≈ expanded_residuals
+
+    u = [2.0, 4.0]
+    du = [1.0, 1.0]
+    residuals, expanded_residuals = compute_residual_vectors(flattening!, u, du)
+    @test residuals ≈ [-1.0, -2.0]
+    @test residuals ≈ expanded_residuals
+
+    u = [2.0]
+    du = [4.0]
+    residuals, expanded_residuals = compute_residual_vectors(equation_used_multiple_times!, u, du)
+    @test residuals ≈ [6.0]
     @test residuals ≈ expanded_residuals
 end;

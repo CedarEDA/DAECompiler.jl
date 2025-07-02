@@ -1,5 +1,11 @@
 struct UnoptimizedKey end
 
+function Base.StackTraces.show_custom_spec_sig(io::IO, owner::UnoptimizedKey, linfo::CodeInstance, frame::Base.StackTraces.StackFrame)
+    print(io, "Unoptimized transformed IR for ")
+    mi = Base.get_ci_mi(linfo)
+    return Base.StackTraces.show_spec_sig(io, mi.def, mi.specTypes)
+end
+
 function rhs_finish_noopt!(
     state::TransformationState,
     ci::CodeInstance,
@@ -16,18 +22,29 @@ function rhs_finish_noopt!(
     end
 
     ir = copy(result.ir)
-    # TODO: use original function arguments too
-    slotnames = [:captures, :out, :du, :u, :residuals, :states, :t]
-    argtypes = [Tuple, Vector{Float64}, Vector{Float64}, Vector{Float64}, Vector{Int}, Vector{Int}, Float64]
-    append!(empty!(ir.argtypes), argtypes)
-    captures, out, du, u, residuals, states, t = Argument.(eachindex(slotnames))
-    @assert length(slotnames) == length(ir.argtypes)
+    src = ci.inferred::AnalyzedSource
+    argrange = 2:src.nargs
+    slotnames = Symbol[:captures]
+    argtypes = Any[Tuple]
+    # Original arguments.
+    append!(slotnames, src.slotnames[argrange])
+    append!(argtypes, remove_variable_and_equation_annotations(ir.argtypes[argrange]))
+    # Additional ABI arguments.
+    push!(slotnames, :out, :du, :u, :residuals, :states, :t)
+    push!(argtypes, Vector{Float64}, Vector{Float64}, Vector{Float64}, Vector{Int}, Vector{Int}, Float64)
 
-    equations = Pair{SSAValue, Eq}[]
+    @assert length(slotnames) == length(argtypes)
+    append!(empty!(ir.argtypes), argtypes)
+    captures, args..., out, du, u, residuals, states, t = Argument.(eachindex(slotnames))
+
+    equations = Pair{Union{Argument, SSAValue}, Eq}[]
+    for arg in args
+        index = [arg.n]
+        i = findfirst(==(index), result.argmap.equations)
+        i !== nothing && push!(equations, arg => Eq(i))
+    end
     callee_to_caller_eq_map = invert_eq_callee_mapping(result.eq_callee_mapping)
     compact = IncrementalCompact(ir)
-
-    # @sshow equation_to_residual_mapping variable_to_state_mapping
 
     for ((old, i), _) in compact
         ssaidx = SSAValue(i)
@@ -39,7 +56,6 @@ function rhs_finish_noopt!(
         if i == 1
             # @insert_instruction_here(compact, nothing, settings, println("Residuals: ", residuals)::Any)
             # @insert_instruction_here(compact, nothing, settings, println("States: ", states)::Any)
-            replace_uses!(compact, (old, inst) => SSAValue(3))
         end
 
         if is_known_invoke_or_call(stmt, Intrinsics.variable, compact)
@@ -56,13 +72,14 @@ function rhs_finish_noopt!(
             # @insert_instruction_here(compact, line, settings, println("Variable derivative (", var, " := ", invview(structure.var_to_diff)[var], "′): ", value)::Any)
         elseif is_known_invoke(stmt, Intrinsics.equation, compact)
             push!(equations, ssaidx => type::Eq)
-            inst[:stmt] = nothing
         elseif is_equation_call(stmt, compact)
             callee, value = stmt.args[2], stmt.args[3]
             i = findfirst(x -> first(x) == callee, equations)::Int
             eq = last(equations[i])
             index = @insert_instruction_here(compact, line, settings, getindex(residuals, eq.id)::Int)
-            ret = @insert_instruction_here(compact, line, settings, setindex!(out, value, index)::Any)
+            previous = @insert_instruction_here(compact, line, settings, getindex(out, index)::Float64)
+            accumulated = @insert_instruction_here(compact, line, settings, +(previous, value)::Float64)
+            ret = @insert_instruction_here(compact, line, settings, setindex!(out, accumulated, index)::Any)
             replace_uses!(compact, (old, inst) => ret)
             # @insert_instruction_here(compact, line, settings, println("Residuals (index = ", index, ", value = ", value, "): ", residuals)::Any)
         elseif is_known_invoke_or_call(stmt, Intrinsics.sim_time, compact)
@@ -71,26 +88,33 @@ function rhs_finish_noopt!(
             inst[:stmt] = 0.0
         elseif isexpr(stmt, :invoke)
             info = inst[:info]::MappingInfo
-            callee_ci, callee_f = stmt.args[1]::CodeInstance, stmt.args[2]
+            callee_ci, callee_f, original_args = stmt.args[1]::CodeInstance, stmt.args[2], @view stmt.args[3:end]
             callee_result = structural_analysis!(callee_ci, world, settings)
             callee_structure = make_structure_from_ipo(callee_result)
             callee_state = TransformationState(callee_result, callee_structure)
 
-            callee_residuals = equation_to_residual_mapping[callee_to_caller_eq_map[StructuralSSARef(old)]]
-            caller_variables = idnum.(info.mapping.var_coeffs)
-            callee_states = variable_to_state_mapping[caller_variables]
+            caller_eqs = get(Vector{Int}, callee_to_caller_eq_map, StructuralSSARef(old))
+            callee_residuals = equation_to_residual_mapping[caller_eqs]
+            caller_variables = map(info.mapping.var_coeffs) do coeff
+                isa(coeff, Incidence) || return -1
+                length(nonzeros(coeff.row)) == 1 || return -1
+                idnum(coeff)
+            end
+            callee_states = [get(variable_to_state_mapping, i, -1) for i in caller_variables]
 
             callee_daef_ci = rhs_finish_noopt!(callee_state, callee_ci, UnoptimizedKey(), world, settings, callee_residuals, callee_states)
             call = @insert_instruction_here(compact, line, settings, (:invoke)(callee_daef_ci, callee_f,
+                original_args...,
                 out,
                 du,
                 u,
-                @insert_instruction_here(compact, line, settings, getindex(Int, callee_residuals...)::Vector{Int}),
-                @insert_instruction_here(compact, line, settings, getindex(Int, callee_states...)::Vector{Int}),
+                @insert_instruction_here(compact, line, settings, Base.vect(callee_residuals...)::Vector{Int}),
+                @insert_instruction_here(compact, line, settings, Base.vect(callee_states...)::Vector{Int}),
                 t)::type)
-            # TODO: add `stmt.args[3:end]`
             replace_uses!(compact, (old, inst) => call)
+            isa(type, Eq) && push!(equations, call => type)
         end
+
         type = inst[:type]
         if isa(type, Incidence) || isa(type, Eq)
             inst[:type] = widenconst(type)
