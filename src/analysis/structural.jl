@@ -380,11 +380,14 @@ function _structural_analysis!(ci::CodeInstance, world::UInt, settings::Settings
             new_call = insert_instruction_here!(compact, settings, @__SOURCE__,
             NewInstruction(Expr(:invoke, (StructuralSSARef(compact.result_idx), callee_codeinst), new_args...), stmtype, info, line, stmtflags))
             compact.ssa_rename[compact.idx - 1] = new_call
+            ssa = StructuralSSARef(new_call.id)
+        else
+            ssa = StructuralSSARef(i)
         end
 
         cms = CallerMappingState(result, refiner.var_to_diff, refiner.varclassification, refiner.varkinds, eqclassification, eqkinds)
         err = add_internal_equations_to_structure!(refiner, cms, total_incidence, eq_callee_mapping,
-            StructuralSSARef(i), result, mapping)
+            ssa, result, mapping)
         if err !== true
             return UncompilableIPOResult(warnings, UnsupportedIRException(err, ir))
         end
