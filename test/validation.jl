@@ -79,6 +79,12 @@ function equation_used_multiple_times!()
     apply_equation_on_ddtx_minus_one(eq, x)
 end
 
+function equation_with_callable!()
+    x = continuous()
+    callable = @noinline Returns(x)
+    always!(ddt(callable()) - 3.0)
+end
+
 @testset "Validation" begin
     refresh() # TODO: remove before merge
 
@@ -148,5 +154,11 @@ end
     du = [4.0]
     residuals, expanded_residuals = compute_residual_vectors(equation_used_multiple_times!, u, du)
     @test residuals ≈ [6.0]
+    @test residuals ≈ expanded_residuals
+
+    u = [2.0]
+    du = [4.0]
+    residuals, expanded_residuals = compute_residual_vectors(equation_with_callable!, u, du)
+    @test residuals ≈ [1.0]
     @test residuals ≈ expanded_residuals
 end;

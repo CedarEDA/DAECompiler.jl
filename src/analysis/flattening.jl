@@ -90,6 +90,8 @@ function flatten_argument!(state::FlatteningState, @nospecialize(argt))
         line = compact[Compiler.OldSSAValue(1)][:line]
         ssa = @insert_instruction_here(compact, line, settings, (:invoke)(nothing, InternalIntrinsics.external_equation)::Eq(eq))
         return ssa
+    elseif isa(argt, Type)
+        return argt.parameters[1]
     elseif isabstracttype(argt) || ismutabletype(argt) || (!isa(argt, DataType) && !isa(argt, PartialStruct))
         line = compact[Compiler.OldSSAValue(1)][:line]
         ssa = @insert_instruction_here(compact, line, settings, error("Cannot IPO model arg type $argt")::Union{})
@@ -245,6 +247,7 @@ function annotate_variables_and_equations(argtypes::Vector{Any}, map::ArgumentMa
 end
 
 init_partialstruct(@nospecialize(T)) = PartialStruct(T, collect(Any, fieldtypes(T)))
+init_partialstruct(pstruct::PartialStruct) = pstruct
 
 function find_base(dict::Dict{CompositeIndex}, index::CompositeIndex)
     for i in reverse(eachindex(index))

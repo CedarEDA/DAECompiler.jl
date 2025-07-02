@@ -104,23 +104,26 @@ function compute_residual_vectors(f, u, du; t = 1.0, mode=DAE, world=Base.tls_wo
     torn_ir = torn_ci.inferred
     removed_states = extract_removed_states(state, key, torn_ir, u, du, t)
 
+    our_prob = DAECProblem(f, (1,) .=> 1., insert_stmt_debuginfo = true)
+    sciml_prob = DiffEqBase.get_concrete_problem(our_prob, true)
+    f_compressed! = sciml_prob.f.f
+
+    our_prob = DAECProblem(f, (1,) .=> 1., insert_stmt_debuginfo = true, skip_optimizations = true)
+    sciml_prob = DiffEqBase.get_concrete_problem(our_prob, true)
+    f_original! = sciml_prob.f.f
+
     residuals = zeros(length(u))
     p = SciMLBase.NullParameters()
     indices = filter(!in(removed_states), eachindex(u))
     u_compressed = u[indices]
     du_compressed = du[indices]
-    residuals_compressed = zeros(length(residuals) - length(removed_states))
 
-    our_prob = DAECProblem(f, (1,) .=> 1., insert_stmt_debuginfo = true)
-    sciml_prob = DiffEqBase.get_concrete_problem(our_prob, true)
-    f_compressed! = sciml_prob.f.f
+    n = length(residuals) - length(removed_states)
+    @assert n ≥ 1
+    residuals_compressed = zeros(n)
     f_compressed!(residuals_compressed, du_compressed, u_compressed, p, t)
-
-    our_prob = DAECProblem(f, (1,) .=> 1., insert_stmt_debuginfo = true, skip_optimizations = true)
-    sciml_prob = DiffEqBase.get_concrete_problem(our_prob, true)
-    f_original! = sciml_prob.f.f
     f_original!(residuals, du, u, p, t)
-
     expanded = expand_residuals(f, residuals_compressed, u, du, t)
+
     return residuals, expanded
 end
