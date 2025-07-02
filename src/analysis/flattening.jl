@@ -169,40 +169,6 @@ function flatten_parameter!(𝕃, compact, argtypes, ntharg, line, settings)
     return @insert_instruction_here(compact, line, settings, tuple(_flatten_parameter!(𝕃, compact, argtypes, ntharg, line, settings)...)::Tuple)
 end
 
-# Needs to match flatten_arguments!
-function process_template_arg!(𝕃, coeffs, eq_mapping, applied_scopes, argt, template_argt, offset=0, eqoffset=0)::Pair{Int, Int}
-    if isa(template_argt, Const)
-        @assert isa(argt, Const) && argt.val === template_argt.val
-        return Pair{Int, Int}(offset, eqoffset)
-    elseif Base.issingletontype(template_argt)
-        @assert isa(template_argt, Type) && argt.instance === template_argt.instance
-        return Pair{Int, Int}(offset, eqoffset)
-    elseif Base.isprimitivetype(template_argt)
-        coeffs[offset+1] = argt
-        return Pair{Int, Int}(offset + 1, eqoffset)
-    elseif template_argt === equation
-        eq_mapping[eqoffset+1] = argt.id
-        return Pair{Int, Int}(offset, eqoffset + 1)
-    elseif isabstracttype(template_argt) || ismutabletype(template_argt) || (!isa(template_argt, DataType) && !isa(template_argt, PartialStruct))
-        return Pair{Int, Int}(offset, eqoffset)
-    else
-        if !isa(template_argt, PartialStruct) && Base.datatype_fieldcount(template_argt) === nothing
-            return Pair{Int, Int}(offset, eqoffset)
-        end
-        template_fields = isa(template_argt, PartialStruct) ? template_argt.fields : collect(fieldtypes(template_argt))
-        return process_template!(𝕃, coeffs, eq_mapping, applied_scopes, Any[Compiler.getfield_tfunc(𝕃, argt, Const(i)) for i = 1:length(template_fields)], template_fields, offset)
-    end
-end
-
-function process_template!(𝕃, coeffs, eq_mapping, applied_scopes, argtypes, template_argtypes, offset=0, eqoffset=0)
-    @assert length(argtypes) == length(template_argtypes)
-    for (i, template_arg) in enumerate(template_argtypes)
-        (offset, eqoffset) = process_template_arg!(𝕃, coeffs, eq_mapping, applied_scopes, argtypes[i], template_arg, offset)
-    end
-    return Pair{Int, Int}(offset, eqoffset)
-end
-
-
 remove_variable_and_equation_annotations(argtypes) = Any[widenconst(T) for T in argtypes]
 
 function annotate_variables_and_equations(argtypes::Vector{Any}, map::ArgumentMap)
