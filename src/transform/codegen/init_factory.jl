@@ -27,7 +27,11 @@ function init_uncompress_gen!(compact::Compiler.IncrementalCompact, result::DAEI
         @assert sicm_ci !== nothing
 
         line = result.ir[SSAValue(1)][:line]
-        param_list = flatten_parameter!(Compiler.fallback_lattice, compact, ci.inferred.ir.argtypes[1:end], argn->Argument(2+argn), line, settings)
+        callee_argtypes = ci.inferred.ir.argtypes
+        callee_argmap = ArgumentMap(callee_argtypes)
+        args = Argument.(2 .+ eachindex(callee_argtypes))
+        new_args = flatten_arguments_for_callee!(compact, callee_argmap, callee_argtypes, args, line, settings)
+        param_list = @insert_instruction_here(compact, line, settings, tuple(new_args...)::Tuple)
         sicm = @insert_instruction_here(compact, line, settings, invoke(param_list, sicm_ci)::Tuple)
     else
         sicm = ()

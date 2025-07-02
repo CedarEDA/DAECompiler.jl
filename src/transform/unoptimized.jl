@@ -13,7 +13,8 @@ function rhs_finish_noopt!(
     world::UInt,
     settings::Settings,
     equation_to_residual_mapping = 1:length(state.structure.eq_to_diff),
-    variable_to_state_mapping = map_variables_to_states(state))
+    variable_to_state_mapping = map_variables_to_states(state);
+    opaque_closure)
 
     (; result, structure) = state
     result_ci = find_matching_ci(ci -> ci.owner === key, ci.def, world)
@@ -23,12 +24,14 @@ function rhs_finish_noopt!(
 
     ir = copy(result.ir)
     src = ci.inferred::AnalyzedSource
-    argrange = 2:src.nargs
-    slotnames = Symbol[:captures]
-    argtypes = Any[Tuple]
+    argrange = 1:src.nargs
     # Original arguments.
-    append!(slotnames, src.slotnames[argrange])
-    append!(argtypes, remove_variable_and_equation_annotations(ir.argtypes[argrange]))
+    slotnames = src.slotnames[argrange]
+    argtypes = remove_variable_and_equation_annotations(ir.argtypes)
+    if opaque_closure
+        slotnames[1] = :captures
+        argtypes[1] = Tuple
+    end
     # Additional ABI arguments.
     push!(slotnames, :out, :du, :u, :residuals, :states, :t)
     push!(argtypes, Vector{Float64}, Vector{Float64}, Vector{Float64}, Vector{Int}, Vector{Int}, Float64)
@@ -88,7 +91,7 @@ function rhs_finish_noopt!(
             inst[:stmt] = 0.0
         elseif isexpr(stmt, :invoke)
             info = inst[:info]::MappingInfo
-            callee_ci, callee_f, original_args = stmt.args[1]::CodeInstance, stmt.args[2], @view stmt.args[3:end]
+            callee_ci, args = stmt.args[1]::CodeInstance, @view stmt.args[2:end]
             callee_result = structural_analysis!(callee_ci, world, settings)
             callee_structure = make_structure_from_ipo(callee_result)
             callee_state = TransformationState(callee_result, callee_structure)
@@ -102,9 +105,8 @@ function rhs_finish_noopt!(
             end
             callee_states = [get(variable_to_state_mapping, i, -1) for i in caller_variables]
 
-            callee_daef_ci = rhs_finish_noopt!(callee_state, callee_ci, UnoptimizedKey(), world, settings, callee_residuals, callee_states)
-            call = @insert_instruction_here(compact, line, settings, (:invoke)(callee_daef_ci, callee_f,
-                original_args...,
+            callee_daef_ci = rhs_finish_noopt!(callee_state, callee_ci, UnoptimizedKey(), world, settings, callee_residuals, callee_states; opaque_closure = false)
+            call = @insert_instruction_here(compact, line, settings, (:invoke)(callee_daef_ci, args...,
                 out,
                 du,
                 u,

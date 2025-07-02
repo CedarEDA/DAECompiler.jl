@@ -90,7 +90,7 @@ function flatten_argument!(state::FlatteningState, @nospecialize(argt))
         line = compact[Compiler.OldSSAValue(1)][:line]
         ssa = @insert_instruction_here(compact, line, settings, (:invoke)(nothing, InternalIntrinsics.external_equation)::Eq(eq))
         return ssa
-    elseif isa(argt, Type)
+    elseif argt <: Type
         return argt.parameters[1]
     elseif isabstracttype(argt) || ismutabletype(argt) || (!isa(argt, DataType) && !isa(argt, PartialStruct))
         line = compact[Compiler.OldSSAValue(1)][:line]
@@ -112,61 +112,25 @@ function flatten_argument!(state::FlatteningState, @nospecialize(argt))
     end
 end
 
-function flatten_arguments_for_callee!(compact::IncrementalCompact, map::ArgumentMap, argtypes, 𝕃, line, settings)
+function flatten_arguments_for_callee!(compact::IncrementalCompact, map::ArgumentMap, argtypes, args, line, settings, 𝕃 = Compiler.fallback_lattice)
     list = Any[]
     this = nothing
-    last_index = Int[]
+    last_index = CompositeIndex()
     for index in map.variables
         from = findfirst(j -> get(last_index, j, -1) !== index[j], eachindex(index))::Int
         for i in from:length(index)
             field = index[i]
             if i == 1
-                this = Argument(2 + field)
+                this = args[field]
             else
                 thistype = argextype(this, compact)
-                fieldtype = Compiler.getfield_tfunc(𝕃, Const(field))
+                fieldtype = Compiler.getfield_tfunc(𝕃, thistype, Const(field))
                 this = @insert_instruction_here(compact, line, settings, getfield(this, field)::fieldtype)
             end
         end
         push!(list, this)
     end
     return list
-end
-
-function _flatten_parameter!(𝕃, compact, argtypes, ntharg, line, settings)
-    list = Any[]
-    for (argn, argt) in enumerate(argtypes)
-        if isa(argt, Const)
-            continue
-        elseif Base.issingletontype(argt)
-            continue
-        elseif Base.isprimitivetype(argt) || isa(argt, Incidence)
-            push!(list, ntharg(argn))
-        elseif argt === equation || isa(argt, Eq)
-            continue
-        elseif isa(argt, Type) && argt <: Intrinsics.AbstractScope
-            continue
-        elseif isabstracttype(argt) || ismutabletype(argt) || (!isa(argt, DataType) && !isa(argt, PartialStruct))
-            continue
-        else
-            if !isa(argt, PartialStruct) && Base.datatype_fieldcount(argt) === nothing
-                continue
-            end
-            this = ntharg(argn)
-            nthfield(i) = @insert_instruction_here(compact, line, settings, getfield(this, i)::Compiler.getfield_tfunc(𝕃, argextype(this, compact), Const(i)))
-            if isa(argt, PartialStruct)
-                fields = _flatten_parameter!(𝕃, compact, argt.fields, nthfield, line, settings)
-            else
-                fields = _flatten_parameter!(𝕃, compact, fieldtypes(argt), nthfield, line, settings)
-            end
-            append!(list, fields)
-        end
-    end
-    return list
-end
-
-function flatten_parameter!(𝕃, compact, argtypes, ntharg, line, settings)
-    return @insert_instruction_here(compact, line, settings, tuple(_flatten_parameter!(𝕃, compact, argtypes, ntharg, line, settings)...)::Tuple)
 end
 
 remove_variable_and_equation_annotations(argtypes) = Any[widenconst(T) for T in argtypes]

@@ -85,6 +85,19 @@ function equation_with_callable!()
     always!(ddt(callable()) - 3.0)
 end
 
+@noinline apply_equation!(lhs, rhs) = always!(lhs - rhs)
+function nonlinear_argument!()
+    x = continuous()
+    apply_equation!(ddt(x), sin(x))
+end
+
+struct WithParameter{N} end
+@noinline (::WithParameter{N})(eq, x) where {N} = eq(ddt(x) - N)
+function callable_with_type_parameter!()
+    eq, x = new_equation_and_variable()
+    WithParameter{3}()(eq, x)
+end
+
 @testset "Validation" begin
     refresh() # TODO: remove before merge
 
@@ -132,6 +145,12 @@ end
     @test all(>(0), residuals)
     @test residuals ≈ expanded_residuals
 
+    u = [2.0]
+    du = [4.0]
+    residuals, expanded_residuals = compute_residual_vectors(nonlinear_argument!, u, du)
+    @test residuals ≈ du .- sin.(u)
+    @test residuals ≈ expanded_residuals
+
     u = [0.0]
     du = [2.0]
     residuals, expanded_residuals = compute_residual_vectors(external_equation!, u, du)
@@ -161,4 +180,11 @@ end
     residuals, expanded_residuals = compute_residual_vectors(equation_with_callable!, u, du)
     @test residuals ≈ [1.0]
     @test residuals ≈ expanded_residuals
+
+    u = [2.0]
+    du = [3.0]
+    refresh(); residuals, expanded_residuals = compute_residual_vectors(callable_with_type_parameter!, u, du)
+    @test residuals ≈ [0.0]
+    # XXX: Residuals from the optimized pipeline are wrong (3.0 instead of 0.0)
+    @test_broken residuals ≈ expanded_residuals
 end;

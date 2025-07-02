@@ -147,7 +147,7 @@ function dae_factory_gen(state::TransformationState, ci::CodeInstance, key::Unio
     argt = Tuple{Vector{Float64}, Vector{Float64}, Vector{Float64}, SciMLBase.NullParameters, Float64}
     sicm = ()
     if settings.skip_optimizations
-        daef_ci = rhs_finish_noopt!(state, ci, key, world, settings)
+        daef_ci = rhs_finish_noopt!(state, ci, key, world, settings; opaque_closure = true)
         oc = sciml_to_internal_abi_noopt!(copy(ci.inferred.ir), state, daef_ci, settings)
     else
         # TODO: We should not have to recompute this here
@@ -164,8 +164,12 @@ function dae_factory_gen(state::TransformationState, ci::CodeInstance, key::Unio
             @assert sicm_ci !== nothing
 
             line = result.ir[SSAValue(1)][:line]
-            param_list = flatten_parameter!(Compiler.fallback_lattice, compact, ci.inferred.ir.argtypes[1:end], argn->Argument(2+argn), line, settings)
-            sicm = @insert_instruction_here(compact, line, settings, invoke(param_list, sicm_ci)::Tuple)
+            callee_argtypes = ci.inferred.ir.argtypes
+            callee_argmap = ArgumentMap(callee_argtypes)
+            args = Argument.(2 .+ eachindex(callee_argtypes))
+            new_args = flatten_arguments_for_callee!(compact, callee_argmap, callee_argtypes, args, line, settings)
+            list = @insert_instruction_here(compact, line, settings, tuple(new_args...)::Tuple)
+            sicm = @insert_instruction_here(compact, line, settings, invoke(list, sicm_ci)::Tuple)
         end
 
         daef_ci = rhs_finish!(state, ci, key, world, settings, 1)

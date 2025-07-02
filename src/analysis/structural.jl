@@ -376,7 +376,11 @@ function _structural_analysis!(ci::CodeInstance, world::UInt, settings::Settings
             # Rewrite to flattened ABI
             compact[SSAValue(i)] = nothing
             compact.result_idx -= 1
-            new_args = _flatten_parameter!(Compiler.optimizer_lattice(refiner), compact, callee_codeinst.inferred.ir.argtypes, arg->stmt.args[arg+1], line, settings)
+            callee_argtypes = callee_codeinst.inferred.ir.argtypes
+            callee_argmap = ArgumentMap(callee_argtypes)
+            args = @view(stmt.args[2:end])
+            𝕃 = Compiler.optimizer_lattice(refiner)
+            new_args = flatten_arguments_for_callee!(compact, callee_argmap, callee_argtypes, args, line, settings, 𝕃)
             new_call = insert_instruction_here!(compact, settings, @__SOURCE__,
             NewInstruction(Expr(:invoke, (StructuralSSARef(compact.result_idx), callee_codeinst), new_args...), stmtype, info, line, stmtflags))
             compact.ssa_rename[compact.idx - 1] = new_call

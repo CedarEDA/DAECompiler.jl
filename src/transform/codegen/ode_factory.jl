@@ -70,8 +70,12 @@ function ode_factory_gen(state::TransformationState, ci::CodeInstance, key::Torn
         @assert sicm_ci !== nothing
 
         line = result.ir[SSAValue(1)][:line]
-        param_list = flatten_parameter!(Compiler.fallback_lattice, returned_ic, ci.inferred.ir.argtypes[1:end], argn->Argument(2+argn), line, settings)
-        sicm_state = @insert_instruction_here(returned_ic, line, settings, (:call)(invoke, param_list, sicm_ci)::Tuple)
+        callee_argtypes = ci.inferred.ir.argtypes
+        callee_argmap = ArgumentMap(callee_argtypes)
+        args = Argument.(2 .+ eachindex(callee_argtypes))
+        new_args = flatten_arguments_for_callee!(returned_ic, callee_argmap, callee_argtypes, args, line, settings)
+        param_list = @insert_instruction_here(returned_ic, line, settings, tuple(new_args...)::Tuple)
+        sicm_state = @insert_instruction_here(returned_ic, line, settings, invoke(param_list, sicm_ci)::Tuple)
     else
         sicm_state = ()
     end

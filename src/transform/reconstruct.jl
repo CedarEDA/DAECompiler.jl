@@ -94,7 +94,8 @@ derivative may differ between the unoptimized and optimized versions.
 function compute_residual_vectors(f, u, du; t = 1.0, mode=DAE, world=Base.tls_world_age())
     @assert mode === DAE # TODO: support ODEs
     settings = Settings(; mode, insert_stmt_debuginfo = true)
-    ci = _code_ad_by_type(Tuple{typeof(f)}; world)
+    tt = Base.signature_type(f, ())
+    ci = _code_ad_by_type(tt; world)
     result = @code_structure result=true mode=mode world=world f()
     structure = make_structure_from_ipo(result)
     state = TransformationState(result, structure)
