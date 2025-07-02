@@ -2,8 +2,6 @@ using DAECompiler
 using DAECompiler.Intrinsics
 using Polynomials: fit
 using XSteam: my_pT, rho_pT, Cp_pT, tc_pT
-using SciMLBase, Sundials
-using Test
 
 struct Sink; end
 function (::Sink)(inlet)
@@ -281,10 +279,4 @@ function (::Benchmark{N})() where {N}
     Source()(in[1])
     PreinsulatedPipe{N}()(in[2], out[1])
     Sink()(out[2])
-end
-
-Benchmark{3}()()
-@test isa(code_lowered(DAECompiler.factory, Tuple{Val{DAECompiler.Settings(mode=DAECompiler.DAENoInit)}, Benchmark{3}})[1], Core.CodeInfo)
-let sol = solve(DAECProblem(Benchmark{3}(), [1:9;] .=> 0.), IDA())
-    @test_broken sol.retcode == ReturnCode.Success
 end
