@@ -16,16 +16,16 @@ function find_matching_ci(predicate, mi::MethodInstance, world::UInt)
     return nothing
 end
 
-function structural_analysis!(ci::CodeInstance, world::UInt)
+function structural_analysis!(ci::CodeInstance, world::UInt, settings::Settings)
     # Check if we have aleady done this work - if so return the cached result
-    result_ci = find_matching_ci(ci->ci.owner == StructureCache(), ci.def, world)
+    result_ci = find_matching_ci(ci->ci.owner == StructureCache(settings), ci.def, world)
     if result_ci !== nothing
         return result_ci.inferred
     end
 
-    result = _structural_analysis!(ci, world)
+    result = _structural_analysis!(ci, world, settings)
     # TODO: The world bounds might have been narrowed
-    cache_dae_ci!(ci, result, nothing, nothing, StructureCache())
+    cache_dae_ci!(ci, result, nothing, nothing, StructureCache(settings))
 
     return result
 end
@@ -40,7 +40,7 @@ struct EqVarState
     eq_callee_mapping
 end
 
-function _structural_analysis!(ci::CodeInstance, world::UInt)
+function _structural_analysis!(ci::CodeInstance, world::UInt, settings::Settings)
     # Variables
     var_to_diff = DiffGraph(0)
     varclassification = VarEqClassification[]
@@ -81,25 +81,34 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
     warnings = BadDAECompilerInputException[]
 
     compact = IncrementalCompact(ir)
-    old_argtypes = copy(ir.argtypes)
-    empty!(ir.argtypes)
-    (arg_replacements, new_argtypes, nexternalargvars, nexternaleqs) = flatten_arguments!(compact, old_argtypes, 0, 0, ir.argtypes)
-    if nexternalargvars == -1
-        return UncompilableIPOResult(warnings, UnsupportedIRException("Unhandled argument types", Compiler.finish(compact)))
+    argmap = ArgumentMap(ir.argtypes)
+    nexternalargvars = length(argmap.variables)
+    nexternaleqs = length(argmap.equations)
+    if !settings.skip_optimizations
+        state = FlatteningState(compact, settings, argmap)
+        arg_replacements = flatten_arguments!(state)
+        if arg_replacements === nothing
+            return UncompilableIPOResult(warnings, UnsupportedIRException("Unhandled argument types", Compiler.finish(compact)))
+        end
+        argtypes = Any[Incidence(ir.argtypes[i], i) for i = 1:nexternalargvars]
+    else
+        argtypes = annotate_variables_and_equations(ir.argtypes, argmap)
+        arg_replacements = nothing
     end
+
     for i = 1:nexternalargvars
         # TODO: Need to handle different var kinds for IPO
+        # TODO: Don't use `Argument` when we don't flatten, maybe something
+        # like an `ArgumentView` with composite indices from the `ArgumentMap`.
         add_variable!(Argument(i))
     end
     for i = 1:nexternaleqs
         # Not technically an argument, but let's use it for now
         add_equation!(Argument(i))
     end
-    argtypes = Any[Incidence(new_argtypes[i], i) for i = 1:nexternalargvars]
 
     # Allocate variable and equation numbers of any incoming arguments
-    refiner = StructuralRefiner(world, var_to_diff, varkinds, varclassification, eqkinds, eqclassification)
-    nexternalargvars = length(var_to_diff)
+    refiner = StructuralRefiner(world, settings, var_to_diff, varkinds, varclassification, eqkinds, eqclassification)
 
     # Go through the IR, annotating each intrinsic with an appropriate taint
     # source lattice element.
@@ -107,10 +116,12 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
     for ((old_idx, i), stmt) in compact
         urs = userefs(stmt)
         compact[SSAValue(i)] = nothing
-        for ur in urs
-            if isa(ur[], Argument)
-                repl = arg_replacements[ur[].n]
-                ur[] = repl
+        if arg_replacements !== nothing
+            for ur in urs
+                if isa(ur[], Argument)
+                    repl = arg_replacements[ur[].n]
+                    ur[] = repl
+                end
             end
         end
         stmt = urs[]
@@ -238,10 +249,12 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
             record_scope!(ir, warnings, names, scope, ScopeDictEntry(true, var_num))
         end
 
-        # Delete - we've recorded this into our our side table, we don't need to
-        # keep it around in the IR
-        inst.args[3] = nothing
-        inst.args[4] = nothing
+        if !settings.skip_optimizations
+            # Delete - we've recorded this into our our side table, we don't need to
+            # keep it around in the IR
+            inst.args[3] = nothing
+            inst.args[4] = nothing
+        end
     end
 
     # Do the same for equations
@@ -272,10 +285,12 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
             record_scope!(ir, warnings, names, scope, ScopeDictEntry(false, eq_num))
         end
 
-        # Delete - we've recorded this into our our side table, we don't need to
-        # keep it around in the IR
-        inst.args[3] = nothing
-        inst.args[4] = nothing
+        if !settings.skip_optimizations
+            # Delete - we've recorded this into our our side table, we don't need to
+            # keep it around in the IR
+            inst.args[3] = nothing
+            inst.args[4] = nothing
+        end
     end
 
     # Now record the association of (::equation)() calls with the equations that they originate from
@@ -302,7 +317,7 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
             eqeq = argextype(stmt.args[2], compact)
 
             if !isa(eqeq, Eq)
-                return UncompilableIPOResult(warnings, UnsupportedIRException("Equation call at $ssa has unknown equation reference.", ir))
+                return UncompilableIPOResult(warnings, UnsupportedIRException("Equation call at $(SSAValue(i)) has unknown equation reference.", ir))
             end
             ieq = eqeq.id
 
@@ -337,7 +352,7 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
         if isa(info, MappingInfo)
             (; result, mapping) = info
         else
-            result = structural_analysis!(callee_codeinst, Compiler.get_inference_world(refiner))
+            result = structural_analysis!(callee_codeinst, Compiler.get_inference_world(refiner), settings)
 
             if isa(result, UncompilableIPOResult)
                 # TODO: Stack trace?
@@ -345,7 +360,7 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
             end
 
             callee_argtypes = Any[argextype(stmt.args[i], compact) for i in 2:length(stmt.args)]
-            mapping = CalleeMapping(Compiler.optimizer_lattice(refiner), callee_argtypes, callee_codeinst, result, callee_codeinst.inferred.ir.argtypes)
+            mapping = CalleeMapping(Compiler.optimizer_lattice(refiner), callee_argtypes, callee_codeinst, result)
             inst[:info] = info = MappingInfo(info, result, mapping)
         end
 
@@ -357,18 +372,26 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
             opaque_eligible = false
         end
 
-        # Rewrite to flattened ABI
-        compact[SSAValue(i)] = nothing
-        compact.result_idx -= 1
-        new_args = _flatten_parameter!(Compiler.optimizer_lattice(refiner), compact, callee_codeinst.inferred.ir.argtypes, arg->stmt.args[arg+1], line)
-
-        new_call = insert_node_here!(compact,
-                NewInstruction(Expr(:invoke, (StructuralSSARef(compact.result_idx), callee_codeinst), new_args...), stmtype, info, line, stmtflags))
-        compact.ssa_rename[compact.idx - 1] = new_call
+        if !settings.skip_optimizations
+            # Rewrite to flattened ABI
+            compact[SSAValue(i)] = nothing
+            compact.result_idx -= 1
+            callee_argtypes = callee_codeinst.inferred.ir.argtypes
+            callee_argmap = ArgumentMap(callee_argtypes)
+            args = @view(stmt.args[2:end])
+            𝕃 = Compiler.optimizer_lattice(refiner)
+            new_args = flatten_arguments_for_callee!(compact, callee_argmap, callee_argtypes, args, line, settings, 𝕃)
+            new_call = insert_instruction_here!(compact, settings, @__SOURCE__,
+            NewInstruction(Expr(:invoke, (StructuralSSARef(compact.result_idx), callee_codeinst), new_args...), stmtype, info, line, stmtflags))
+            compact.ssa_rename[compact.idx - 1] = new_call
+            ssa = StructuralSSARef(new_call.id)
+        else
+            ssa = StructuralSSARef(i)
+        end
 
         cms = CallerMappingState(result, refiner.var_to_diff, refiner.varclassification, refiner.varkinds, eqclassification, eqkinds)
-        err = add_internal_equations_to_structure!(refiner, cms, total_incidence, eq_callee_mapping, StructuralSSARef(new_call.id),
-            result, mapping)
+        err = add_internal_equations_to_structure!(refiner, cms, total_incidence, eq_callee_mapping,
+            ssa, result, mapping)
         if err !== true
             return UncompilableIPOResult(warnings, UnsupportedIRException(err, ir))
         end
@@ -378,7 +401,7 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
         total_incidence, eqclassification, eqkinds, eq_callee_mapping)
 
     # Replace non linear return by a new variable and return that variable
-    if !opaque_eligible
+    if !opaque_eligible && !settings.skip_optimizations
         last_ssa = SSAValue(compact.result_idx - 1)
         ret_stmt_inst = compact[last_ssa]
         ret_stmt = ret_stmt_inst[:stmt]
@@ -386,8 +409,8 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
         line = ret_stmt_inst[:line]
         Compiler.delete_inst_here!(compact)
 
-        (new_ret, ultimate_rt) = rewrite_ipo_return!(Compiler.typeinf_lattice(refiner), compact, line, ret_stmt.val, ultimate_rt, eqvars)
-        insert_node_here!(compact, NewInstruction(ReturnNode(new_ret), ultimate_rt, Compiler.NoCallInfo(), line, Compiler.IR_FLAG_REFINED), true)
+        (new_ret, ultimate_rt) = rewrite_ipo_return!(Compiler.typeinf_lattice(refiner), compact, line, settings, ret_stmt.val, ultimate_rt, eqvars)
+        insert_instruction_here!(compact, settings, @__SOURCE__, NewInstruction(ReturnNode(new_ret), ultimate_rt, Compiler.NoCallInfo(), line, Compiler.IR_FLAG_REFINED), reverse_affinity = true)
     elseif isa(ultimate_rt, Type)
         # If we don't have any internal variables (in which case we might have to to do a more aggressive rewrite), strengthen the incidence
         # by demoting to full incidence over the argument variables. Incidence is not allowed to propagate through global mutable state, so
@@ -401,7 +424,7 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
     var_to_diff = StateSelection.complete(var_to_diff)
 
     names = OrderedDict{Any, ScopeDictEntry}()
-    return DAEIPOResult(ir, opaque_eligible, ultimate_rt, argtypes,
+    return DAEIPOResult(ir, opaque_eligible, ultimate_rt, argtypes, argmap,
         nexternalargvars,
         nsysmscopes,
         nexternaleqs,
@@ -415,7 +438,7 @@ function _structural_analysis!(ci::CodeInstance, world::UInt)
         warnings)
 end
 
-function rewrite_ipo_return!(𝕃, compact::IncrementalCompact, line, ssa, ultimate_rt::Any, eqvars::EqVarState)
+function rewrite_ipo_return!(𝕃, compact::IncrementalCompact, line, settings, ssa, ultimate_rt::Any, eqvars::EqVarState)
     if isa(ultimate_rt, Eq)
         return Pair{Any, Any}(ssa, ultimate_rt)
     end
@@ -425,22 +448,23 @@ function rewrite_ipo_return!(𝕃, compact::IncrementalCompact, line, ssa, ultim
         new_types = Any[]
         for i = 1:length(ultimate_rt.fields)
             ssa_type = Compiler.getfield_tfunc(𝕃, ultimate_rt, Const(i))
-            ssa_field = insert_node_here!(compact,
-                NewInstruction(Expr(:call, getfield, variable), ssa_type, Compiler.NoCallInfo(), line, Compiler.IR_FLAG_REFINED), true)
+            ssa_field = insert_instruction_here!(compact, settings, @__SOURCE__,
+                NewInstruction(Expr(:call, getfield, ssa, i), ssa_type, Compiler.NoCallInfo(), line, Compiler.IR_FLAG_REFINED), reverse_affinity = true)
 
-            (new_field, new_type) = rewrite_ipo_return!(𝕃, compact, line, ssa_field, ssa_type, eqvars)
+            (new_field, new_type) = rewrite_ipo_return!(𝕃, compact, line, settings, ssa_field, ssa_type, eqvars)
             push!(new_fields, new_field)
             push!(new_types, new_type)
         end
         newT = Compiler.PartialStruct(ultimate_rt.typ, new_types)
         if widenconst(ultimate_rt) <: Tuple
-            retssa = insert_node_here!(compact,
-                NewInstruction(Expr(:call, tuple, new_fields...), newT, Compiler.NoCallInfo(), line, Compiler.IR_FLAG_REFINED), true)
+            retssa = insert_instruction_here!(compact, settings, @__SOURCE__,
+                NewInstruction(Expr(:call, tuple, new_fields...), newT, Compiler.NoCallInfo(), line, Compiler.IR_FLAG_REFINED), reverse_affinity = true)
         else
-            T = insert_node_here!(compact,
-                NewInstruction(Expr(:call, typeof, ssa), Type, Compiler.NoCallInfo(), line, Compiler.IR_FLAG_REFINED), true)
-            retssa = insert_node_here!(compact,
-                NewInstruction(Expr(:new, T, new_fields...), newT, Compiler.NoCallInfo(), line, Compiler.IR_FLAG_REFINED), true)
+            T = insert_instruction_here!(compact, settings, @__SOURCE__,
+                NewInstruction(Expr(:call, typeof, ssa), Type, Compiler.NoCallInfo(), line, Compiler.IR_FLAG_REFINED), reverse_affinity = true)
+
+            retssa = insert_instruction_here!(compact, settings, @__SOURCE__,
+                NewInstruction(Expr(:new, T, new_fields...), newT, Compiler.NoCallInfo(), line, Compiler.IR_FLAG_REFINED), reverse_affinity = true)
         end
         return Pair{Any, Any}(retssa, newT)
     end
@@ -453,8 +477,8 @@ function rewrite_ipo_return!(𝕃, compact::IncrementalCompact, line, ssa, ultim
     push!(eqvars.varclassification, External)
     push!(eqvars.varkinds, Intrinsics.Continuous)
 
-    new_var_ssa = insert_node_here!(compact,
-        NewInstruction(Expr(:invoke, nothing, variable), Incidence(nonlinrepl), Compiler.NoCallInfo(), line, Compiler.IR_FLAG_REFINED), true)
+    new_var_ssa = insert_instruction_here!(compact, settings, @__SOURCE__,
+        NewInstruction(Expr(:invoke, nothing, variable), Incidence(nonlinrepl), Compiler.NoCallInfo(), line, Compiler.IR_FLAG_REFINED); reverse_affinity = true)
 
     eq_incidence = ultimate_rt - Incidence(nonlinrepl)
     push!(eqvars.total_incidence, eq_incidence)
@@ -463,14 +487,14 @@ function rewrite_ipo_return!(𝕃, compact::IncrementalCompact, line, ssa, ultim
     push!(eqvars.eqkinds, Intrinsics.Always)
     new_eq = length(eqvars.total_incidence)
 
-    new_eq_ssa = insert_node_here!(compact,
-        NewInstruction(Expr(:invoke, nothing, equation), Eq(new_eq), Compiler.NoCallInfo(), line, Compiler.IR_FLAG_REFINED), true)
+    new_eq_ssa = insert_instruction_here!(compact, settings, @__SOURCE__,
+        NewInstruction(Expr(:invoke, nothing, equation), Eq(new_eq), Compiler.NoCallInfo(), line, Compiler.IR_FLAG_REFINED); reverse_affinity = true)
 
-    eq_val_ssa = insert_node_here!(compact,
-        NewInstruction(Expr(:call, InternalIntrinsics.assign_var, new_var_ssa, ssa), eq_incidence, Compiler.NoCallInfo(), line, Compiler.IR_FLAG_REFINED), true)
+    eq_val_ssa = insert_instruction_here!(compact, settings, @__SOURCE__,
+        NewInstruction(Expr(:call, InternalIntrinsics.assign_var, new_var_ssa, ssa), eq_incidence, Compiler.NoCallInfo(), line, Compiler.IR_FLAG_REFINED); reverse_affinity = true)
 
-    eq_call_ssa = insert_node_here!(compact,
-        NewInstruction(Expr(:invoke, nothing, new_eq_ssa, eq_val_ssa), Nothing, Compiler.NoCallInfo(), line, Compiler.IR_FLAG_REFINED), true)
+    eq_call_ssa = insert_instruction_here!(compact, settings, @__SOURCE__,
+        NewInstruction(Expr(:invoke, nothing, new_eq_ssa, eq_val_ssa), Nothing, Compiler.NoCallInfo(), line, Compiler.IR_FLAG_REFINED); reverse_affinity = true)
 
     T = widenconst(ultimate_rt)
     # TODO: We don't have a way to express that the return value is directly this variable for arbitrary types

@@ -6,28 +6,31 @@ module DAECompiler
     using Diffractor
     using OrderedCollections
     using Compiler
-    using Compiler: IRCode, IncrementalCompact, argextype, singleton_type, isexpr, widenconst
+    using Compiler: AbstractLattice, IRCode, IncrementalCompact, DebugInfoStream, NewInstruction, argextype, singleton_type, isexpr, widenconst
     using Core.IR
     using SciMLBase
     using AutoHashEquals
     using LinearAlgebra: LinearAlgebra
     using InteractiveUtils: gen_call_with_extracted_types_and_kwargs
 
+    include("settings.jl")
     include("utils.jl")
     include("intrinsics.jl")
-    include("settings.jl")
+    include("reflection.jl")
     include("analysis/utils.jl")
     include("analysis/lattice.jl")
     include("analysis/ADAnalyzer.jl")
     include("analysis/scopes.jl")
+    include("analysis/flattening.jl")
     include("analysis/cache.jl")
     include("analysis/refiner.jl")
     include("analysis/ipoincidence.jl")
     include("analysis/structural.jl")
-    include("analysis/flattening.jl")
     include("transform/state_selection.jl")
     include("transform/common.jl")
     include("transform/runtime.jl")
+    include("transform/unoptimized.jl")
+    include("transform/reconstruct.jl")
     include("transform/tearing/schedule.jl")
     include("transform/codegen/dae_factory.jl")
     include("transform/codegen/ode_factory.jl")
@@ -40,5 +43,4 @@ module DAECompiler
     include("analysis/consistency.jl")
     include("interface.jl")
     include("problem_interface.jl")
-    include("reflection.jl")
 end

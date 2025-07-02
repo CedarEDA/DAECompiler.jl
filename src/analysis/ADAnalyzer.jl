@@ -62,6 +62,7 @@ end
 
 struct AnalyzedSource
     ir::Compiler.IRCode
+    slotnames::Vector{Any}
     inline_cost::Compiler.InlineCostType
     nargs::UInt
     isva::Bool
@@ -72,10 +73,16 @@ end
     Core.svec(edges..., interp.edges...)
 end
 
+function get_slotnames(def::Method)
+    names = split(def.slot_syms, '\0')
+    return map(Symbol, names)
+end
+
 @override function Compiler.transform_result_for_cache(interp::ADAnalyzer, result::InferenceResult, edges::SimpleVector)
     ir = result.src.optresult.ir
+    slotnames = get_slotnames(result.linfo.def)
     params = Compiler.OptimizationParams(interp)
-    return AnalyzedSource(ir, Compiler.compute_inlining_cost(interp, result), result.src.src.nargs, result.src.src.isva)
+    return AnalyzedSource(ir, slotnames, Compiler.compute_inlining_cost(interp, result), result.src.src.nargs, result.src.src.isva)
 end
 
 @override function Compiler.transform_result_for_local_cache(interp::ADAnalyzer, result::InferenceResult)
@@ -83,8 +90,9 @@ end
         return nothing
     end
     ir = result.src.optresult.ir
+    slotnames = get_slotnames(result.linfo.def)
     params = Compiler.OptimizationParams(interp)
-    return AnalyzedSource(ir, Compiler.compute_inlining_cost(interp, result), result.src.src.nargs, result.src.src.isva)
+    return AnalyzedSource(ir, slotnames, Compiler.compute_inlining_cost(interp, result), result.src.src.nargs, result.src.src.isva)
 end
 
 function Compiler.retrieve_ir_for_inlining(ci::CodeInstance, result::AnalyzedSource)

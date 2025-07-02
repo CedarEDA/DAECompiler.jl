@@ -35,6 +35,7 @@ struct DAEIPOResult
     opaque_eligible::Bool
     extended_rt::Any
     argtypes
+    argmap::ArgumentMap
     nexternalargvars::Int # total vars is length(var_to_diff)
     nsysmscopes::Int
     nexternaleqs::Int
