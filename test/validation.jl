@@ -11,7 +11,12 @@ const *ᵢ = Core.Intrinsics.mul_float
 const +ᵢ = Core.Intrinsics.add_float
 const -ᵢ = Core.Intrinsics.sub_float
 
-function f()
+@noinline function onecall!()
+    x = continuous()
+    always!(ddt(x) - x)
+end
+
+function multiple_linear_equations!()
     x₁ = continuous() # selected
     x₂ = continuous() # selected
     x₃ = continuous() # algebraic, optimized away
@@ -20,11 +25,6 @@ function f()
     always!(ddt(x₂) -ᵢ 3.0)
     always!(x₃ -ᵢ x₁) # optimized away, not part of the DAE problem.
     always!(x₄ *ᵢ x₄ -ᵢ ddt(x₁))
-end
-
-@noinline function onecall!()
-    x = continuous()
-    always!(ddt(x) - x)
 end
 
 @noinline function sin!()
@@ -90,7 +90,7 @@ end
 
     u = [3.0, 1.0, 100.0, 4.0]
     du = [3.0, 0.0, 0.0, 0.0]
-    residuals, expanded_residuals = compute_residual_vectors(f, u, du)
+    residuals, expanded_residuals = compute_residual_vectors(multiple_linear_equations!, u, du)
     @test residuals ≈ [0.0, -3.0, 97.0, 13.0]
     @test residuals ≈ expanded_residuals
 
