@@ -86,12 +86,11 @@ function _structural_analysis!(ci::CodeInstance, world::UInt, settings::Settings
     nexternaleqs = length(argmap.equations)
     if !settings.skip_optimizations
         state = FlatteningState(compact, settings, argmap)
-        arg_replacements = flatten_arguments!(state, ir.argtypes)
+        arg_replacements = flatten_arguments!(state)
         if arg_replacements === nothing
             return UncompilableIPOResult(warnings, UnsupportedIRException("Unhandled argument types", Compiler.finish(compact)))
         end
-        append!(empty!(ir.argtypes), state.new_argtypes)
-        argtypes = Any[Incidence(state.new_argtypes[i], i) for i = 1:nexternalargvars]
+        argtypes = Any[Incidence(ir.argtypes[i], i) for i = 1:nexternalargvars]
     else
         argtypes = annotate_variables_and_equations(ir.argtypes, argmap)
         arg_replacements = nothing

@@ -38,11 +38,10 @@ struct FlatteningState
     map::ArgumentMap
     nvariables::Int
     nequations::Int
-    new_argtypes::Vector{Any}
 end
 
 function FlatteningState(compact::IncrementalCompact, settings::Settings, map::ArgumentMap)
-    FlatteningState(compact, settings, deepcopy(map), length(map.variables), length(map.equations), Any[])
+    FlatteningState(compact, settings, deepcopy(map), length(map.variables), length(map.equations))
 end
 
 function next_variable!(state::FlatteningState)
@@ -55,16 +54,24 @@ function next_equation!(state::FlatteningState)
     return state.nequations - length(state.map.equations)
 end
 
+function flatten_arguments!(state::FlatteningState)
+    argtypes = copy(state.compact.ir.argtypes)
+    empty!(state.compact.ir.argtypes) # will be recomputed during flattening
+    args = flatten_arguments!(state, argtypes)
+    if args !== nothing
+        @assert isempty(state.map.variables)
+        @assert isempty(state.map.equations)
+    end
+    return args
+end
+
 function flatten_arguments!(state::FlatteningState, argtypes::Vector{Any})
     args = Any[]
-    # push!(state.new_argtypes, argtypes[1])
     for argt in argtypes
         arg = flatten_argument!(state, argt)
         arg === nothing && return nothing
         push!(args, arg)
     end
-    @assert isempty(state.map.variables)
-    @assert isempty(state.map.equations)
     return args
 end
 
@@ -76,7 +83,7 @@ function flatten_argument!(state::FlatteningState, @nospecialize(argt))
     elseif Base.issingletontype(argt)
         return argt.instance
     elseif isprimitivetype(argt)
-        push!(state.new_argtypes, argt)
+        push!(state.compact.ir.argtypes, argt)
         return Argument(next_variable!(state))
     elseif argt === equation
         eq = next_equation!(state)
