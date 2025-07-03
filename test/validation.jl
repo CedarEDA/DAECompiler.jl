@@ -4,8 +4,6 @@ using DAECompiler: refresh, compute_residual_vectors
 using Test
 using DAECompiler
 using DAECompiler.Intrinsics
-using SciMLBase
-using OrdinaryDiffEq
 
 const *ᵢ = Core.Intrinsics.mul_float
 const +ᵢ = Core.Intrinsics.add_float
@@ -183,8 +181,7 @@ end
 
     u = [2.0]
     du = [3.0]
-    refresh(); residuals, expanded_residuals = compute_residual_vectors(callable_with_type_parameter!, u, du)
+    residuals, expanded_residuals = compute_residual_vectors(callable_with_type_parameter!, u, du)
     @test residuals ≈ [0.0]
-    # XXX: Residuals from the optimized pipeline are wrong (3.0 instead of 0.0)
-    @test_broken residuals ≈ expanded_residuals
+    @test residuals ≈ expanded_residuals
 end;

@@ -4,7 +4,7 @@ function expand_residuals(state::TransformationState, key::TornCacheKey, compres
     i = 1
     var_eq_matching = matching_for_key(state, key)
     for (eq, incidence) in enumerate(result.total_incidence)
-        if !is_var_part_known_linear(incidence)
+        if !is_const_plus_var_known_linear(incidence)
             sign = infer_residual_sign(result, eq, var_eq_matching)
             push!(expanded, sign * compressed[i])
             i += 1
@@ -96,7 +96,7 @@ function compute_residual_vectors(f, u, du; t = 1.0, mode=DAE, world=Base.tls_wo
     settings = Settings(; mode, insert_stmt_debuginfo = true)
     tt = Base.signature_type(f, ())
     ci = _code_ad_by_type(tt; world)
-    result = @code_structure result=true mode=mode world=world f()
+    result = @code_structure result=true mode=settings.mode insert_stmt_debuginfo=settings.insert_stmt_debuginfo world=world f()
     structure = make_structure_from_ipo(result)
     state = TransformationState(result, structure)
     key, _ = top_level_state_selection!(state)
@@ -105,11 +105,11 @@ function compute_residual_vectors(f, u, du; t = 1.0, mode=DAE, world=Base.tls_wo
     torn_ir = torn_ci.inferred
     removed_states = extract_removed_states(state, key, torn_ir, u, du, t)
 
-    our_prob = DAECProblem(f, (1,) .=> 1., insert_stmt_debuginfo = true)
+    our_prob = DAECProblem(f, (1,) .=> 1.; settings.insert_stmt_debuginfo)
     sciml_prob = DiffEqBase.get_concrete_problem(our_prob, true)
     f_compressed! = sciml_prob.f.f
 
-    our_prob = DAECProblem(f, (1,) .=> 1., insert_stmt_debuginfo = true, skip_optimizations = true)
+    our_prob = DAECProblem(f, (1,) .=> 1.; settings.insert_stmt_debuginfo, skip_optimizations = true)
     sciml_prob = DiffEqBase.get_concrete_problem(our_prob, true)
     f_original! = sciml_prob.f.f
 
