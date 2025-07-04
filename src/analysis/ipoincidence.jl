@@ -18,10 +18,10 @@ function compute_missing_coeff!(coeffs, (;callee_result, caller_var_to_diff, cal
     # First find the rootvar, and if we already have a coeff for it
     # apply the derivatives.
     ndiffs = 0
-    calle_inv = invview(callee_result.var_to_diff)
-    while calle_inv[v] !== nothing && !isassigned(coeffs, v)
+    callee_inv = invview(callee_result.var_to_diff)
+    while callee_inv[v] !== nothing && !isassigned(coeffs, v)
         ndiffs += 1
-        v = calle_inv[v]
+        v = callee_inv[v]
     end
 
     if !isassigned(coeffs, v)
@@ -43,9 +43,9 @@ function compute_missing_coeff!(coeffs, (;callee_result, caller_var_to_diff, cal
     return nothing
 end
 
-apply_linear_incidence(𝕃, ret::Type, caller::CallerMappingState, mapping::CalleeMapping) = ret
-apply_linear_incidence(𝕃, ret::Const, caller::CallerMappingState, mapping::CalleeMapping) = ret
-function apply_linear_incidence(𝕃, ret::Incidence, caller::Union{CallerMappingState, Nothing}, mapping::CalleeMapping)
+apply_linear_incidence!(mapping::CalleeMapping, 𝕃, ret::Type, caller::CallerMappingState) = ret
+apply_linear_incidence!(mapping::CalleeMapping, 𝕃, ret::Const, caller::CallerMappingState) = ret
+function apply_linear_incidence!(mapping::CalleeMapping, 𝕃, ret::Incidence, caller::Union{CallerMappingState, Nothing})
     # Substitute variables returned by the callee with the incidence defined by the caller.
     # The composition will be additive in the constant terms, and multiplicative for linear coefficients.
     caller_variables = mapping.var_coeffs
@@ -141,7 +141,7 @@ function compose_additive_term(@nospecialize(a), @nospecialize(b), coeff)
     return Const(val)
 end
 
-function apply_linear_incidence(𝕃, ret::Eq, caller::CallerMappingState, mapping::CalleeMapping)
+function apply_linear_incidence!(mapping::CalleeMapping, 𝕃, ret::Eq, caller::CallerMappingState)
     eq_mapping = mapping.eqs[ret.id]
     if eq_mapping == 0
         push!(caller.caller_eqclassification, Owned)
@@ -151,8 +151,8 @@ function apply_linear_incidence(𝕃, ret::Eq, caller::CallerMappingState, mappi
     return Eq(eq_mapping)
 end
 
-function apply_linear_incidence(𝕃, ret::PartialStruct, caller::CallerMappingState, mapping::CalleeMapping)
-    return PartialStruct(𝕃, ret.typ, Any[apply_linear_incidence(𝕃, f, caller, mapping) for f in ret.fields])
+function apply_linear_incidence!(mapping::CalleeMapping, 𝕃, ret::PartialStruct, caller::CallerMappingState)
+    return PartialStruct(𝕃, ret.typ, Any[apply_linear_incidence!(mapping, 𝕃, f, caller) for f in ret.fields])
 end
 
 function CalleeMapping(𝕃::AbstractLattice, argtypes::Vector{Any}, callee_ci::CodeInstance, callee_result::DAEIPOResult)

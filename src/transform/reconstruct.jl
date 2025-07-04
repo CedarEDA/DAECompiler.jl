@@ -25,7 +25,7 @@ function expand_residuals(state::TransformationState, key::TornCacheKey, compres
             end
             residual += value * coeff
         end
-        constant_term = isa(incidence.typ, Const) ? incidence.typ.val::Float64 : 0.0
+        constant_term = incidence.typ.val::Float64
         push!(expanded, constant_term + residual)
     end
     return expanded

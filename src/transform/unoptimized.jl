@@ -100,7 +100,7 @@ function rhs_finish_noopt!(
             callee_residuals = equation_to_residual_mapping[caller_eqs]
             caller_variables = map(info.mapping.var_coeffs) do coeff
                 isa(coeff, Incidence) || return -1
-                length(nonzeros(coeff.row)) == 1 || return -1
+                nnz(coeff.row) == 1 || return -1
                 idnum(coeff)
             end
             callee_states = [get(variable_to_state_mapping, i, -1) for i in caller_variables]

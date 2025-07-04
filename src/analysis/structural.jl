@@ -522,7 +522,7 @@ function add_internal_equations_to_structure!(refiner::StructuralRefiner, cms::C
             # we're here is because it leaked an explicit reference.
             continue
         end
-        mapped_inc = apply_linear_incidence(Compiler.typeinf_lattice(refiner), callee_result.total_incidence[eq], cms, callee_mapping)
+        mapped_inc = apply_linear_incidence!(callee_mapping, Compiler.typeinf_lattice(refiner), callee_result.total_incidence[eq], cms)
         if isassigned(total_incidence, mapped_eq)
             total_incidence[mapped_eq] = tfunc(Val(Core.Intrinsics.add_float),
                 total_incidence[mapped_eq],
@@ -541,7 +541,7 @@ function add_internal_equations_to_structure!(refiner::StructuralRefiner, cms::C
         callee_result.eqclassification[ieq] === External && continue
         isassigned(callee_result.total_incidence, ieq) || continue
         inc = callee_result.total_incidence[ieq]
-        extinc = apply_linear_incidence(Compiler.typeinf_lattice(refiner), inc, cms, callee_mapping)
+        extinc = apply_linear_incidence!(callee_mapping, Compiler.typeinf_lattice(refiner), inc, cms)
         if !isa(extinc, Incidence) && !isa(extinc, Const)
             return "Failed to map internal incidence for equation $ieq (internal result $inc) - got $extinc while processing $thisssa"
         end
