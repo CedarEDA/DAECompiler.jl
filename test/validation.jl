@@ -96,6 +96,34 @@ function callable_with_type_parameter!()
     WithParameter{3}()(eq, x)
 end
 
+@noinline nonlinear_operation() = tanh(ddt(continuous()))
+function nonlinear_replacement!()
+    result = nonlinear_operation()
+    always!(result - 0.5)
+end
+
+@noinline function nested_nonlinear_operations(x, y)
+    z = continuous()
+    eq = always()
+    a = sin(y)
+    b = exp(ddt(z))
+    c = cosh(ddt(x) + y + z)
+    (a, ((b, c), eq))
+end
+function nonlinear_replacement_nested!()
+    x = continuous()
+    (sy, ((eż, cẋyz), eq)) = nested_nonlinear_operations(x, 0.5)
+    always!(sy + eż)
+    eq(cẋyz)
+end
+
+@noinline nonlinear_operation(x) = sin(x) - ddt(continuous())
+function external_derivative_nonlinear!()
+    x = continuous()
+    always!(x - 0.5)
+    always!(nonlinear_operation(ddt(x)))
+end
+
 @testset "Validation" begin
     refresh() # TODO: remove before merge
 
@@ -184,4 +212,26 @@ end
     residuals, expanded_residuals = compute_residual_vectors(callable_with_type_parameter!, u, du)
     @test residuals ≈ [0.0]
     @test residuals ≈ expanded_residuals
+
+    u = [2.0]
+    du = [3.0]
+    residuals, expanded_residuals = compute_residual_vectors(nonlinear_replacement!, u, du)
+    @test residuals ≈ [0.49505475368673046, 0.0]
+    @test residuals ≈ expanded_residuals
+
+    u = [2.0, 6.0]
+    du = [3.0, -1.0]
+    residuals, expanded_residuals = compute_residual_vectors(nonlinear_replacement_nested!, u, du)
+    @test residuals ≈ expanded_residuals
+
+    u = [2.0, 4.0]
+    du = [3.0, 5.0]
+    # XXX: Fix GlobalRef handling in Diffractor's forward AD pass first.
+    # ERROR: UndefVarError: `pos` not defined in `Diffractor`
+    # XXX: To pass this test we'll need to map one of the callee variables to a state
+    # differential (`du`), while currently we only map to states and we assume the derivative index matches.
+    @test_skip begin
+        residuals, expanded_residuals = compute_residual_vectors(external_derivative_nonlinear!, u, du)
+        @test residuals ≈ expanded_residuals
+    end
 end;

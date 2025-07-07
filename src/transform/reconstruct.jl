@@ -1,11 +1,13 @@
-function expand_residuals(state::TransformationState, key::TornCacheKey, compressed, u, du, t)
+function expand_residuals(state::TransformationState, key::TornCacheKey, states, compressed, u, du, t)
     (; result, structure) = state
     expanded = Float64[]
     i = 1
     var_eq_matching = matching_for_key(state, key)
     for (eq, incidence) in enumerate(result.total_incidence)
-        if !is_const_plus_var_known_linear(incidence)
+        uses_replacement_variable = any(x -> in(x.by + 1, rowvals(incidence.row)), result.replacement_map.variables)
+        if !is_const_plus_var_known_linear(incidence) || uses_replacement_variable
             sign = infer_residual_sign(result, eq, var_eq_matching)
+            uses_replacement_variable && (sign *= -1) # XXX: this may be too simple
             push!(expanded, sign * compressed[i])
             i += 1
             continue
@@ -19,9 +21,11 @@ function expand_residuals(state::TransformationState, key::TornCacheKey, compres
             else
                 is_diff = is_differential_variable(structure, var)
                 source = ifelse(is_diff, du, u)
-                slot = count(v -> is_differential_variable(structure, v) == is_diff, 1:var)
+                # XXX: that's probably incorrect but has done the correct thing so far
                 var === invview(var_eq_matching)[eq] && !is_diff && (i += 1)
-                value = source[slot]
+                state = states[var]
+                @assert state ≠ -1 "Reading from a state vector for a variable that has no corresponding state"
+                value = source[state]
             end
             residual += value * coeff
         end
@@ -53,29 +57,20 @@ function is_differential_variable(structure::DAESystemStructure, var)
     @assert false
 end
 
-function expand_residuals(f, residuals, u, du, t)
-    result = @code_structure result=true f()
-    structure = make_structure_from_ipo(result)
-    state = TransformationState(result, structure)
-    key, _ = top_level_state_selection!(state)
-    return expand_residuals(state, key, residuals, u, du, t)
-end
-
-function extract_removed_states(state::TransformationState, key::TornCacheKey, torn::TornIR, u, du, t)
+function extract_removed_variables(state::TransformationState, key::TornCacheKey, torn::TornIR)
     (; result, structure) = state
     # TODO: handle multiple partitions
     torn_ir = only(torn.ir_seq)
-    removed_states = Int[]
+    removed_vars = Int[]
     for (i, inst) in enumerate(torn_ir.stmts)
         stmt = inst[:stmt]
         is_solved_variable(stmt) || continue
         var = stmt.args[2]::Int
         vint = invview(structure.var_to_diff)[var]
         vint === nothing || key.diff_states === nothing || !in(vint, key.diff_states) || continue
-        push!(removed_states, var)
+        push!(removed_vars, var)
     end
-    # @sshow removed_states
-    return removed_states
+    return removed_vars
 end
 
 """
@@ -103,7 +98,6 @@ function compute_residual_vectors(f, u, du; t = 1.0, mode=DAE, world=Base.tls_wo
     tearing_schedule!(state, ci, key, world, settings)
     torn_ci = find_matching_ci(ci->isa(ci.owner, TornIRSpec) && ci.owner.key == key, ci.def, world)
     torn_ir = torn_ci.inferred
-    removed_states = extract_removed_states(state, key, torn_ir, u, du, t)
 
     our_prob = DAECProblem(f, (1,) .=> 1.; settings.insert_stmt_debuginfo)
     sciml_prob = DiffEqBase.get_concrete_problem(our_prob, true)
@@ -115,16 +109,24 @@ function compute_residual_vectors(f, u, du; t = 1.0, mode=DAE, world=Base.tls_wo
 
     residuals = zeros(length(u))
     p = SciMLBase.NullParameters()
-    indices = filter(!in(removed_states), eachindex(u))
-    u_compressed = u[indices]
-    du_compressed = du[indices]
+    states = map_variables_to_states(state)
+    removed_variables = extract_removed_variables(state, key, torn_ir)
+    removed_states = filter(≠(-1), states[removed_variables])
+    compressed_states = filter(x -> !in(x, removed_states) && x ≠ -1, states)
+    state_compression = unique(compressed_states)
+    u_compressed = u[state_compression]
+    du_compressed = du[state_compression]
 
-    n = length(residuals) - length(removed_states)
-    @assert n ≥ 1
+    n = length(state.result.eqkinds)
     residuals_compressed = zeros(n)
     f_compressed!(residuals_compressed, du_compressed, u_compressed, p, t)
     f_original!(residuals, du, u, p, t)
-    expanded = expand_residuals(f, residuals_compressed, u, du, t)
+
+    expanded = expand_residuals(state, key, states, residuals_compressed, u, du, t)
+    @assert issorted(result.replacement_map.variables, by = x -> x.equation)
+    for (; equation) in result.replacement_map.variables
+        insert!(residuals, equation, 0.0)
+    end
 
     return residuals, expanded
 end

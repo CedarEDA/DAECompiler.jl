@@ -301,6 +301,7 @@ function _structural_analysis!(ci::CodeInstance, world::UInt, settings::Settings
     handler_info = Compiler.compute_trycatch(ir)
     ncallees = 0
     compact = IncrementalCompact(ir)
+    replacement_map = NonlinearReplacementMap()
     opaque_eligible = isempty(total_incidence) && all(==(External), varclassification)
     for ((old_idx, i), stmt) in compact
         stmt === nothing && continue
@@ -395,6 +396,9 @@ function _structural_analysis!(ci::CodeInstance, world::UInt, settings::Settings
         if err !== true
             return UncompilableIPOResult(warnings, UnsupportedIRException(err, ir))
         end
+        if !settings.skip_optimizations
+            add_replacements_from_callee!(replacement_map, result.replacement_map, mapping, cms, Compiler.typeinf_lattice(refiner))
+        end
     end
 
     eqvars = EqVarState(var_to_diff, varclassification, varkinds,
@@ -409,7 +413,12 @@ function _structural_analysis!(ci::CodeInstance, world::UInt, settings::Settings
         line = ret_stmt_inst[:line]
         Compiler.delete_inst_here!(compact)
 
-        (new_ret, ultimate_rt) = rewrite_ipo_return!(Compiler.typeinf_lattice(refiner), compact, line, settings, ret_stmt.val, ultimate_rt, eqvars)
+        𝕃 = Compiler.typeinf_lattice(refiner)
+        replacement_map.variable_counter = length(refiner.var_to_diff)
+        replacement_map.equation_counter = length(eqkinds)
+        plan_nonlinear_replacements!(replacement_map, ultimate_rt, 𝕃)
+
+        (new_ret, ultimate_rt) = rewrite_ipo_return!(𝕃, compact, line, settings, ret_stmt.val, ultimate_rt, eqvars)
         insert_instruction_here!(compact, settings, @__SOURCE__, NewInstruction(ReturnNode(new_ret), ultimate_rt, Compiler.NoCallInfo(), line, Compiler.IR_FLAG_REFINED), reverse_affinity = true)
     elseif isa(ultimate_rt, Type)
         # If we don't have any internal variables (in which case we might have to to do a more aggressive rewrite), strengthen the incidence
@@ -432,10 +441,41 @@ function _structural_analysis!(ci::CodeInstance, world::UInt, settings::Settings
         var_to_diff,
         varclassification,
         total_incidence, eqclassification, eq_callee_mapping,
+        replacement_map,
         names,
         varkinds,
         eqkinds,
         warnings)
+end
+
+function plan_nonlinear_replacements!(map::NonlinearReplacementMap, @nospecialize(type), 𝕃::AbstractLattice)
+    if isa(type, PartialStruct)
+        for field in eachindex(type.fields)
+            ftype = Compiler.getfield_tfunc(𝕃, type, Const(field))
+            plan_nonlinear_replacements!(map, ftype, 𝕃)
+        end
+    elseif isa(type, Incidence)
+        nnz(type.row) > 0 || return
+        nnz(type.row) > 1 || first(nonzeros(type.row)) === nonlinear || return
+        add_variable_replacement!(map, type)
+    end
+end
+
+function add_variable_replacement!(map::NonlinearReplacementMap, incidence::Incidence)
+    by = (map.variable_counter += 1)
+    equation = (map.equation_counter += 1)
+    push!(map.variables, VariableReplacement(incidence, by, equation))
+end
+
+function add_replacements_from_callee!(map::NonlinearReplacementMap, callee::NonlinearReplacementMap, callee_mapping::CalleeMapping, caller::CallerMappingState, 𝕃::AbstractLattice)
+    for (; replaced, by, equation) in callee.variables
+        caller_replaced = apply_linear_incidence!(callee_mapping, 𝕃, replaced, caller)
+        caller_by = idnum(callee_mapping.var_coeffs[by])
+        caller_equation = callee_mapping.eqs[equation]
+        replacement = VariableReplacement(caller_replaced, caller_by, caller_equation)
+        push!(map.variables, replacement)
+    end
+    return map
 end
 
 function rewrite_ipo_return!(𝕃, compact::IncrementalCompact, line, settings, ssa, ultimate_rt::Any, eqvars::EqVarState)

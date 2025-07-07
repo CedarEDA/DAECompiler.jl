@@ -333,6 +333,8 @@ function compute_eq_schedule(key::TornCacheKey, total_incidence, result, mss::St
                 for i = 1:length(callee_info.result.total_incidence)
                     i in previously_scheduled_or_ignored && continue # We scheduled this previously
                     i in this_callee_eqs && continue # We already scheduled this
+                    # Skip equations that the callee defines but does not apply.
+                    !isassigned(callee_info.result.total_incidence, i) && continue
                     callee_incidence = callee_info.result.total_incidence[i]
                     incidence = apply_linear_incidence!(callee_info.mapping, nothing, callee_incidence, nothing)
                     if is_const_plus_var_known_linear(incidence)

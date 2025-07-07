@@ -144,7 +144,7 @@ function index_lowering_ad!(state::TransformationState, key::TornCacheKey, setti
             stmt = ir[stmt][:inst]
         end
         if is_known_invoke(stmt, variable, ir)
-            diff_variable!(ir, ssa, stmt, order)
+            diff_variable!(ir, settings, ssa, stmt, order)
             return nothing
         elseif is_known_invoke(stmt, equation, ir)
             eq = inst[:type].id

@@ -74,7 +74,8 @@ function rhs_finish_noopt!(
             replace_uses!(compact, (old, inst) => value)
             # @insert_instruction_here(compact, line, settings, println("Variable derivative (", var, " := ", invview(structure.var_to_diff)[var], "′): ", value)::Any)
         elseif is_known_invoke(stmt, Intrinsics.equation, compact)
-            push!(equations, ssaidx => type::Eq)
+            # This is already done for each encountered `Eq` type.
+            # push!(equations, ssaidx => type::Eq)
         elseif is_equation_call(stmt, compact)
             callee, value = stmt.args[2], stmt.args[3]
             i = findfirst(x -> first(x) == callee, equations)::Int
@@ -118,6 +119,7 @@ function rhs_finish_noopt!(
         end
 
         type = inst[:type]
+        isa(type, Eq) && push!(equations, ssaidx => type)
         if isa(type, Incidence) || isa(type, Eq)
             inst[:type] = widenconst(type)
         end
@@ -129,11 +131,16 @@ function rhs_finish_noopt!(
 end
 
 function map_variables_to_states(state::TransformationState)
-    (; structure) = state
+    (; result, structure) = state
     diff_to_var = invview(structure.var_to_diff)
     states = Int[]
     prev_state = 0
     for var in continuous_variables(state)
+        if any(repl -> repl.by == var, result.replacement_map.variables)
+            # This is a replacement variable, skip it.
+            push!(states, -1)
+            continue
+        end
         ref = is_differential_variable(structure, var) ? diff_to_var[var] : var
         state = @something(get(states, ref, nothing), prev_state += 1)
         push!(states, state)
