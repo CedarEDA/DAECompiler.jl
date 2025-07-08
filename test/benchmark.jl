@@ -1,6 +1,5 @@
 module _benchmark
 
-using Pkg; Pkg.activate(joinpath(dirname(@__DIR__), "benchmark"))
 using DAECompiler
 using DAECompiler: compute_residual_vectors
 using SciMLBase, Sundials
