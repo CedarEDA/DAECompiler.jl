@@ -1,3 +1,5 @@
+module _validation
+
 using DAECompiler
 using DAECompiler: refresh, compute_residual_vectors
 
@@ -235,3 +237,5 @@ end
         @test residuals ≈ expanded_residuals
     end
 end;
+
+end # module _validation
