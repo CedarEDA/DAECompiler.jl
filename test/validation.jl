@@ -127,8 +127,6 @@ function external_derivative_nonlinear!()
 end
 
 @testset "Validation" begin
-    refresh() # TODO: remove before merge
-
     u = [2.0]
     du = [3.0]
     residuals, expanded_residuals = compute_residual_vectors(onecall!, u, du)
