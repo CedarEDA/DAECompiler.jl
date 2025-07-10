@@ -6,16 +6,16 @@ module DAECompiler
     using Diffractor
     using OrderedCollections
     using Compiler
-    using Compiler: IRCode, IncrementalCompact, argextype, singleton_type, isexpr, widenconst
+    using Compiler: IRCode, IncrementalCompact, DebugInfoStream, NewInstruction, argextype, singleton_type, isexpr, widenconst
     using Core.IR
     using SciMLBase
     using AutoHashEquals
     using LinearAlgebra: LinearAlgebra
     using InteractiveUtils: gen_call_with_extracted_types_and_kwargs
 
+    include("settings.jl")
     include("utils.jl")
     include("intrinsics.jl")
-    include("settings.jl")
     include("analysis/utils.jl")
     include("analysis/lattice.jl")
     include("analysis/ADAnalyzer.jl")

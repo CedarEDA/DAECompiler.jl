@@ -45,7 +45,7 @@ function is_diffed_equation_call_invoke_or_call(@nospecialize(stmt), ir::IRCode)
     return widenconst(ft) === equation
 end
 
-function index_lowering_ad!(state::TransformationState, key::TornCacheKey)
+function index_lowering_ad!(state::TransformationState, key::TornCacheKey, settings::Settings)
     (; result, structure) = state
     (; var_to_diff, eq_to_diff, graph, solvable_graph) = structure
 
@@ -116,7 +116,7 @@ function index_lowering_ad!(state::TransformationState, key::TornCacheKey)
         return vars[dvar]
     end
 
-    function diff_variable!(ir, ssa, stmt, order)
+    function diff_variable!(ir, settings, ssa, stmt, order)
         inst = ir[ssa]
         var = idnum(ir[ssa][:type])
         primal = insert_node!(ir, ssa, NewInstruction(inst))
@@ -129,7 +129,7 @@ function index_lowering_ad!(state::TransformationState, key::TornCacheKey)
         duals = insert_node!(ir, ssa, NewInstruction(
             Expr(:call, tuple, diffs...), Any
         ))
-        replace_call!(ir, ssa, Expr(:call, Diffractor.TaylorBundle{order}, primal, duals))
+        replace_call!(ir, ssa, Expr(:call, Diffractor.TaylorBundle{order}, primal, duals), settings, @__SOURCE__)
     end
 
     function transform!(ir, ssa, order, maparg)
@@ -144,7 +144,7 @@ function index_lowering_ad!(state::TransformationState, key::TornCacheKey)
             stmt = ir[stmt][:inst]
         end
         if is_known_invoke(stmt, variable, ir)
-            diff_variable!(ir, ssa, stmt, order)
+            diff_variable!(ir, settings, ssa, stmt, order)
             return nothing
         elseif is_known_invoke(stmt, equation, ir)
             eq = inst[:type].id
@@ -180,7 +180,7 @@ function index_lowering_ad!(state::TransformationState, key::TornCacheKey)
             return nothing
         elseif is_known_invoke(stmt, sim_time, ir)
             time = insert_node!(ir, ssa, NewInstruction(inst))
-            replace_call!(ir, ssa, Expr(:call, Diffractor.∂xⁿ{order}(), time))
+            replace_call!(ir, ssa, Expr(:call, Diffractor.∂xⁿ{order}(), time), settings, @__SOURCE__)
             return nothing
         elseif is_diffed_equation_call_invoke_or_call(stmt, ir)
             eq = idnum(argextype(_eq_function_arg(stmt), ir))
@@ -210,9 +210,9 @@ function index_lowering_ad!(state::TransformationState, key::TornCacheKey)
         elseif is_known_invoke(stmt, ddt, ir)
             arg = maparg(stmt.args[end], ssa, order+1)
             if order == 0
-                replace_call!(ir, ssa, Expr(:call, Diffractor.partial, arg, 1))
+                replace_call!(ir, ssa, Expr(:call, Diffractor.partial, arg, 1), settings, @__SOURCE__())
             else
-                replace_call!(ir, ssa, Expr(:call, diff_bundle, arg))
+                replace_call!(ir, ssa, Expr(:call, diff_bundle, arg), settings, @__SOURCE__())
             end
             return nothing
         else
@@ -224,7 +224,7 @@ function index_lowering_ad!(state::TransformationState, key::TornCacheKey)
             end
             inst[:inst] = urs[]
             primal = insert_node!(ir, ssa, NewInstruction(inst))
-            replace_call!(ir, ssa, Expr(:call, Diffractor.zero_bundle{order}(), primal))
+            replace_call!(ir, ssa, Expr(:call, Diffractor.zero_bundle{order}(), primal), settings, @__SOURCE__)
             return nothing
         end
     end

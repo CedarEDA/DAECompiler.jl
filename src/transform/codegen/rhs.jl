@@ -16,13 +16,13 @@ function Base.StackTraces.show_custom_spec_sig(io::IO, owner::RHSSpec, linfo::Co
     return Base.StackTraces.show_spec_sig(io, mi.def, mi.specTypes)
 end
 
-function handle_contribution!(ir::Compiler.IRCode, inst::Compiler.Instruction, kind, slot, arg_range, red)
+function handle_contribution!(ir::Compiler.IRCode, settings::Settings, source, inst::Compiler.Instruction, kind, slot, arg_range, red)
     pos = SSAValue(inst.idx)
     @assert Int(LastStateKind) < Int(kind) <= Int(LastEquationStateKind)
     which = Argument(arg_range[Int(kind)])
     prev = insert_node!(ir, pos, NewInstruction(inst; stmt=Expr(:call, Base.getindex, which, slot), type=Float64))
     sum = insert_node!(ir, pos, NewInstruction(inst; stmt=Expr(:call, +, prev, red), type=Float64))
-    replace_call!(ir, pos, Expr(:call, Base.setindex!, which, sum, slot))
+    replace_call!(ir, pos, Expr(:call, Base.setindex!, which, sum, slot), settings, source)
 end
 
 function compute_slot_ranges(caller_state::TransformationState, info::MappingInfo, callee_key, var_assignment, eq_assignment)
@@ -117,6 +117,13 @@ function rhs_finish!(
         empty!(ir.argtypes)
         push!(ir.argtypes, Tuple)  # SICM State
         push!(ir.argtypes, Tuple)  # in vars
+        if in(settings.mode, (ODE, ODENoInit))
+            slotnames = [:sicm_state, :vars, :in_u_mm, :in_u_unassgn, :in_alg_derv, :in_alg, :out_du_mm, :out_eq, :t]
+        elseif in(settings.mode, (DAE, DAENoInit))
+            slotnames = [:sicm_state, :vars, :in_u_mm, :in_u_unassgn, :in_du_unassgn, :in_alg, :out_du_mm, :out_eq, :t]
+        else
+            slotnames = nothing # XXX: define slotnames for `InitUncompress`
+        end
 
         arg_range = 3:8
         @assert length(arg_range) == Int(LastEquationStateKind)
@@ -157,7 +164,7 @@ function rhs_finish!(
                 spec_data = stmt.args[1]
                 callee_key = spec_data[2]
                 callee_ordinal = spec_data[end]::Int
-                callee_result = structural_analysis!(callee_ci, world)
+                callee_result = structural_analysis!(callee_ci, world, settings)
                 callee_daef_ci = rhs_finish!(callee_result, callee_ci, callee_key, world, settings, callee_ordinal)
                 # Allocate a continuous block of variables for all callee alg and diff states
 
@@ -186,7 +193,7 @@ function rhs_finish!(
                 varnum = idnum(ir.stmts.type[i])
                 kind = varkind(state, varnum)
                 if kind == Intrinsics.Epsilon
-                    replace_call!(ir, SSAValue(i), 0.)
+                    replace_call!(ir, SSAValue(i), 0., settings, @__SOURCE__)
                     continue
                 end
                 @assert kind == Intrinsics.Continuous
@@ -200,14 +207,14 @@ function rhs_finish!(
                 (kind, slot) = assgn
                 @assert 1 <= Int(kind) <= Int(LastStateKind)
                 which = Argument(arg_range[Int(kind)])
-                replace_call!(ir, SSAValue(i), Expr(:call, Base.getindex, which, slot))
+                replace_call!(ir, SSAValue(i), Expr(:call, Base.getindex, which, slot), settings, @__SOURCE__)
             elseif is_known_invoke_or_call(stmt, InternalIntrinsics.contribution!, ir)
                 eq = stmt.args[end-2]::Int
                 kind = stmt.args[end-1]::EquationStateKind
                 (eqkind, slot) = eq_assignment[eq]::Pair
                 @assert eqkind == kind
                 red = stmt.args[end]
-                handle_contribution!(ir, inst, kind, slot, arg_range, red)
+                handle_contribution!(ir, settings, @__SOURCE__(), inst, kind, slot, arg_range, red)
             elseif is_known_invoke(stmt, equation, ir)
                 # Equation - used, but only as an arg to equation call, which will all get
                 # eliminated by the end of this loop, so we can delete this statement, as
@@ -217,28 +224,23 @@ function rhs_finish!(
                 var = stmt.args[end-1]
                 vint = invview(structure.var_to_diff)[var]
                 if vint !== nothing && key.diff_states !== nothing && (vint in key.diff_states) && !(var in diff_states_in_callee)
-                    handle_contribution!(ir, inst, StateDiff, var_assignment[vint][2], arg_range, stmt.args[end])
+                    handle_contribution!(ir, settings, @__SOURCE__(), inst, StateDiff, var_assignment[vint][2], arg_range, stmt.args[end])
                 else
                     ir[SSAValue(i)] = nothing
                 end
             else
-                replace_if_intrinsic!(ir, SSAValue(i), nothing, nothing, Argument(1), t, var_assignment)
+                replace_if_intrinsic!(ir, settings, SSAValue(i), nothing, nothing, Argument(1), t, var_assignment)
             end
         end
 
         # Just before the end of the function
-        idx = length(ir.stmts)
-        function ir_add!(a, b)
-            ni = NewInstruction(Expr(:call, +, a, b), Any, ir[SSAValue(idx)][:line])
-            insert_node!(ir, idx, ni)
-        end
         ir = Compiler.compact!(ir)
         resize!(ir.cfg.blocks, 1)
         empty!(ir.cfg.blocks[1].succs)
 
         widen_extra_info!(ir)
         Compiler.verify_ir(ir)
-        src = ir_to_src(ir, settings)
+        src = ir_to_src(ir, settings; slotnames)
 
         abi = Tuple{Tuple, Tuple, (VectorViewType for _ in arg_range)..., Float64}
         daef_ci = cache_dae_ci!(ci, src, src.debuginfo, abi, RHSSpec(key, ir_ordinal))
