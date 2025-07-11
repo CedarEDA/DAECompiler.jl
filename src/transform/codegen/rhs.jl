@@ -77,7 +77,7 @@ end
 
 function rhs_finish!(result::DAEIPOResult, ci::CodeInstance, key::TornCacheKey, world::UInt, settings::Settings, ordinal::Int, indexT=Int)
     structure = make_structure_from_ipo(result)
-    tstate = TransformationState(result, structure, copy(result.total_incidence))
+    tstate = TransformationState(result, structure)
     return rhs_finish!(tstate, ci, key, world, settings, ordinal, indexT)
 end
 
@@ -90,6 +90,7 @@ function rhs_finish!(
     ordinal::Int,
     indexT=Int)
 
+    @assert !settings.skip_optimizations
     (; result, structure) = state
     result_ci = find_matching_ci(ci->isa(ci.inferred, RHSSpec) && ci.inferred.key == key && ci.inferred.ordinal == ordinal, ci.def, world)
     if result_ci !== nothing
@@ -109,8 +110,6 @@ function rhs_finish!(
 
     cis = Vector{CodeInstance}()
     for (ir_ordinal, ir) in enumerate(torn.ir_seq)
-        ir = torn.ir_seq[ir_ordinal]
-
         # Read in from the last level before any DAE or ODE-specific `ir_levels`
         # We assume this is named `tearing_schedule!`
         ir = copy(ir)
@@ -208,6 +207,7 @@ function rhs_finish!(
                 @assert 1 <= Int(kind) <= Int(LastStateKind)
                 which = Argument(arg_range[Int(kind)])
                 replace_call!(ir, SSAValue(i), Expr(:call, Base.getindex, which, slot), settings, @__SOURCE__)
+                inst[:type] = Float64
             elseif is_known_invoke_or_call(stmt, InternalIntrinsics.contribution!, ir)
                 eq = stmt.args[end-2]::Int
                 kind = stmt.args[end-1]::EquationStateKind
@@ -234,20 +234,28 @@ function rhs_finish!(
         end
 
         # Just before the end of the function
-        ir = Compiler.compact!(ir)
-        resize!(ir.cfg.blocks, 1)
-        empty!(ir.cfg.blocks[1].succs)
-
-        widen_extra_info!(ir)
-        Compiler.verify_ir(ir)
-        src = ir_to_src(ir, settings; slotnames)
-
-        abi = Tuple{Tuple, Tuple, (VectorViewType for _ in arg_range)..., Float64}
-        daef_ci = cache_dae_ci!(ci, src, src.debuginfo, abi, RHSSpec(key, ir_ordinal))
-        ccall(:jl_add_codeinst_to_jit, Cvoid, (Any, Any), daef_ci, src)
-
+        spec = RHSSpec(key, ir_ordinal)
+        daef_ci = rhs_finish_ir!(ir, ci, settings, spec, slotnames; single_block = true)
         push!(cis, daef_ci)
     end
 
     return cis[ordinal]
+end
+
+function rhs_finish_ir!(ir::IRCode, ci::CodeInstance, settings::Settings, owner::Union{RHSSpec, UnoptimizedKey}, slotnames; single_block = false)
+    ir = Compiler.compact!(ir)
+    if single_block
+        resize!(ir.cfg.blocks, 1)
+        empty!(ir.cfg.blocks[1].succs)
+    end
+
+    widen_extra_info!(ir)
+    Compiler.verify_ir(ir)
+    src = ir_to_src(ir, settings; slotnames)
+
+    abi = Tuple{ir.argtypes...}
+    daef_ci = cache_dae_ci!(ci, src, src.debuginfo, abi, owner)
+    ccall(:jl_add_codeinst_to_jit, Cvoid, (Any, Any), daef_ci, src)
+
+    return daef_ci
 end

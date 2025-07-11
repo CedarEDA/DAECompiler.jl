@@ -6,6 +6,8 @@ struct TransformationState <: StateSelection.TransformationState{DAEIPOResult}
     structure::DAESystemStructure
     total_incidence::Vector{Incidence}
 end
+TransformationState(result::DAEIPOResult, structure::DAESystemStructure) =
+    TransformationState(result, structure, copy(result.total_incidence))
 
 function StateSelection.linear_subsys_adjmat!(state::TransformationState)
     graph = state.structure.graph
@@ -165,7 +167,7 @@ function Base.show(io::IO, (; callees)::CalleeInfo)
     end
 end
 
-function top_level_state_selection!(tstate)
+function top_level_state_selection!(tstate::TransformationState)
     (; result, structure) = tstate
 
     # For the top-level problem, all external vars are state-invariant, and we do no other fissioning

@@ -162,15 +162,19 @@ end
     @sshow stmt
     @sshow length(ir.stmts) typeof(val)
 
-Drop-in replacement for `@show`, but using `jl_safe_printf` to avoid task switches.
+Drop-in replacement for `@show`, but using `Core.println` to avoid task switches.
 
 This directly prints to C stdout; `stdout` redirects won't have any effect.
 """
 macro sshow(exs...)
     blk = Expr(:block)
     for ex in exs
-        push!(blk.args, :(Core.println($(sprint(Base.show_unquoted,ex)*" = "),
-                                  repr(begin local value = $(esc(ex)) end))))
+        push!(blk.args, quote
+            value = $(esc(ex))
+            Core.print($(sprint(Base.show_unquoted, ex)))
+            Core.print(" = ")
+            Core.println(sprint(print, value, context = :color => true))
+        end)
     end
     isempty(exs) || push!(blk.args, :value)
     return blk

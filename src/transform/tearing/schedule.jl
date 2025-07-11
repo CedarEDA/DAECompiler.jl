@@ -333,8 +333,10 @@ function compute_eq_schedule(key::TornCacheKey, total_incidence, result, mss::St
                 for i = 1:length(callee_info.result.total_incidence)
                     i in previously_scheduled_or_ignored && continue # We scheduled this previously
                     i in this_callee_eqs && continue # We already scheduled this
+                    # Skip equations that the callee defines but does not apply.
+                    !isassigned(callee_info.result.total_incidence, i) && continue
                     callee_incidence = callee_info.result.total_incidence[i]
-                    incidence = apply_linear_incidence(nothing, callee_incidence, nothing, callee_info.mapping)
+                    incidence = apply_linear_incidence!(callee_info.mapping, nothing, callee_incidence, nothing)
                     if is_const_plus_var_known_linear(incidence)
                         # No non-linear components - skip it
                         push!(previously_scheduled_or_ignored, i)
@@ -498,6 +500,8 @@ function invert_eq_callee_mapping(eq_callee_mapping)
     return callee_eq_mapping
 end
 
+classify_var(structure::DAESystemStructure, key::TornCacheKey, var) = classify_var(structure.var_to_diff, key, var)
+classify_var(result::DAEIPOResult, key::TornCacheKey, var) = classify_var(result.var_to_diff, key, var)
 function classify_var(var_to_diff, key::TornCacheKey, var)
     if var in key.alg_states
         vint = invview(var_to_diff)[var]
@@ -652,7 +656,7 @@ end
 
 function tearing_schedule!(result::DAEIPOResult, ci::CodeInstance, key::TornCacheKey, world::UInt, settings::Settings)
     structure = make_structure_from_ipo(result)
-    tstate = TransformationState(result, structure, copy(result.total_incidence))
+    tstate = TransformationState(result, structure)
     return tearing_schedule!(tstate, ci, key, world, settings)
 end
 
@@ -839,7 +843,7 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
                         if !any(out->callee_eq in out[2], callee_var_schedule)
                             display(mss)
                             cstructure = make_structure_from_ipo(callee_result)
-                            cvar_eq_matching = matching_for_key(callee_result, callee_key, cstructure)
+                            cvar_eq_matching = matching_for_key(callee_result, callee_key)
                             display(StateSelection.MatchedSystemStructure(callee_result, cstructure, cvar_eq_matching))
                             @sshow eq_orders
                             @sshow callee_result.total_incidence[callee_eq]
@@ -854,7 +858,7 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
                     vars_for_final = BitSet()
                     # TODO: This is a very expensive way to compute this - we should be able to do this cheaper
                     cstructure = make_structure_from_ipo(callee_result)
-                    tstate = TransformationState(callee_result, cstructure, copy(callee_result.total_incidence))
+                    tstate = TransformationState(callee_result, cstructure)
                     cvar_eq_matching = matching_for_key(tstate, callee_key)
                     for callee_var in 1:length(cvar_eq_matching)
                         if cvar_eq_matching[callee_var] !== unassigned
@@ -976,7 +980,7 @@ function tearing_schedule!(state::TransformationState, ci::CodeInstance, key::To
                     @sshow lin_var
                     @sshow ordinal
                     @sshow eq_order
-                    display(result.ir)
+                    @sshow result.ir
                     error("Tried to schedule variable $(lin_var) that we do not have a solution to (but our scheduling should have ensured that we do)")
                 end
                 var_sols[lin_var] = CarriedSSAValue(ordinal, (@insert_instruction_here(compact1, line, settings, (:invoke)(nothing, Intrinsics.variable)::Incidence(lin_var)).id))

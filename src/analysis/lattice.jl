@@ -4,7 +4,7 @@ using SparseArrays
 
 ########################## EqStructureLattice ####################################
 """
-    struct EqStructureLattice <: Compiler.AbstractLattice
+    struct EqStructureLattice <: AbstractLattice
 
 This lattice implements the `AbstractLattice` interface. It adjoins `Incidence` and `Eq`.
 
@@ -34,7 +34,7 @@ the taint of %phi depends not only on `%a` and `%b`, but also on the taint of
 the branch condition `%cond`. This is a common feature of taint analysis, but
 is somewhat unusual from the perspective of other Julia type lattices.
 """
-struct EqStructureLattice <: Compiler.AbstractLattice; end
+struct EqStructureLattice <: AbstractLattice; end
 Compiler.widenlattice(::EqStructureLattice) = Compiler.ConstsLattice()
 Compiler.is_valid_lattice_norec(::EqStructureLattice, @nospecialize(v)) = isa(v, Incidence) || isa(v, Eq) || isa(v, PartialScope) || isa(v, PartialKeyValue)
 Compiler.has_extended_unionsplit(::EqStructureLattice) = true
@@ -537,7 +537,7 @@ struct PartialKeyValue
 end
 PartialKeyValue(typ) = PartialKeyValue(typ, typ, IdDict{Any, Any}())
 
-function getkeyvalue_tfunc(𝕃::Compiler.AbstractLattice,
+function getkeyvalue_tfunc(𝕃::AbstractLattice,
         @nospecialize(collection), @nospecialize(key))
     isa(key, Const) || return Tuple{Any}
     if haskey(collection.vals, key.val)

@@ -18,10 +18,10 @@ function compute_missing_coeff!(coeffs, (;callee_result, caller_var_to_diff, cal
     # First find the rootvar, and if we already have a coeff for it
     # apply the derivatives.
     ndiffs = 0
-    calle_inv = invview(callee_result.var_to_diff)
-    while calle_inv[v] !== nothing && !isassigned(coeffs, v)
+    callee_inv = invview(callee_result.var_to_diff)
+    while callee_inv[v] !== nothing && !isassigned(coeffs, v)
         ndiffs += 1
-        v = calle_inv[v]
+        v = callee_inv[v]
     end
 
     if !isassigned(coeffs, v)
@@ -43,9 +43,9 @@ function compute_missing_coeff!(coeffs, (;callee_result, caller_var_to_diff, cal
     return nothing
 end
 
-apply_linear_incidence(𝕃, ret::Type, caller::CallerMappingState, mapping::CalleeMapping) = ret
-apply_linear_incidence(𝕃, ret::Const, caller::CallerMappingState, mapping::CalleeMapping) = ret
-function apply_linear_incidence(𝕃, ret::Incidence, caller::Union{CallerMappingState, Nothing}, mapping::CalleeMapping)
+apply_linear_incidence!(mapping::CalleeMapping, 𝕃, ret::Type, caller::CallerMappingState) = ret
+apply_linear_incidence!(mapping::CalleeMapping, 𝕃, ret::Const, caller::CallerMappingState) = ret
+function apply_linear_incidence!(mapping::CalleeMapping, 𝕃, ret::Incidence, caller::Union{CallerMappingState, Nothing})
     # Substitute variables returned by the callee with the incidence defined by the caller.
     # The composition will be additive in the constant terms, and multiplicative for linear coefficients.
     caller_variables = mapping.var_coeffs
@@ -141,7 +141,7 @@ function compose_additive_term(@nospecialize(a), @nospecialize(b), coeff)
     return Const(val)
 end
 
-function apply_linear_incidence(𝕃, ret::Eq, caller::CallerMappingState, mapping::CalleeMapping)
+function apply_linear_incidence!(mapping::CalleeMapping, 𝕃, ret::Eq, caller::CallerMappingState)
     eq_mapping = mapping.eqs[ret.id]
     if eq_mapping == 0
         push!(caller.caller_eqclassification, Owned)
@@ -151,21 +151,48 @@ function apply_linear_incidence(𝕃, ret::Eq, caller::CallerMappingState, mappi
     return Eq(eq_mapping)
 end
 
-function apply_linear_incidence(𝕃, ret::PartialStruct, caller::CallerMappingState, mapping::CalleeMapping)
-    return PartialStruct(𝕃, ret.typ, Any[apply_linear_incidence(𝕃, f, caller, mapping) for f in ret.fields])
+function apply_linear_incidence!(mapping::CalleeMapping, 𝕃, ret::PartialStruct, caller::CallerMappingState)
+    return PartialStruct(𝕃, ret.typ, Any[apply_linear_incidence!(mapping, 𝕃, f, caller) for f in ret.fields])
 end
 
-function CalleeMapping(𝕃::Compiler.AbstractLattice, argtypes::Vector{Any}, callee_ci::CodeInstance, callee_result::DAEIPOResult, template_argtypes)
+function CalleeMapping(𝕃::AbstractLattice, argtypes::Vector{Any}, callee_ci::CodeInstance, callee_result::DAEIPOResult)
+    caller_argtypes = Compiler.va_process_argtypes(𝕃, argtypes, callee_ci.inferred.nargs, callee_ci.inferred.isva)
+    callee_argtypes = callee_ci.inferred.ir.argtypes
+    argmap = ArgumentMap(callee_argtypes)
+    nvars = length(callee_result.var_to_diff)
+    neqs = length(callee_result.total_incidence)
+    @assert length(argmap.variables) ≤ nvars
+    @assert length(argmap.equations) ≤ neqs
+
     applied_scopes = Any[]
-    coeffs = Vector{Any}(undef, length(callee_result.var_to_diff))
-    eq_mapping = fill(0, length(callee_result.total_incidence))
+    coeffs = Vector{Any}(undef, nvars)
+    eq_mapping = fill(0, neqs)
+    mapping = CalleeMapping(coeffs, eq_mapping, applied_scopes)
 
-    va_argtypes = Compiler.va_process_argtypes(𝕃, argtypes, callee_ci.inferred.nargs, callee_ci.inferred.isva)
-    process_template!(𝕃, coeffs, eq_mapping, applied_scopes, va_argtypes, template_argtypes)
-
-    return CalleeMapping(coeffs, eq_mapping, applied_scopes)
+    fill_callee_mapping!(mapping, argmap, caller_argtypes, 𝕃)
+    return mapping
 end
 
+function fill_callee_mapping!(mapping::CalleeMapping, argmap::ArgumentMap, argtypes::Vector{Any}, 𝕃::AbstractLattice)
+    for (i, index) in enumerate(argmap.variables)
+        type = get_fieldtype(argtypes, index, 𝕃)
+        mapping.var_coeffs[i] = type
+    end
+    for (i, index) in enumerate(argmap.equations)
+        eq = get_fieldtype(argtypes, index, 𝕃)::Eq
+        mapping.eqs[i] = eq.id
+    end
+end
+
+function get_fieldtype(argtypes::Vector{Any}, index::CompositeIndex, 𝕃::AbstractLattice = Compiler.fallback_lattice)
+    @assert !isempty(index)
+    index = copy(index)
+    type = argtypes[popfirst!(index)]
+    while !isempty(index)
+        type = Compiler.getfield_tfunc(𝕃, type, Const(popfirst!(index)))
+    end
+    return type
+end
 
 struct MappingInfo <: Compiler.CallInfo
     info::Any

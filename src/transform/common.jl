@@ -116,7 +116,7 @@ function replace_call!(ir::Union{IRCode,IncrementalCompact}, idx::SSAValue, @nos
     ir[idx][:type] = Any
     ir[idx][:info] = Compiler.NoCallInfo()
     ir[idx][:flag] |= Compiler.IR_FLAG_REFINED
-    return new_call
+    return idx
 end
 
 function maybe_insert_debuginfo!(compact::IncrementalCompact, settings::Settings, source::LineNumberNode, previous = nothing, i = compact.result_idx)
@@ -129,6 +129,7 @@ function maybe_insert_debuginfo!(debuginfo::DebugInfoStream, settings::Settings,
 end
 
 function insert_debuginfo!(debuginfo::DebugInfoStream, i::Integer, source::LineNumberNode, previous)
+    prev_edge_index = prev_edge_line = nothing
     if previous !== nothing && isa(previous, Tuple)
         prev_edge_index, prev_edge_line = previous[2], previous[3]
     end
@@ -199,8 +200,8 @@ function replace_if_intrinsic!(compact, settings, ssa, du, u, p, t, var_assignme
         if var_assignment === nothing
             var_idx = 0
         else
-            var_idx, in_du = var_assignment[var]
-            @assert !in_du || (du !== nothing)
+            kind, var_idx = var_assignment[var]
+            @assert kind !== AssignedDiff || du !== nothing
         end
 
         if iszero(var_idx)
@@ -208,7 +209,7 @@ function replace_if_intrinsic!(compact, settings, ssa, du, u, p, t, var_assignme
             # but for some reason, wasn't deleted in any prior pass.
             inst[:inst] = GlobalRef(DAECompiler.Intrinsics, :_VARIABLE_UNASSIGNED)
         else
-            source = in_du ? du : u
+            source = kind === AssignedDiff ? du : u
             replace_call!(compact, ssa, Expr(:call, getindex, source, var_idx), settings, @__SOURCE__)
         end
     elseif is_known_invoke_or_call(stmt, sim_time, compact)

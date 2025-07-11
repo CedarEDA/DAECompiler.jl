@@ -21,6 +21,19 @@ end
     var_schedule::Vector{Pair{BitSet, BitSet}}
 end
 
+struct VariableReplacement
+    replaced::Incidence
+    by::Int
+    equation::Int
+end
+
+mutable struct NonlinearReplacementMap
+    const variables::Vector{VariableReplacement}
+    variable_counter::Int
+    equation_counter::Int
+end
+NonlinearReplacementMap() = NonlinearReplacementMap(VariableReplacement[], 0, 0)
+
 """
     StructuralSSARef
 
@@ -35,6 +48,7 @@ struct DAEIPOResult
     opaque_eligible::Bool
     extended_rt::Any
     argtypes
+    argmap::ArgumentMap
     nexternalargvars::Int # total vars is length(var_to_diff)
     nsysmscopes::Int
     nexternaleqs::Int
@@ -44,6 +58,7 @@ struct DAEIPOResult
     total_incidence::Vector{Any}
     eqclassification::Vector{VarEqClassification}
     eq_callee_mapping::Vector{Union{Nothing, Vector{Pair{StructuralSSARef, Int}}}}
+    replacement_map::NonlinearReplacementMap
     names::OrderedDict{Any, ScopeDictEntry} # TODO: OrderedIdDict
     varkinds::Vector{Union{Intrinsics.VarKind, Nothing}}
     eqkinds::Vector{Union{Intrinsics.EqKind, Nothing}}

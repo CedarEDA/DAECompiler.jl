@@ -1,5 +1,5 @@
 """
-    struct RHSSpec
+    struct InitUncompressSpec
 
 Cache partition for the RHS
 """
@@ -11,7 +11,7 @@ end
 
 function gen_init_uncompress!(result::DAEIPOResult, ci::CodeInstance, init_key::TornCacheKey, diff_key::TornCacheKey, world::UInt, settings::Settings, ordinal::Int, indexT=Int)
     structure = make_structure_from_ipo(result)
-    tstate = TransformationState(result, structure, copy(result.total_incidence))
+    tstate = TransformationState(result, structure)
     return gen_init_uncompress!(tstate, ci, init_key, diff_key, world, settings, ordinal, indexT)
 end
 
@@ -44,8 +44,6 @@ function gen_init_uncompress!(
 
     cis = Vector{CodeInstance}()
     for (ir_ordinal, ir) in enumerate(torn.ir_seq)
-        ir = torn.ir_seq[ir_ordinal]
-
         # Read in from the last level before any DAE or ODE-specific `ir_levels`
         # We assume this is named `tearing_schedule!`
         ir = copy(ir)
